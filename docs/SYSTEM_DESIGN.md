@@ -11,7 +11,7 @@ See [`articles/`](../articles/) for the raw source notes per part, and [`CLAUDE.
 | Part | Topic | Status |
 |---|---|---|
 | 1 | A Systems Map of Modern Agent Infrastructure | Recorded |
-| 2 | Infrastructure, Models, and Inference | Not started |
+| 2 | Infrastructure, Models, and Inference | Recorded |
 | 3 | Control Planes, Sessions, and State Ownership | Not started |
 | 4 | Runtimes, Workflows, and Durable Execution | Not started |
 | 5 | Context, Retrieval, and Memory | Not started |
@@ -55,3 +55,33 @@ We are building a **chat/task assistant with a small tool surface** — single-u
 - **De-emphasize for now, revisit if scope grows:** heavy durable-execution/resumption machinery (layer 3) and formal approval workflows (layer 8) — a single-user assistant with a small tool surface doesn't yet need retry/resume-after-failure semantics or human-in-the-loop approval gates. We will still keep the *boundary* clear in code (e.g., don't let capability exposure silently double as execution authority) even if the enforcement is lightweight.
 - **Infrastructure substrate (layer 10):** deferred — no conclusions until Part 2, which covers it directly.
 - **Guiding rule carried forward:** even where we simplify a layer, keep the article's boundary pairs intact in our code and naming (session ≠ authorization, transcript ≠ context, capability ≠ execution, observability ≠ evaluation) so the system stays debuggable as scope grows later.
+
+---
+
+## Part 2 — Foundation Infrastructure, Models, and Inference
+
+*Notes: [articles/part-2-foundation-infrastructure-models-inference.md](../articles/part-2-foundation-infrastructure-models-inference.md)*
+
+### Discussion
+
+- **Model provider:** discussed building against Anthropic directly vs. a provider-agnostic abstraction from day one. Settled on Anthropic direct, on the reasoning that a full swap-any-provider abstraction for a single-user assistant with no second provider in sight is premature abstraction — the article's "separate model/serving/contract choice" advice is a conceptual discipline (keep the concerns distinct in your head and in code boundaries), not a mandate to build a provider-swapping interface with no second implementation behind it.
+- **Serving-system depth:** since we're calling a hosted API rather than self-hosting inference, queueing/scheduling/serving concerns are the provider's problem, not ours. We just need to be aware prompt caching exists and use it sensibly — no custom serving abstraction.
+
+### Team conclusion
+
+We build directly against the **Anthropic API** in Python, with **minimal serving-layer investment** (hosted API, no custom queueing/scheduling). We still honor the article's three-way split conceptually and structurally: model-calling code lives in its own module, isolated from the rest of the system, so the model asset / serving / interaction-contract concerns stay swappable in principle even though we're not building a swap abstraction now.
+
+### Decisions for this project
+
+- **Model client module:** isolate all direct Anthropic API calls (model asset + interaction contract concerns) behind one module — nothing else in the codebase talks to the API directly. → `src/model/client.py` (planned)
+- **No custom serving layer:** rely on the Anthropic API's own handling of queueing/scheduling; our code only needs basic retry/error handling around API calls, not a scheduler.
+- **Tool calls treated as proposals, not execution** (per this part's boundary pairs): model output that requests a tool call must pass through explicit application-side authorization before anything runs — carries forward the layer-6/7 capability ≠ execution boundary from Part 1, now reinforced at the model-output level. → ties to `src/tools/` and `src/execution/` (planned, to be detailed in Part 6/7)
+- **Structured output treated as untrusted:** any JSON/schema output from the model gets validated by the application, not assumed correct — schema validity is shape, not truth.
+- **Caching:** if/when we use prompt caching, name explicitly which cache we mean (provider-side prompt cache vs. any app-level cache we might add later) rather than referring to "the cache" generically.
+- **Error handling split by which of the three model-layer components failed**, instead of one generic "API call failed" exception — so retries and logging are correct and diagnosable per the layer that actually broke:
+  - *Asset failure* (context window exceeded, unsupported modality, output too long) — not retryable as-is; requires reshaping the request.
+  - *Serving failure* (rate limit, timeout, transient 5xx/overload) — retryable, with backoff.
+  - *Contract failure* (malformed request, unexpected response shape) — an integration bug, not retryable blindly.
+  → `src/model/client.py` (planned) — distinct exception types/handling paths per category.
+- **Retry logic must be side-effect-aware:** don't retry a request if a tool call from the prior attempt may have already executed — track whether a side effect occurred before treating a retry as safe. Ties forward to the tools/execution boundary (Part 6/7). → `src/model/client.py` (planned)
+- **Structured output validated explicitly**, not trusted on schema-parse success alone (e.g. a pydantic model or equivalent check) before the rest of the app uses it. → `src/model/output.py` (planned)

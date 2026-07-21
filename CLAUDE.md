@@ -17,6 +17,23 @@ We go through the series **one part at a time**, in order. For each part:
 
 Do not skip ahead to later parts before the current part's conclusion is recorded, unless the user explicitly asks to jump around.
 
+Reading ahead in the *source articles* yourself, for personal awareness, is fine and encouraged (light skim, not a close read) — it helps you spot cross-layer dependencies early. That is separate from the team formally discussing/designing/recording a part, which must still happen strictly in order.
+
+## Implementation timing
+
+Build code **interleaved, part by part** — implement a part's planned artifact right after its design conclusion is recorded, not after all 8 parts are designed. Reasons: untested design assumptions compound silently across later parts if left on paper too long, and a module only really validates a decision once it's actually run. This applies even though later parts sometimes contain knowledge relevant to an earlier part's implementation (e.g. Part 8's observability concerns touching Part 2's error handling):
+
+- If implementing a part needs a hook into a later, undiscussed layer, build the **smallest possible stub** and flag it explicitly as provisional (e.g. a comment or doc note: "minimal stub, revisit in Part N"). Do not fully design that later layer early just to support the stub.
+
+## Testing approach
+
+Not every design decision needs an automated test. Split "Decisions for this project" bullets into two kinds:
+
+- **Load-bearing invariants** — a claim about behavior that, if silently violated, causes a real bug or incident (e.g. "a retry must never re-execute a tool call that already ran," "the model never writes directly to the session store"). These get a real, automated test that fails when the invariant is broken. This is the same idea as an "architectural fitness function" (Ford/Parsons/Kua, *Building Evolutionary Architectures*): an executable, repeatable check that preserves an architectural characteristic over time.
+- **Rationale/preference decisions** — a judgment call about *why* we built something a certain way, with no runtime behavior to assert (e.g. "we chose Anthropic direct over a provider abstraction because it was premature abstraction"). These stay as documentation in `docs/SYSTEM_DESIGN.md` only — do not write a test for them.
+
+Keep the number of tests per part small and deliberate (a handful of genuinely load-bearing boundaries, not one test per decision bullet) — the point is targeted verification of what would actually hurt if it broke, not exhaustive coverage of every design nuance. When verifying a module, also prefer a real end-to-end run over isolated unit tests alone, and specifically try to reproduce any failure modes named in that part's article (e.g. Part 3's six named failure modes) rather than only testing the happy path.
+
 ## Repo layout
 
 - `articles/` — condensed notes per article part, one file each, cited with source URL and fetch date.

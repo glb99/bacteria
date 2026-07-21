@@ -12,7 +12,7 @@ See [`articles/`](../articles/) for the raw source notes per part, and [`CLAUDE.
 |---|---|---|
 | 1 | A Systems Map of Modern Agent Infrastructure | Recorded |
 | 2 | Infrastructure, Models, and Inference | Recorded |
-| 3 | Control Planes, Sessions, and State Ownership | Not started |
+| 3 | Control Planes, Sessions, and State Ownership | Recorded |
 | 4 | Runtimes, Workflows, and Durable Execution | Not started |
 | 5 | Context, Retrieval, and Memory | Not started |
 | 6 | Tools, MCP, and Capability Surfaces | Not started |
@@ -85,3 +85,28 @@ We build directly against the **Anthropic API** in Python, with **minimal servin
   → `src/model/client.py` (planned) — distinct exception types/handling paths per category.
 - **Retry logic must be side-effect-aware:** don't retry a request if a tool call from the prior attempt may have already executed — track whether a side effect occurred before treating a retry as safe. Ties forward to the tools/execution boundary (Part 6/7). → `src/model/client.py` (planned)
 - **Structured output validated explicitly**, not trusted on schema-parse success alone (e.g. a pydantic model or equivalent check) before the rest of the app uses it. → `src/model/output.py` (planned)
+
+---
+
+## Part 3 — Control Planes, Sessions, and State Ownership
+
+*Notes: [articles/part-3-control-planes-sessions-state-ownership.md](../articles/part-3-control-planes-sessions-state-ownership.md)*
+
+### Discussion
+
+- **"Proposed new items + state mutations" in the request-path diagram — is that a formal protocol?** No — the article doesn't define a wire protocol/schema for it. What the diagram shows is an architectural pattern: a two-phase separation between the runtime *proposing* new transcript items/state mutations (dashed arrow — a candidate, not yet authoritative) and a distinct, separate *commit* step that makes it canonical. This is the same "proposal ≠ execution" boundary from Parts 1–2, applied one level up to state writes themselves.
+- **Is committing that state mutation something the agent (model) does, or something our infrastructure does?** Infrastructure, unambiguously. The model's output — including any "new transcript item" or "state delta" it produces — is just another proposal, no different in kind from a tool-call proposal. The model has no visibility into concurrency, ordering, or conflicting state, so it cannot be trusted with commit authority. Actually writing to the authoritative store must be deterministic, non-model code (control plane / state store), which can reject or reconcile a proposal against what the canonical record actually looks like at commit time (e.g., if a correction arrived mid-run).
+- **Given our single-user chat/task-assistant scope, how much of this machinery do we build?** Minimal but explicit: one session store, a clear code-level separation of transcript state / working state / memory, but no multi-session routing and no fork/branch machinery — we don't yet have concurrent runs or multiple users to disambiguate between. We keep the propose/commit split conceptually honest (the runtime never writes directly to the canonical store) but implement it as a plain function call/return in our own code, not a formal protocol with its own schema — we have no concurrent writers to arbitrate between yet, so that formality would be premature.
+
+### Team conclusion
+
+We build a **single-session control plane**: one authoritative session/state store, with transcript state, working state, and memory kept as explicitly distinct concerns in code (never merged into one blob). The model/runtime never writes to that store directly — all state changes are proposals that pass through a dedicated, non-model commit step. We do not build multi-session routing, resume/fork branching, or a formal state-mutation protocol yet, since our scope (single user, no concurrent runs) doesn't need to disambiguate between competing continuations. If that changes later, the propose/commit separation we're building now is what makes adding those features additive rather than a rearchitecture.
+
+### Decisions for this project
+
+- **Single authoritative session/state store**, separate from any in-memory/runtime-local state. Runtime and model code treat it as the only source of truth; nothing else is allowed to be authoritative. → `src/session/store.py` (planned)
+- **Three explicitly separate concerns in code**, matching the article's three jobs of "state": transcript (durable record), working state (scratchpad/checkpoint data), memory (durable state reintroduced deliberately across sessions). Not modeled as one generic "state" blob. → `src/session/store.py` (planned)
+- **Model/runtime output is always a proposal, never a direct write.** The commit step — actually persisting a new transcript item or state mutation to the authoritative store — is separate, deterministic, non-model code. → `src/session/store.py` (planned)
+- **No formal state-mutation protocol/schema yet.** The propose→commit handoff is a plain function call in-process, not a message format with its own versioning — revisit only if/when we have concurrent writers or multi-session routing to arbitrate between.
+- **Session identity kept explicit and separate from user identity**, even with only one user today, so the boundary exists in code before it's ever load-bearing.
+- **Out of scope for now:** resume/retry/fork branching logic, multi-session routing. Noted as deliberately deferred, not overlooked — same treatment as durable execution/approvals deferred in Part 1.

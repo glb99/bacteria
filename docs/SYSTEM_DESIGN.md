@@ -26,6 +26,7 @@ See [`articles/`](../articles/) for the raw source notes per part, and [`CLAUDE.
 Cross-cutting decisions that aren't tied to a single article part.
 
 - **Language: Python.** Dominant ecosystem for agent/LLM tooling (LangGraph, most MCP servers, Anthropic/OpenAI SDKs), and the article's own references (LangGraph, Temporal) are Python-friendly. Chosen over TypeScript/Node given our scope doesn't currently need a front-to-back web UI language.
+- **Dependency/environment management: [uv](https://docs.astral.sh/uv/).** Manages the virtual environment, dependency resolution/locking (`uv.lock`, committed), and the Python interpreter itself. `pyproject.toml` stays standard (PEP 621), so this is a tooling choice, not a lock-in. Run tests/commands via `uv run ...`.
 
 ---
 
@@ -73,18 +74,20 @@ We build directly against the **Anthropic API** in Python, with **minimal servin
 
 ### Decisions for this project
 
-- **Model client module:** isolate all direct Anthropic API calls (model asset + interaction contract concerns) behind one module — nothing else in the codebase talks to the API directly. → `src/model/client.py` (planned)
+- **Model client module:** isolate all direct Anthropic API calls (model asset + interaction contract concerns) behind one module — nothing else in the codebase talks to the API directly. → [`src/model/client.py`](../src/model/client.py)
 - **No custom serving layer:** rely on the Anthropic API's own handling of queueing/scheduling; our code only needs basic retry/error handling around API calls, not a scheduler.
-- **Tool calls treated as proposals, not execution** (per this part's boundary pairs): model output that requests a tool call must pass through explicit application-side authorization before anything runs — carries forward the layer-6/7 capability ≠ execution boundary from Part 1, now reinforced at the model-output level. → ties to `src/tools/` and `src/execution/` (planned, to be detailed in Part 6/7)
-- **Structured output treated as untrusted:** any JSON/schema output from the model gets validated by the application, not assumed correct — schema validity is shape, not truth.
+- **Tool calls treated as proposals, not execution** (per this part's boundary pairs): model output that requests a tool call must pass through explicit application-side authorization before anything runs — carries forward the layer-6/7 capability ≠ execution boundary from Part 1, now reinforced at the model-output level. Verified structurally today: `ModelClient` only reports `tool_calls`, it has no code path that executes anything. → ties to `src/tools/` and `src/execution/` (planned, to be detailed in Part 6/7)
+- **Structured output treated as untrusted:** any JSON/schema output from the model gets validated by the application, not assumed correct — schema validity is shape, not truth. → [`src/model/output.py`](../src/model/output.py)
 - **Caching:** if/when we use prompt caching, name explicitly which cache we mean (provider-side prompt cache vs. any app-level cache we might add later) rather than referring to "the cache" generically.
 - **Error handling split by which of the three model-layer components failed**, instead of one generic "API call failed" exception — so retries and logging are correct and diagnosable per the layer that actually broke:
   - *Asset failure* (context window exceeded, unsupported modality, output too long) — not retryable as-is; requires reshaping the request.
   - *Serving failure* (rate limit, timeout, transient 5xx/overload) — retryable, with backoff.
   - *Contract failure* (malformed request, unexpected response shape) — an integration bug, not retryable blindly.
-  → `src/model/client.py` (planned) — distinct exception types/handling paths per category.
-- **Retry logic must be side-effect-aware:** don't retry a request if a tool call from the prior attempt may have already executed — track whether a side effect occurred before treating a retry as safe. Ties forward to the tools/execution boundary (Part 6/7). → `src/model/client.py` (planned)
-- **Structured output validated explicitly**, not trusted on schema-parse success alone (e.g. a pydantic model or equivalent check) before the rest of the app uses it. → `src/model/output.py` (planned)
+  → [`src/model/client.py`](../src/model/client.py), [`src/model/errors.py`](../src/model/errors.py) — distinct exception types per category, tested in [`tests/test_model_client.py`](../tests/test_model_client.py).
+- **Retry logic must be side-effect-aware:** don't retry a request if a tool call from the prior attempt may have already executed — track whether a side effect occurred before treating a retry as safe. Implemented by scoping the retry loop to the literal API call only (identical request payload each attempt); tool execution lives in a separate, not-yet-built module (Part 6/7) that calls into this client, never the reverse — so this client structurally cannot retry-and-reexecute a tool. → [`src/model/client.py`](../src/model/client.py)
+- **Structured output validated explicitly**, not trusted on schema-parse success alone (e.g. a pydantic model or equivalent check) before the rest of the app uses it. → [`src/model/output.py`](../src/model/output.py)
+
+**Implementation status:** built and tested (5 load-bearing invariant tests in [`tests/test_model_client.py`](../tests/test_model_client.py) + 3 in [`tests/test_output_validation.py`](../tests/test_output_validation.py), all passing via mocked Anthropic responses). Not yet verified against a live API call — no `ANTHROPIC_API_KEY` was available in the dev environment at implementation time; do a real end-to-end call once a key is set locally.
 
 ---
 
@@ -104,9 +107,11 @@ We build a **single-session control plane**: one authoritative session/state sto
 
 ### Decisions for this project
 
-- **Single authoritative session/state store**, separate from any in-memory/runtime-local state. Runtime and model code treat it as the only source of truth; nothing else is allowed to be authoritative. → `src/session/store.py` (planned)
-- **Three explicitly separate concerns in code**, matching the article's three jobs of "state": transcript (durable record), working state (scratchpad/checkpoint data), memory (durable state reintroduced deliberately across sessions). Not modeled as one generic "state" blob. → `src/session/store.py` (planned)
-- **Model/runtime output is always a proposal, never a direct write.** The commit step — actually persisting a new transcript item or state mutation to the authoritative store — is separate, deterministic, non-model code. → `src/session/store.py` (planned)
+- **Single authoritative session/state store**, separate from any in-memory/runtime-local state. Runtime and model code treat it as the only source of truth; nothing else is allowed to be authoritative. → [`src/session/store.py`](../src/session/store.py)
+- **Three explicitly separate concerns in code**, matching the article's three jobs of "state": transcript (durable record), working state (scratchpad/checkpoint data), memory (durable state reintroduced deliberately across sessions). Not modeled as one generic "state" blob. Memory is a stub for now — real design deferred to Part 5, flagged as provisional in code. → [`src/session/store.py`](../src/session/store.py)
+- **Model/runtime output is always a proposal, never a direct write.** The commit step — actually persisting a new transcript item or state mutation to the authoritative store — is separate, deterministic, non-model code. `get_state()` returns a deep copy specifically so nothing can mutate authoritative state except `commit()`. → [`src/session/store.py`](../src/session/store.py)
 - **No formal state-mutation protocol/schema yet.** The propose→commit handoff is a plain function call in-process, not a message format with its own versioning — revisit only if/when we have concurrent writers or multi-session routing to arbitrate between.
 - **Session identity kept explicit and separate from user identity**, even with only one user today, so the boundary exists in code before it's ever load-bearing.
 - **Out of scope for now:** resume/retry/fork branching logic, multi-session routing. Noted as deliberately deferred, not overlooked — same treatment as durable execution/approvals deferred in Part 1.
+
+**Implementation status:** built and tested (5 load-bearing invariant tests in [`tests/test_session_store.py`](../tests/test_session_store.py), all passing) — in-memory only, no persistence backend yet (that's Part 4's territory, durable execution).

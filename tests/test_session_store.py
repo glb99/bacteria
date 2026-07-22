@@ -28,12 +28,11 @@ def test_commit_is_the_only_way_state_actually_changes():
     store = SessionStore()
     session = store.create_session(user_id="u1")
 
-    proposal = store.propose(
+    committed = store.commit(
         session.session_id,
         new_transcript_items=[TranscriptItem(kind="message", payload={"text": "hi"})],
         working_state_updates={"step": 1},
     )
-    committed = store.commit(proposal)
 
     assert len(committed.transcript) == 1
     assert committed.working_state == {"step": 1}
@@ -57,15 +56,13 @@ def test_transcript_and_working_state_are_independently_addressable():
     store = SessionStore()
     session = store.create_session(user_id="u1")
 
-    store.commit(store.propose(session.session_id, working_state_updates={"a": 1}))
+    store.commit(session.session_id, working_state_updates={"a": 1})
     state = store.get_state(session.session_id)
     assert state.transcript == []
 
     store.commit(
-        store.propose(
-            session.session_id,
-            new_transcript_items=[TranscriptItem(kind="message", payload={"text": "hi"})],
-        )
+        session.session_id,
+        new_transcript_items=[TranscriptItem(kind="message", payload={"text": "hi"})],
     )
     state = store.get_state(session.session_id)
     assert state.working_state == {"a": 1}

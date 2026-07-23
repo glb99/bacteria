@@ -9,16 +9,19 @@ deliberate scope decision (see docs/SYSTEM_DESIGN.md, Part 4), not an
 oversight: a run's identity and step history live only for the duration of
 one turn and are discarded afterward.
 
-Context assembly (what messages actually get sent to the model) is a minimal
-stub here — real design belongs to Part 5 (Context, Retrieval, and Memory).
+Context assembly (what messages actually get sent to the model) is owned by
+bacteria.context.assembly, not by the runtime — Part 5's decision, following
+the same orchestrator/owner split the runtime already keeps with the model
+client and session store.
 """
 
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from bacteria.context.assembly import assemble_context
 from bacteria.model.client import ModelResponse
 from bacteria.session.store import SessionState, SessionStore, TranscriptItem
 
@@ -74,13 +77,11 @@ class Runtime:
         step_tracker = StepTracker()
 
         state = self._session_store.get_state(session_id)
-        messages = self._transcript_to_messages(state.transcript) + [
-            {"role": "user", "content": user_text}
-        ]
+        context = assemble_context(state, user_text)
 
         response: ModelResponse = step_tracker.run_once(
             f"{run_id}:model_call",
-            lambda: self._model_client.send(messages=messages),
+            lambda: self._model_client.send(messages=context.messages, system=context.system),
         )
 
         committed_state = self._session_store.commit(
@@ -92,12 +93,3 @@ class Runtime:
         )
 
         return RunResult(run_id=run_id, response=response, committed_state=committed_state)
-
-    @staticmethod
-    def _transcript_to_messages(transcript: list[TranscriptItem]) -> list[dict[str, Any]]:
-        """Minimal stub — revisit in Part 5 (context assembly)."""
-        return [
-            {"role": item.payload["role"], "content": item.payload["text"]}
-            for item in transcript
-            if item.kind == "message"
-        ]

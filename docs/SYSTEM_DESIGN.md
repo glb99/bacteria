@@ -14,7 +14,7 @@ See [`articles/`](../articles/) for the raw source notes per part, and [`CLAUDE.
 | 2 | Infrastructure, Models, and Inference | Recorded |
 | 3 | Control Planes, Sessions, and State Ownership | Recorded |
 | 4 | Runtimes, Workflows, and Durable Execution | Recorded |
-| 5 | Context, Retrieval, and Memory | Not started |
+| 5 | Context, Retrieval, and Memory | Recorded |
 | 6 | Tools, MCP, and Capability Surfaces | Not started |
 | 7 | Execution Surfaces, Identity, and Approval Boundaries | Not started |
 | 8 | Observability, Evaluation, and Production Feedback Loops | Not started |
@@ -146,6 +146,37 @@ We hold the line on durable execution: **no persistence, no crash-recovery, no r
 - **Runtime owns sequencing only**: it orchestrates calls into `src/bacteria/model/client.py` (and, later, context/tools/execution modules from Parts 5–7) without owning their internal logic — preserves the ownership boundaries from Parts 1–3 at the orchestration level.
 - **Terminology carried forward in code and docs**: retry, replay, resume, and idempotency are kept as distinct concepts even though only retry/idempotency-adjacent logic (step boundaries) is actually implemented now — replay and resume are named as explicitly out of scope, not silently absent.
 
-**Implementation status:** built and tested (5 load-bearing invariant tests in [`tests/test_runtime.py`](../tests/test_runtime.py), all passing) — `Runtime` orchestrates `ModelClient` and `SessionStore` via a per-turn `StepTracker`; context assembly is a documented stub pending Part 5.
+**Implementation status:** built and tested (5 load-bearing invariant tests in [`tests/test_runtime.py`](../tests/test_runtime.py), all passing) — `Runtime` orchestrates `ModelClient` and `SessionStore` via a per-turn `StepTracker`. Context assembly was a documented stub pending Part 5; retired in favor of a real implementation there.
 
 **Implementation status:** built and tested (5 load-bearing invariant tests in [`tests/test_session_store.py`](../tests/test_session_store.py), all passing) — in-memory only, no persistence backend yet (that's Part 4's territory, durable execution).
+
+---
+
+## Part 5 — Context, Retrieval, and Memory
+
+*Notes: [articles/part-5-context-retrieval-memory.md](../articles/part-5-context-retrieval-memory.md)*
+
+### Discussion
+
+- **"A context layer decides whether accessed evidence should influence the model" — does that decision need to be "intelligent"?** No, not in the AI-judgment sense. The article's own list of what retrieved evidence needs (source, owner, version, freshness, permissions, confidence, provenance) points at deterministic policy checks, not reasoning — does scope match, is it fresh enough, is it permitted. The mechanism can get smarter later (a reranker, an LLM judge), but the architectural requirement is just that *some explicit check* exists instead of trusting a similarity score by default.
+- **"So no tools in the context?"** Tool *definitions* are explicitly part of context — the article's own working-set list includes "tool definitions" and "tool outputs." What moves to Part 6 is a different question: not whether the model sees that a tool exists, but whether it's *authorized* to call it, under whose authority, with what limits. Context = visibility; Part 6 = execution authority. Same capability ≠ execution boundary from Part 1, one level deeper.
+- **"So then removed?" (re: "durable memory should be an explicit lifecycle event")** Yes — lifecycle explicitly includes expiry/deletion, not just creation. The article's own memory-system question list includes "when should it expire, who can delete it" alongside "what's worth extracting." A memory isn't permanent by default; its removal has to be as deliberate a decision as its creation.
+- **"What a source of truth is?"** Recap from Part 1: when a piece of state might exist in more than one place (a store, an in-memory copy, a cache), the source of truth is whichever one is authoritative if they disagree. We already have a concrete instance of this: `SessionStore` is our named source of truth, and `get_state()` returns a deep copy specifically so no caller's local copy can be mistaken for it — mutating the returned copy has zero effect on the store, which is what `test_get_state_returns_a_copy_not_the_authoritative_record` verifies directly.
+- **Why does the deep copy matter concretely?** Without it, `get_state()` would return a live reference into the store's internals — any caller mutating it would silently corrupt authoritative state from outside the module that owns it (a classic aliasing bug), and the "only `commit()`/`remember()` mutate state" invariant would only hold by convention, not by construction. The deep copy is what makes the invariant real rather than a comment.
+- **Scope for this project:** retrieval (external evidence) deferred — no evidence sources exist yet, same reasoning as deferring durability in Part 4: don't build infrastructure for a need we don't have. Memory: built for real, but in-memory and session-scoped (no persistence backend exists yet, same constraint as Parts 3/4), with explicit writes/removal rather than automatic capture. Context assembly: a bounded recent-message window replacing the `Runtime` stub — not full compaction/summarization, which can wait until actually needed.
+
+### Team conclusion
+
+Context assembly graduates from a stub to a real, owned module (`bacteria.context.assembly`), following the same orchestrator/owner split the runtime already keeps with the model client and session store: `Runtime` decides *when* to assemble context, this module decides *what* belongs in it. The strategy is a hard recent-message window — enough to fix "transcript stuffing" without building compaction machinery we don't need yet. Memory becomes real: a session-scoped, in-memory store of explicitly-written entries, kept structurally separate from both transcript and working-state scratch data, with an explicit removal path (not just writes). Retrieval stays out of scope entirely — there's nothing to retrieve from yet, and building the machinery now would be speculative in exactly the way we've avoided elsewhere in this project.
+
+### Decisions for this project
+
+- **Context assembly is its own module, not Runtime logic.** `Runtime` no longer owns `_transcript_to_messages`; it calls `assemble_context(state, user_text)` and passes the result's `messages`/`system` straight to the model client. → [`src/bacteria/context/assembly.py`](../src/bacteria/context/assembly.py)
+- **Bounded recent-window strategy**, not full compaction: the last `window_size` transcript messages, not the whole history — directly fixes failure mode #1 ("transcript stuffing"). → [`src/bacteria/context/assembly.py`](../src/bacteria/context/assembly.py)
+- **Memory is surfaced separately from transcript** — formatted into the model request's `system` field, never merged into the message list, so the model-visible shape reflects the real distinction between "what happened" (transcript) and "what the system chose to preserve" (memory).
+- **Memory writes are explicit**, through a dedicated `remember()` method — never through `commit()`'s generic working-state path. Each entry carries a `reason` and `created_at`, the article's minimum provenance, even at this small scale. → [`src/bacteria/session/store.py`](../src/bacteria/session/store.py)
+- **Memory has an explicit removal path** (`forget()`), not just a write path — lifecycle includes expiry, not only creation. → [`src/bacteria/session/store.py`](../src/bacteria/session/store.py)
+- **Retrieval deferred entirely.** No module, no interface stub — same treatment as durable execution in Part 4: named as deliberately out of scope, not overlooked. When a real evidence source exists, it must be treated as candidate evidence, not authority (the article's boundary), when it's eventually built.
+- **No persistence yet** — memory and context assembly are both still bound by the in-memory-only constraint from Parts 3/4. Cross-session recall (memory surviving a process restart) isn't achievable until that's revisited.
+
+**Implementation status:** built and tested (6 load-bearing invariant tests: 3 in [`tests/test_context_assembly.py`](../tests/test_context_assembly.py), 2 new in [`tests/test_session_store.py`](../tests/test_session_store.py), all passing — 23/23 across the whole suite). `Runtime`'s Part 4 stub is fully retired.

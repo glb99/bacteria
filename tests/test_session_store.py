@@ -73,3 +73,32 @@ def test_unknown_session_is_rejected():
     store = SessionStore()
     with pytest.raises(UnknownSessionError):
         store.get_state("does-not-exist")
+
+
+def test_memory_writes_are_explicit_and_separate_from_commit():
+    """'Make memory writes explicit' (Part 5) — remember() is the only way
+    memory changes; commit()'s working-state updates must never leak into it,
+    and vice versa."""
+    store = SessionStore()
+    session = store.create_session(user_id="u1")
+
+    store.commit(session.session_id, working_state_updates={"scratch": 1})
+    state = store.get_state(session.session_id)
+    assert state.memory == {}
+
+    store.remember(session.session_id, key="pref", value="concise", reason="user said so")
+    state = store.get_state(session.session_id)
+    assert state.working_state == {"scratch": 1}
+    assert state.memory["pref"].value == "concise"
+    assert state.memory["pref"].reason == "user said so"
+
+
+def test_forget_removes_a_memory_entry():
+    """The other half of a memory's lifecycle (Part 5) — not just writes."""
+    store = SessionStore()
+    session = store.create_session(user_id="u1")
+    store.remember(session.session_id, key="pref", value="concise", reason="user said so")
+
+    store.forget(session.session_id, key="pref")
+
+    assert store.get_state(session.session_id).memory == {}

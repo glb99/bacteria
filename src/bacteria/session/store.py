@@ -9,8 +9,11 @@ not two, is enough to keep the model/runtime's output a proposal rather than
 a direct write (Part 3 decision); see docs/SYSTEM_DESIGN.md Part 4 discussion
 for why the earlier propose()/commit() split was collapsed.
 
-Memory (durable, cross-session state) is intentionally left as a stub here —
-its real design belongs to Part 5 (Context, Retrieval, and Memory).
+Memory (Part 5 decision): real but in-memory, session-scoped, and written
+only through the explicit `remember()` method — never through `commit()`.
+This keeps "a memory is a deliberate lifecycle event" (Part 5) distinct in
+code from ordinary working-state scratch data, even though neither is
+persisted across process restarts yet (that's still Part 4's territory).
 """
 
 from __future__ import annotations
@@ -38,13 +41,19 @@ class TranscriptItem:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@dataclass(frozen=True)
+class MemoryEntry:
+    value: Any
+    reason: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 @dataclass
 class SessionState:
     session: Session
     transcript: list[TranscriptItem] = field(default_factory=list)
     working_state: dict[str, Any] = field(default_factory=dict)
-    # Memory stub: revisit in Part 5. Not read or written by anything yet.
-    memory: dict[str, Any] = field(default_factory=dict)
+    memory: dict[str, MemoryEntry] = field(default_factory=dict)
 
 
 class UnknownSessionError(KeyError):
@@ -94,4 +103,23 @@ class SessionStore:
         state = self._sessions[session_id]
         state.transcript.extend(new_transcript_items or [])
         state.working_state.update(working_state_updates or {})
+        return copy.deepcopy(state)
+
+    def remember(self, session_id: str, key: str, value: Any, reason: str) -> SessionState:
+        """The only method allowed to write memory. Deliberately separate from
+        commit(): a memory write is a decided lifecycle event (Part 5), not
+        incidental turn state, so it doesn't share a code path with ordinary
+        working-state scratch data."""
+        if session_id not in self._sessions:
+            raise UnknownSessionError(session_id)
+        state = self._sessions[session_id]
+        state.memory[key] = MemoryEntry(value=value, reason=reason)
+        return copy.deepcopy(state)
+
+    def forget(self, session_id: str, key: str) -> SessionState:
+        """Explicit removal — the other half of a memory's lifecycle."""
+        if session_id not in self._sessions:
+            raise UnknownSessionError(session_id)
+        state = self._sessions[session_id]
+        state.memory.pop(key, None)
         return copy.deepcopy(state)

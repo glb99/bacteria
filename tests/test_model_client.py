@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 import anthropic
 import pytest
 
-from model.client import ModelClient
-from model.errors import AssetError, ContractError, ServingError
+from bacteria.model.client import ModelClient
+from bacteria.model.errors import AssetError, ContractError, ServingError
 
 
 def make_client(**overrides) -> ModelClient:

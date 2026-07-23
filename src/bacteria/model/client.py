@@ -22,7 +22,7 @@ from typing import Any
 
 import anthropic
 
-from model.errors import AssetError, ContractError, ModelLayerError, ServingError
+from bacteria.model.errors import AssetError, ContractError, ModelLayerError, ServingError
 
 _ASSET_HINTS = ("context", "maximum context length", "token", "too long")
 

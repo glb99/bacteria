@@ -4,7 +4,7 @@
 import pytest
 from pydantic import BaseModel
 
-from model.output import OutputValidationError, validate_output
+from bacteria.model.output import OutputValidationError, validate_output
 
 
 class RefundArgs(BaseModel):

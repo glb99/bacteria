@@ -2,9 +2,9 @@
 
 import pytest
 
-from model.client import ModelResponse
-from runtime.runtime import Runtime, StepAlreadyExecutedError, StepTracker
-from session.store import SessionStore
+from bacteria.model.client import ModelResponse
+from bacteria.runtime.runtime import Runtime, StepAlreadyExecutedError, StepTracker
+from bacteria.session.store import SessionStore
 
 
 class FakeModelClient:

@@ -19,8 +19,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
-from model.client import ModelResponse
-from session.store import SessionState, SessionStore, TranscriptItem
+from bacteria.model.client import ModelResponse
+from bacteria.session.store import SessionState, SessionStore, TranscriptItem
 
 
 class StepAlreadyExecutedError(Exception):

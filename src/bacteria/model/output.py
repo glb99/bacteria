@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from model.errors import ContractError
+from bacteria.model.errors import ContractError
 
 T = TypeVar("T", bound=BaseModel)
 

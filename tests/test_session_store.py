@@ -6,7 +6,7 @@ decisions whose violation would cause a real bug get a test here.
 
 import pytest
 
-from session.store import SessionStore, TranscriptItem, UnknownSessionError
+from bacteria.session.store import SessionStore, TranscriptItem, UnknownSessionError
 
 
 def test_get_state_returns_a_copy_not_the_authoritative_record():

@@ -15,7 +15,7 @@ See [`articles/`](../articles/) for the raw source notes per part, and [`CLAUDE.
 | 3 | Control Planes, Sessions, and State Ownership | Recorded |
 | 4 | Runtimes, Workflows, and Durable Execution | Recorded |
 | 5 | Context, Retrieval, and Memory | Recorded |
-| 6 | Tools, MCP, and Capability Surfaces | Not started |
+| 6 | Tools, MCP, and Capability Surfaces | Recorded |
 | 7 | Execution Surfaces, Identity, and Approval Boundaries | Not started |
 | 8 | Observability, Evaluation, and Production Feedback Loops | Not started |
 
@@ -180,6 +180,35 @@ Context assembly graduates from a stub to a real, owned module (`bacteria.contex
 - **No persistence yet** — memory and context assembly are both still bound by the in-memory-only constraint from Parts 3/4. Cross-session recall (memory surviving a process restart) isn't achievable until that's revisited.
 
 **Implementation status:** built and tested (6 load-bearing invariant tests: 3 in [`tests/test_context_assembly.py`](../tests/test_context_assembly.py), 2 new in [`tests/test_session_store.py`](../tests/test_session_store.py), all passing — 23/23 across the whole suite). `Runtime`'s Part 4 stub is fully retired.
+
+---
+
+## Part 6 — Tools, MCP, and Capability Surfaces
+
+*Notes: [articles/part-6-tools-mcp-capability-surfaces.md](../articles/part-6-tools-mcp-capability-surfaces.md)*
+
+### Discussion
+
+- **Does `test_tool_calls_are_surfaced_as_proposals_not_executed` actually test non-execution?** No — caught mid-discussion. It only asserts `result.tool_calls` matches the expected list (a response-shape/passthrough check). The "never executed" claim in its docstring was true, but for a structural reason the test itself doesn't check: `client.py` has no filesystem/subprocess code capable of acting on a tool name. Left as-is deliberately — there was no execution layer yet for a real non-execution invariant to protect. Now that one exists, the real invariant is tested directly by `test_runtime_executes_tool_calls_via_the_execution_module_not_the_model_client`.
+- **What's the actual difference between "a tool" and "MCP"?** A tool is the general capability concept — an entry in the model's capability surface, callable via schema, regardless of how it's wired up (hosted / local / connector). MCP is one specific *protocol* for exposing capabilities across a client-server boundary (JSON-RPC; Resources/Tools/Prompts/Roots/Sampling/Elicitation) — a standardized discovery/transport layer, not a fourth kind of tool, and explicitly not a security boundary (the spec itself says so).
+- **Given that, which should this project use, and by what criteria?** MCP earns its complexity when integrating a growing or third-party set of external systems and wanting standardized discovery/interop. Local tools are the right call for a small, fixed, project-owned action set with no interop need — same capability-surface boundary from this part, without MCP's own added trust surface (subprocess launch for stdio, origin validation for HTTP). This project currently has zero tools of any kind, one local user, and no third-party integrations — local tools first, same "don't build infrastructure for a need we don't have" call as retrieval (Part 5) and durability (Part 4).
+- **If MCP is ever adopted, would it be as a client or a server?** Client/host, not server. Bacteria is the agent — the thing wanting more capabilities — which is the MCP client/host role (connecting out to someone else's server). Being an MCP *server* would mean exposing bacteria's own capabilities for other agent hosts to consume, which isn't a stated goal anywhere in this project.
+
+### Team conclusion
+
+Build the proposal → execution seam for real, scoped to local tools only, with MCP explicitly deferred. A `ToolRegistry` owns the capability surface (what tools exist, what's exposed for a given run); a separate `execution` module is the only place a tool's handler actually runs, kept structurally apart from both the model client (which only ever reports a proposal) and the runtime (which orchestrates *when* execution happens, not how a call is authorized). Authorization and approval are named only as the smallest possible hook (an `approve` callback defaulting to "always allow") — full design of that boundary is explicitly Part 7's job ("Execution Surfaces, Identity, and Approval Boundaries"), not this part's, per `CLAUDE.md`'s minimal-stub-for-later-layers rule.
+
+### Decisions for this project
+
+- **Tools are local only — no MCP client/server.** Revisit when there's a concrete need to consume an existing third-party MCP server (client role); a server role isn't currently justified by anything in this project's goals. → [`src/bacteria/tools/registry.py`](../src/bacteria/tools/registry.py)
+- **The model-facing schema never carries the handler.** `ToolDefinition.to_schema()` returns only `name`/`description`/`input_schema` — the callable that would actually run code never reaches the model or crosses into request payloads. → [`src/bacteria/tools/registry.py`](../src/bacteria/tools/registry.py)
+- **Per-run filtering exists but isn't yet driven by real policy.** `ToolRegistry.schemas_for_run(allowed=...)` supports exposing a narrowed set (checklist item 1), but nothing yet decides *what* should be allowed per user/workflow — there's only one user and no workflow stages to scope against yet.
+- **Execution is a dedicated module, not Runtime logic and not ModelClient logic.** `execute_tool_call()` is the only place a handler runs; it looks up the tool, gates on `approve` (stub, defaults to always-allow), and wraps handler failures rather than leaking them raw. → [`src/bacteria/tools/execution.py`](../src/bacteria/tools/execution.py)
+- **Runtime drives exactly one round of tool execution per turn** — call model, execute any proposed tools via the execution module (step-tracked, per Part 4's idempotency discipline), call model once more with results, return. Not a multi-round agentic loop — that's more machinery than anything currently needs. → [`src/bacteria/runtime/runtime.py`](../src/bacteria/runtime/runtime.py)
+- **Tool execution is recorded in the transcript** (`TranscriptItem(kind="tool_call", ...)`), not just passed through silently — directly guards failure mode #7 ("approval hidden in implementation"): what ran and what it returned is visible in session state, not buried inside a callback.
+- **Authorization/approval get only a stub (`approve`, defaults to always-allow)**, explicitly not designed here — Part 7 owns that boundary. Flagged as provisional, not a security decision to build on. → [`src/bacteria/tools/execution.py`](../src/bacteria/tools/execution.py)
+
+**Implementation status:** built and tested (9 new load-bearing invariant tests: 3 in [`tests/test_tool_registry.py`](../tests/test_tool_registry.py), 4 in [`tests/test_tool_execution.py`](../tests/test_tool_execution.py), 2 in [`tests/test_runtime.py`](../tests/test_runtime.py) — full suite 34/34). No real tool is registered anywhere yet (no example tool wired into the CLI) — the loop is proven end-to-end only via a fake tool-calling model client in tests, same treatment `ModelClient` itself got before the Part 1-addendum CLI entry point existed.
 
 ---
 

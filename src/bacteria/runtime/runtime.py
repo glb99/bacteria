@@ -24,6 +24,8 @@ from typing import Any, Callable, Protocol
 from bacteria.context.assembly import assemble_context
 from bacteria.model.client import ModelResponse
 from bacteria.session.store import SessionState, SessionStore, TranscriptItem
+from bacteria.tools.execution import ToolResult, execute_tool_call
+from bacteria.tools.registry import ToolRegistry
 
 
 class StepAlreadyExecutedError(Exception):
@@ -72,24 +74,83 @@ class Runtime:
         self._model_client = model_client
         self._session_store = session_store
 
-    def run_turn(self, session_id: str, user_text: str) -> RunResult:
+    def run_turn(
+        self,
+        session_id: str,
+        user_text: str,
+        tool_registry: ToolRegistry | None = None,
+    ) -> RunResult:
         run_id = str(uuid.uuid4())
         step_tracker = StepTracker()
 
         state = self._session_store.get_state(session_id)
         context = assemble_context(state, user_text)
+        tools = tool_registry.schemas_for_run() if tool_registry else None
 
         response: ModelResponse = step_tracker.run_once(
             f"{run_id}:model_call",
-            lambda: self._model_client.send(messages=context.messages, system=context.system),
+            lambda: self._model_client.send(
+                messages=context.messages, system=context.system, tools=tools
+            ),
         )
 
-        committed_state = self._session_store.commit(
-            session_id,
-            new_transcript_items=[
-                TranscriptItem(kind="message", payload={"role": "user", "text": user_text}),
-                TranscriptItem(kind="message", payload={"role": "assistant", "text": response.text}),
-            ],
+        transcript_items = [TranscriptItem(kind="message", payload={"role": "user", "text": user_text})]
+
+        if response.tool_calls and tool_registry is not None:
+            results: list[ToolResult] = [
+                step_tracker.run_once(
+                    f"{run_id}:tool_call:{call['id']}",
+                    lambda call=call: execute_tool_call(call, tool_registry),
+                )
+                for call in response.tool_calls
+            ]
+            transcript_items.extend(
+                TranscriptItem(
+                    kind="tool_call",
+                    payload={"name": result.name, "output": result.output},
+                )
+                for result in results
+            )
+
+            follow_up_messages = context.messages + [
+                {"role": "assistant", "content": self._assistant_content_blocks(response)},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": result.tool_call_id,
+                            "content": str(result.output),
+                        }
+                        for result in results
+                    ],
+                },
+            ]
+            response = step_tracker.run_once(
+                f"{run_id}:model_call_after_tools",
+                lambda: self._model_client.send(
+                    messages=follow_up_messages, system=context.system, tools=tools
+                ),
+            )
+
+        transcript_items.append(
+            TranscriptItem(kind="message", payload={"role": "assistant", "text": response.text})
         )
+
+        committed_state = self._session_store.commit(session_id, new_transcript_items=transcript_items)
 
         return RunResult(run_id=run_id, response=response, committed_state=committed_state)
+
+    @staticmethod
+    def _assistant_content_blocks(response: ModelResponse) -> list[dict[str, Any]]:
+        """Reconstructed from ModelResponse's own fields, not response.raw —
+        keeps the follow-up request buildable regardless of which model
+        client produced the response."""
+        blocks: list[dict[str, Any]] = []
+        if response.text:
+            blocks.append({"type": "text", "text": response.text})
+        blocks.extend(
+            {"type": "tool_use", "id": call["id"], "name": call["name"], "input": call["input"]}
+            for call in response.tool_calls
+        )
+        return blocks

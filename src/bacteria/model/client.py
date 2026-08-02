@@ -22,9 +22,16 @@ from typing import Any
 
 import anthropic
 
-from bacteria.model.errors import AssetError, ContractError, ModelLayerError, ServingError
+from bacteria.model.errors import (
+    AssetError,
+    ContractError,
+    CredentialsError,
+    ModelLayerError,
+    ServingError,
+)
 
 _ASSET_HINTS = ("context", "maximum context length", "token", "too long")
+_AUTH_HINTS = ("authentication", "api_key", "auth_token", "credentials")
 
 
 @dataclass
@@ -83,6 +90,16 @@ class ModelClient:
 
     @staticmethod
     def _classify(exc: Exception) -> ModelLayerError:
+        # The SDK raises a bare TypeError, before any network call, when no
+        # api_key/auth_token/credentials can be resolved at all — distinct
+        # from anthropic.AuthenticationError below, which means the request
+        # actually reached the server and was rejected (401).
+        if isinstance(exc, TypeError) and any(hint in str(exc).lower() for hint in _AUTH_HINTS):
+            return CredentialsError(str(exc))
+
+        if isinstance(exc, anthropic.AuthenticationError):
+            return CredentialsError(str(exc))
+
         if isinstance(
             exc,
             (

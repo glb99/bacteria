@@ -7,7 +7,7 @@ import anthropic
 import pytest
 
 from bacteria.model.client import ModelClient
-from bacteria.model.errors import AssetError, ContractError, ServingError
+from bacteria.model.errors import AssetError, ContractError, CredentialsError, ServingError
 
 
 def make_client(**overrides) -> ModelClient:
@@ -36,6 +36,10 @@ def make_api_error(exc_cls, message="boom"):
     if exc_cls is anthropic.InternalServerError:
         response = MagicMock()
         response.status_code = 500
+        return exc_cls(message, response=response, body=None)
+    if exc_cls is anthropic.AuthenticationError:
+        response = MagicMock()
+        response.status_code = 401
         return exc_cls(message, response=response, body=None)
     raise AssertionError(f"unhandled exc_cls {exc_cls}")
 
@@ -86,6 +90,38 @@ def test_contract_failure_is_not_retried():
     )
 
     with pytest.raises(ContractError):
+        client.send(messages=[{"role": "user", "content": "hi"}])
+
+    assert client._client.messages.create.call_count == 1
+
+
+def test_missing_credentials_is_not_retried():
+    """The SDK raises a bare TypeError (not an anthropic.APIError) when no
+    api_key/auth_token/credentials can be resolved at all, before any
+    network call. Must be classified distinctly, not swept into ContractError
+    or (worse) mistaken for a retryable ServingError."""
+    client = make_client()
+    client._client.messages.create.side_effect = TypeError(
+        "Could not resolve authentication method. Expected one of api_key, "
+        "auth_token, or credentials to be set."
+    )
+
+    with pytest.raises(CredentialsError):
+        client.send(messages=[{"role": "user", "content": "hi"}])
+
+    assert client._client.messages.create.call_count == 1
+
+
+def test_rejected_credentials_is_not_retried():
+    """A request that does reach the server but is rejected for bad
+    credentials (401) must classify the same way as the local
+    missing-credentials case above, not as a generic ContractError."""
+    client = make_client()
+    client._client.messages.create.side_effect = make_api_error(
+        anthropic.AuthenticationError, message="invalid x-api-key"
+    )
+
+    with pytest.raises(CredentialsError):
         client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert client._client.messages.create.call_count == 1

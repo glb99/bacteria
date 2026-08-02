@@ -180,3 +180,17 @@ Context assembly graduates from a stub to a real, owned module (`bacteria.contex
 - **No persistence yet** — memory and context assembly are both still bound by the in-memory-only constraint from Parts 3/4. Cross-session recall (memory surviving a process restart) isn't achievable until that's revisited.
 
 **Implementation status:** built and tested (6 load-bearing invariant tests: 3 in [`tests/test_context_assembly.py`](../tests/test_context_assembly.py), 2 new in [`tests/test_session_store.py`](../tests/test_session_store.py), all passing — 23/23 across the whole suite). `Runtime`'s Part 4 stub is fully retired.
+
+---
+
+## Layer 1 — Interfaces and Channels (outside the article's Part sequence)
+
+Part 1's systems map names ten layers, but Parts 2-8 map onto layers 2-9 one-to-one — layer 1 ("interfaces and channels": where work enters the system) never gets its own dedicated part. Following `CLAUDE.md`'s part-by-part ritual strictly would mean this layer never gets built at all, purely because the source material happens not to loop back to it, not because it's actually out of scope. Treated as a cross-cutting addendum instead of a numbered part, prompted by a real gap: nothing in the codebase outside of mocked tests ever constructed a real `ModelClient` or drove `Runtime` end-to-end.
+
+### Decisions for this project
+
+- **A minimal real CLI entry point**, not a design exercise — the smallest thing that receives work from outside (stdin) and hands it to `Runtime.run_turn()`, matching layer 1's one job per Part 1: receive the event, then hand off to the control plane/runtime. → [`src/bacteria/interfaces/cli.py`](../src/bacteria/interfaces/cli.py)
+- **Wires the real `ModelClient`** (no fake/mock) together with `SessionStore` and `Runtime`, registered as a console script (`bacteria`) via `[project.scripts]` in `pyproject.toml`.
+- **No session/run resolution logic** — one session is created per process invocation. Real resolution (reusing a session across invocations, choosing which session an event belongs to) is exactly the control-plane concern Part 3 already covers structurally; this entry point doesn't need to reinvent it for a single-user local CLI.
+
+**Implementation status:** built, imports cleanly, and was run for real (no `ANTHROPIC_API_KEY` set locally). Running it surfaced a genuine gap rather than a hypothetical one: `ModelClient._classify()` had never been exercised against a real Anthropic SDK exception before. A missing-credentials failure raises a raw `TypeError` from the SDK's auth resolution, before any HTTP call — that didn't match any of `_classify`'s named exception types, so it fell through to the generic `ContractError` catch-all. Fixed: added a fourth error category, `CredentialsError` (see [`src/bacteria/model/errors.py`](../src/bacteria/model/errors.py)), deliberately kept outside Part 2's asset/serving/contract three-way split — those all describe a well-formed *attempt* failing, whereas missing/invalid credentials mean the attempt was never authorized at all. `_classify()` now recognizes both the local pre-flight `TypeError` and the server-rejected `anthropic.AuthenticationError` (401) case, routing both to `CredentialsError` — non-retryable, same as `AssetError`/`ContractError`. Two new load-bearing tests in [`tests/test_model_client.py`](../tests/test_model_client.py) (`test_missing_credentials_is_not_retried`, `test_rejected_credentials_is_not_retried`); full suite now 25/25.

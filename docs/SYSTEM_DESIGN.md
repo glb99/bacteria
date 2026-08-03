@@ -16,7 +16,7 @@ See [`articles/`](../articles/) for the raw source notes per part, and [`CLAUDE.
 | 4 | Runtimes, Workflows, and Durable Execution | Recorded |
 | 5 | Context, Retrieval, and Memory | Recorded |
 | 6 | Tools, MCP, and Capability Surfaces | Recorded |
-| 7 | Execution Surfaces, Identity, and Approval Boundaries | Not started |
+| 7 | Execution Surfaces, Identity, and Approval Boundaries | Recorded |
 | 8 | Observability, Evaluation, and Production Feedback Loops | Not started |
 
 ---
@@ -209,6 +209,32 @@ Build the proposal → execution seam for real, scoped to local tools only, with
 - **Authorization/approval get only a stub (`approve`, defaults to always-allow)**, explicitly not designed here — Part 7 owns that boundary. Flagged as provisional, not a security decision to build on. → [`src/bacteria/tools/execution.py`](../src/bacteria/tools/execution.py)
 
 **Implementation status:** built and tested (9 new load-bearing invariant tests: 3 in [`tests/test_tool_registry.py`](../tests/test_tool_registry.py), 4 in [`tests/test_tool_execution.py`](../tests/test_tool_execution.py), 2 in [`tests/test_runtime.py`](../tests/test_runtime.py) — full suite 34/34). No real tool is registered anywhere yet (no example tool wired into the CLI) — the loop is proven end-to-end only via a fake tool-calling model client in tests, same treatment `ModelClient` itself got before the Part 1-addendum CLI entry point existed.
+
+---
+
+## Part 7 — Execution Surfaces, Identity, and Approval Boundaries
+
+*Notes: [articles/part-7-execution-surfaces-identity-approval.md](../articles/part-7-execution-surfaces-identity-approval.md)*
+
+### Discussion
+
+- **How much of this part actually applies at our scale?** Most of the article's texture (OAuth scopes, tenant isolation, browser sessions, service-account credentials, sandboxing infrastructure) assumes production multi-tenant surfaces this project doesn't have — one local user, zero real tools registered, local Python function calls, no external connectors. Same shape of call as deferring retrieval (Part 5) and durability (Part 4): legitimately out of scope for now, not overlooked.
+- **Is any of it not speculative?** Yes — the `approve` hook in [`bacteria.tools.execution`](../src/bacteria/tools/execution.py) was already built in Part 6 as an explicit stub pointing at this part. "Should this specific call happen now" is a real, answerable question the moment any tool with a side effect exists, even at single-user scale — unlike identity envelopes or sandboxing, which need a multi-principal or multi-trust-level system to mean anything.
+- **Scope for this project:** build the approval boundary only — a real, working `approve` implementation and the plumbing to supply one to `Runtime.run_turn()`. Defer identity envelopes, policy/enforcement separation, sandboxing, and the untrusted-content-authority invariant entirely; they need surfaces (OAuth, multiple trust levels, real side-effecting tools) this project doesn't have yet.
+
+### Team conclusion
+
+Approval is the one control from this part worth making real right now, because the seam for it already exists (Part 6's `approve` stub) and it doesn't require inventing any infrastructure this project doesn't need — everything else in Part 7 (identity envelopes, policy/enforcement/sandboxing as distinct mechanisms, the untrusted-content invariant) stays documented only, revisited once a concrete need shows up (a second identity, a real side-effecting tool, an untrusted content source).
+
+### Decisions for this project
+
+- **A real approval implementation, not just the stub's default.** `cli_approve()` asks the local user directly, describing the pending call (name + arguments) per the article's "good approval text" — placed at the point of the actual side effect (inside `bacteria.tools.execution`), not at task start. → [`src/bacteria/tools/approval.py`](../src/bacteria/tools/approval.py)
+- **Approval defaults to denied, not allowed, on ambiguous input.** Anything other than an explicit yes rejects the call — matches the article's framing of approval as a real gate, not a formality.
+- **`Runtime.run_turn()` now accepts an `approve` callback**, threaded through to `execute_tool_call()` for every proposed tool call in a turn. Omitting it preserves Part 6's always-allow default, so existing callers (and tests) aren't broken by this addition. → [`src/bacteria/runtime/runtime.py`](../src/bacteria/runtime/runtime.py)
+- **Rejection fails the turn loudly** — `ToolExecutionError` propagates out of `run_turn()` rather than being caught and fed back to the model as a soft failure. Simplest correct behavior at this scope; a graceful "the user declined, here's why" round-trip back to the model is a real nicety, deliberately not built until there's an actual interactive user relying on it (the CLI doesn't wire in `tool_registry`/`approve` yet — see Layer 1 addendum below).
+- **Identity, policy/enforcement/sandboxing separation, and the untrusted-content-authority invariant are deferred entirely.** No stubs, no placeholders — same treatment retrieval (Part 5) and durability (Part 4) got. Revisit when a concrete need exists: a second identity/principal, a tool with a real external side effect, or a content source that isn't fully trusted.
+
+**Implementation status:** built and tested (7 new load-bearing invariant tests: 3 in [`tests/test_tool_approval.py`](../tests/test_tool_approval.py), 2 approval-specific in [`tests/test_runtime.py`](../tests/test_runtime.py) — full suite 39/39). `cli_approve` is not yet wired into [`src/bacteria/interfaces/cli.py`](../src/bacteria/interfaces/cli.py), consistent with that entry point still not registering any real tool.
 
 ---
 

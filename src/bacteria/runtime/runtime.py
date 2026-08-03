@@ -79,6 +79,7 @@ class Runtime:
         session_id: str,
         user_text: str,
         tool_registry: ToolRegistry | None = None,
+        approve: Callable[[dict[str, Any]], bool] | None = None,
     ) -> RunResult:
         run_id = str(uuid.uuid4())
         step_tracker = StepTracker()
@@ -97,10 +98,11 @@ class Runtime:
         transcript_items = [TranscriptItem(kind="message", payload={"role": "user", "text": user_text})]
 
         if response.tool_calls and tool_registry is not None:
+            approve_fn = approve if approve is not None else (lambda _tool_call: True)
             results: list[ToolResult] = [
                 step_tracker.run_once(
                     f"{run_id}:tool_call:{call['id']}",
-                    lambda call=call: execute_tool_call(call, tool_registry),
+                    lambda call=call: execute_tool_call(call, tool_registry, approve=approve_fn),
                 )
                 for call in response.tool_calls
             ]

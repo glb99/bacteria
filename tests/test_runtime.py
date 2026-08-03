@@ -1,10 +1,11 @@
-"""Load-bearing invariant tests for the runtime (Part 4 and Part 6 decisions)."""
+"""Load-bearing invariant tests for the runtime (Part 4, 6, and 7 decisions)."""
 
 import pytest
 
 from bacteria.model.client import ModelResponse
 from bacteria.runtime.runtime import Runtime, StepAlreadyExecutedError, StepTracker
 from bacteria.session.store import SessionStore
+from bacteria.tools.execution import ToolExecutionError
 from bacteria.tools.registry import ToolDefinition, ToolRegistry
 
 
@@ -143,3 +144,57 @@ def test_tool_execution_is_recorded_in_the_transcript():
     tool_items = [item for item in result.committed_state.transcript if item.kind == "tool_call"]
     assert len(tool_items) == 1
     assert tool_items[0].payload == {"name": "get_time", "output": "10:00"}
+
+
+def make_get_time_registry(handler=None) -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            name="get_time",
+            description="returns the current time",
+            input_schema={"type": "object"},
+            handler=handler or (lambda tool_input: "10:00"),
+        )
+    )
+    return registry
+
+
+def test_runtime_honors_a_rejecting_approval_callback():
+    """The load-bearing property Part 7 is actually about: Runtime must not
+    execute a tool call the approval boundary rejected, and must not silently
+    swallow the rejection either."""
+    store = SessionStore()
+    session = store.create_session(user_id="u1")
+    client = FakeToolCallingClient()
+    runtime = Runtime(model_client=client, session_store=store)
+
+    handler_calls = []
+    registry = make_get_time_registry(handler=lambda tool_input: handler_calls.append(tool_input))
+
+    with pytest.raises(ToolExecutionError):
+        runtime.run_turn(
+            session.session_id,
+            "what time is it?",
+            tool_registry=registry,
+            approve=lambda _tool_call: False,
+        )
+
+    assert handler_calls == []
+
+
+def test_runtime_honors_an_approving_callback():
+    store = SessionStore()
+    session = store.create_session(user_id="u1")
+    client = FakeToolCallingClient()
+    runtime = Runtime(model_client=client, session_store=store)
+
+    registry = make_get_time_registry()
+
+    result = runtime.run_turn(
+        session.session_id,
+        "what time is it?",
+        tool_registry=registry,
+        approve=lambda _tool_call: True,
+    )
+
+    assert result.response.text == "It's 10:00"

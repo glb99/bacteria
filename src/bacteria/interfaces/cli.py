@@ -10,6 +10,14 @@ SessionStore, and Runtime and hands work — a line of user input — to
 Runtime.run_turn(), which is this layer's whole job per Part 1: receive
 work from outside, then hand it to the control plane/runtime.
 
+Also owns building the tool registry — nothing else in this project has a
+notion of "what capabilities does this deployment have" yet, so that
+construction lives here alongside the other real objects (same reasoning
+as ModelClient/SessionStore). `add_note` (bacteria.tools.notes) is the
+first real tool registered anywhere in this project, deliberately small
+but with an actual side effect, gated by the real approval boundary
+(cli_approve) instead of the always-allow default.
+
 Requires ANTHROPIC_API_KEY to be set in the environment.
 """
 
@@ -18,12 +26,18 @@ from __future__ import annotations
 from bacteria.model.client import ModelClient
 from bacteria.runtime.runtime import Runtime
 from bacteria.session.store import SessionStore
+from bacteria.tools.approval import cli_approve
+from bacteria.tools.notes import build_add_note_tool
+from bacteria.tools.registry import ToolRegistry
 
 
 def main() -> None:
     model_client = ModelClient()
     session_store = SessionStore()
     runtime = Runtime(model_client=model_client, session_store=session_store)
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(build_add_note_tool())
 
     session = session_store.create_session(user_id="local-cli")
     print(f"session: {session.session_id}  (empty line or Ctrl+C to quit)")
@@ -36,7 +50,12 @@ def main() -> None:
         if not user_text:
             break
 
-        result = runtime.run_turn(session.session_id, user_text)
+        result = runtime.run_turn(
+            session.session_id,
+            user_text,
+            tool_registry=tool_registry,
+            approve=cli_approve,
+        )
         print(result.response.text)
 
 

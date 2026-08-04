@@ -5,7 +5,9 @@ description = "An AI agent built from The Agent Stack series, layer by layer."
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40.0",
+    "google-genai>=1.0.0",
     "pydantic>=2.9.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

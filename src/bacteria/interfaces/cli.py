@@ -18,10 +18,14 @@ first real tool registered anywhere in this project, deliberately small
 but with an actual side effect, gated by the real approval boundary
 (cli_approve) instead of the always-allow default.
 
-Requires ANTHROPIC_API_KEY to be set in the environment.
+Requires ANTHROPIC_API_KEY to be set in the environment, or in a .env file
+in the current directory (loaded here — the Anthropic SDK itself only reads
+real process environment variables, never a .env file on its own).
 """
 
 from __future__ import annotations
+
+from dotenv import load_dotenv
 
 from bacteria.model.client import ModelClient
 from bacteria.runtime.runtime import Runtime
@@ -32,6 +36,7 @@ from bacteria.tools.registry import ToolRegistry
 
 
 def main() -> None:
+    load_dotenv()
     model_client = ModelClient()
     session_store = SessionStore()
     runtime = Runtime(model_client=model_client, session_store=session_store)

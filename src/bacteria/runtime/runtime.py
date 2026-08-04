@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from bacteria.context.assembly import assemble_context
 from bacteria.model.client import ModelResponse
@@ -54,6 +54,7 @@ class StepTracker:
         return result
 
 
+@runtime_checkable
 class SendsMessages(Protocol):
     def send(self, messages: list[dict[str, Any]], **kwargs: Any) -> ModelResponse: ...
 

@@ -24,7 +24,7 @@ from typing import Any, Callable, Protocol
 from bacteria.context.assembly import assemble_context
 from bacteria.model.client import ModelResponse
 from bacteria.session.store import SessionState, SessionStore, TranscriptItem
-from bacteria.tools.execution import ToolResult, execute_tool_call
+from bacteria.tools.execution import ToolExecutionError, ToolResult, execute_tool_call
 from bacteria.tools.registry import ToolRegistry
 
 
@@ -88,56 +88,81 @@ class Runtime:
         context = assemble_context(state, user_text)
         tools = tool_registry.schemas_for_run() if tool_registry else None
 
-        response: ModelResponse = step_tracker.run_once(
-            f"{run_id}:model_call",
-            lambda: self._model_client.send(
-                messages=context.messages, system=context.system, tools=tools
-            ),
-        )
-
         transcript_items = [TranscriptItem(kind="message", payload={"role": "user", "text": user_text})]
 
-        if response.tool_calls and tool_registry is not None:
-            approve_fn = approve if approve is not None else (lambda _tool_call: True)
-            results: list[ToolResult] = [
-                step_tracker.run_once(
-                    f"{run_id}:tool_call:{call['id']}",
-                    lambda call=call: execute_tool_call(call, tool_registry, approve=approve_fn),
-                )
-                for call in response.tool_calls
-            ]
-            transcript_items.extend(
-                TranscriptItem(
-                    kind="tool_call",
-                    payload={"name": result.name, "output": result.output},
-                )
-                for result in results
-            )
-
-            follow_up_messages = context.messages + [
-                {"role": "assistant", "content": self._assistant_content_blocks(response)},
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": result.tool_call_id,
-                            "content": str(result.output),
-                        }
-                        for result in results
-                    ],
-                },
-            ]
-            response = step_tracker.run_once(
-                f"{run_id}:model_call_after_tools",
+        try:
+            response: ModelResponse = step_tracker.run_once(
+                f"{run_id}:model_call",
                 lambda: self._model_client.send(
-                    messages=follow_up_messages, system=context.system, tools=tools
+                    messages=context.messages, system=context.system, tools=tools
                 ),
             )
 
-        transcript_items.append(
-            TranscriptItem(kind="message", payload={"role": "assistant", "text": response.text})
-        )
+            if response.tool_calls and tool_registry is not None:
+                approve_fn = approve if approve is not None else (lambda _tool_call: True)
+                results: list[ToolResult] = []
+                for call in response.tool_calls:
+                    try:
+                        result = step_tracker.run_once(
+                            f"{run_id}:tool_call:{call['id']}",
+                            lambda call=call: execute_tool_call(call, tool_registry, approve=approve_fn),
+                        )
+                    except ToolExecutionError as exc:
+                        transcript_items.append(
+                            TranscriptItem(
+                                kind="tool_call",
+                                payload={
+                                    "name": call["name"],
+                                    "input": call["input"],
+                                    "status": "failed",
+                                    "error": str(exc),
+                                },
+                            )
+                        )
+                        raise
+                    results.append(result)
+                    transcript_items.append(
+                        TranscriptItem(
+                            kind="tool_call",
+                            payload={
+                                "name": result.name,
+                                "input": call["input"],
+                                "status": "executed",
+                                "output": result.output,
+                            },
+                        )
+                    )
+
+                follow_up_messages = context.messages + [
+                    {"role": "assistant", "content": self._assistant_content_blocks(response)},
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": result.tool_call_id,
+                                "content": str(result.output),
+                            }
+                            for result in results
+                        ],
+                    },
+                ]
+                response = step_tracker.run_once(
+                    f"{run_id}:model_call_after_tools",
+                    lambda: self._model_client.send(
+                        messages=follow_up_messages, system=context.system, tools=tools
+                    ),
+                )
+
+            transcript_items.append(
+                TranscriptItem(kind="message", payload={"role": "assistant", "text": response.text})
+            )
+        except Exception as exc:
+            # Evidence must survive a failed run, not just a successful one
+            # (Part 8) — commit whatever was accumulated before re-raising.
+            transcript_items.append(TranscriptItem(kind="run_error", payload={"error": str(exc)}))
+            self._session_store.commit(session_id, new_transcript_items=transcript_items)
+            raise
 
         committed_state = self._session_store.commit(session_id, new_transcript_items=transcript_items)
 

@@ -17,7 +17,7 @@ See [`articles/`](../articles/) for the raw source notes per part, and [`CLAUDE.
 | 5 | Context, Retrieval, and Memory | Recorded |
 | 6 | Tools, MCP, and Capability Surfaces | Recorded |
 | 7 | Execution Surfaces, Identity, and Approval Boundaries | Recorded |
-| 8 | Observability, Evaluation, and Production Feedback Loops | Not started |
+| 8 | Observability, Evaluation, and Production Feedback Loops | Recorded |
 
 ---
 
@@ -235,6 +235,33 @@ Approval is the one control from this part worth making real right now, because 
 - **Identity, policy/enforcement/sandboxing separation, and the untrusted-content-authority invariant are deferred entirely.** No stubs, no placeholders — same treatment retrieval (Part 5) and durability (Part 4) got. Revisit when a concrete need exists: a second identity/principal, a tool with a real external side effect, or a content source that isn't fully trusted.
 
 **Implementation status:** built and tested (7 new load-bearing invariant tests: 3 in [`tests/test_tool_approval.py`](../tests/test_tool_approval.py), 2 approval-specific in [`tests/test_runtime.py`](../tests/test_runtime.py) — full suite 39/39). `cli_approve` is not yet wired into [`src/bacteria/interfaces/cli.py`](../src/bacteria/interfaces/cli.py), consistent with that entry point still not registering any real tool.
+
+---
+
+## Part 8 — Observability, Evaluation, and Production Feedback Loops
+
+*Notes: [articles/part-8-observability-evaluation-feedback-loops.md](../articles/part-8-observability-evaluation-feedback-loops.md)*
+
+### Discussion
+
+- **"What accountability is?"** (re: "an audit trail preserves accountability") — a trace answers *how* the system reached a result (mechanism). An audit trail answers *who is answerable* for it (responsibility): which identity acted, under what granted scope, which policy allowed it, whether approval was required and by whom it was given, what changed. The test: given a bad outcome, can you point to a specific identity/authorization/approval chain, not just a sequence of function calls.
+- **"Still evals? or unit tests?"** (re: "write an assertion" instead of asking a model judge) — genuinely blurry by the article's own taxonomy, which names deterministic checks as one of three kinds of evaluation. Mechanically identical to a unit test (same `assert`); the real difference is subject and lifecycle — a unit test checks a function against crafted inputs, pre-release; a deterministic eval checks a whole agent run's recorded behavior, often against real captured traces, as ongoing regression coverage gating each release. Maps directly onto this project's already-adopted "architectural fitness function" testing philosophy (`CLAUDE.md`) — a deterministic eval is a fitness function for agent *behavior* instead of code *architecture*.
+- **"Which parts should be automated, is it CI/CD?"** (re: the bad-run → triage → dataset → regression → gate → canary loop) — yes, CI/CD generalized past code correctness into behavioral correctness. Fully automatable: running the regression suite, gating a release on it, canary rollout with auto-rollback. Semi-automatable: flagging candidate bad runs. Inherently human: triaging *why* a run was bad, and the actual fix. The one non-CI/CD-shaped addition is that judgment step at the front, which a normal test pipeline doesn't need because "did this pass" isn't always a clean boolean.
+- **Scope for this project:** most of the article assumes a production audience this project doesn't have — release gates, canary rollouts, SLOs, distributional-drift monitoring, a redaction/retention story for traces containing user data. All deferred, same treatment as retrieval (Part 5) and identity/sandboxing (Part 7). But a concrete, non-speculative gap surfaced during discussion: `execute_tool_call` failures (rejection, unknown tool, handler error) currently propagate straight out of `run_turn` *before* `commit()` runs — meaning a failed run leaves zero evidence, not even the user's message. That's the same root cause behind the `CredentialsError` gap found when the CLI was first run for real (Layer 1 addendum, below) — a run-level failure loses everything accumulated so far. This directly violates the article's stated invariant ("every meaningful run should leave enough evidence to explain how the system reached the result... even a failed one") and is worth fixing for real, independent of any production-scale motivation.
+
+### Team conclusion
+
+Build the observability half only, scoped tightly to "don't lose evidence on failure" — nothing about evaluation infrastructure or feedback loops, since there's no eval suite beyond pytest's existing regression coverage and no release process to feed a loop into. Enrich the tool-call transcript record to include what was actually requested (`input`), not just what came back (`output`), and make sure any run-level failure — a rejected/failed tool call, or a failure in the model call itself — still commits whatever evidence was accumulated before re-raising, instead of silently discarding it.
+
+### Decisions for this project
+
+- **Tool-call transcript records now include `input`, not just `output`**, and an explicit `status` (`executed`/`failed`) — matches the article's "the trace crosses the stack" requirement; previously the record of *what was requested* didn't exist at all, only what came back. → [`src/bacteria/runtime/runtime.py`](../src/bacteria/runtime/runtime.py)
+- **A failed or rejected tool call is committed as evidence, not silently lost.** `run_turn` catches `ToolExecutionError` around each call, appends a `tool_call` transcript item recording what was attempted and why it failed, then re-raises — the caller still sees the failure loudly (Part 7's decision stands: no soft-recovery round-trip to the model), but the session now has a permanent record of the attempt. → [`src/bacteria/runtime/runtime.py`](../src/bacteria/runtime/runtime.py)
+- **Any run-level exception commits accumulated evidence before re-raising**, tagged as a `run_error` transcript item. Closes the same gap the `CredentialsError` discovery exposed for the model call itself — previously a model-call failure lost even the user's message. → [`src/bacteria/runtime/runtime.py`](../src/bacteria/runtime/runtime.py)
+- **Trace and audit stay unified, not split into separate records.** The article warns against collapsing them in production because the audiences differ (broad engineering access to debug logs vs. tightly controlled audit access). This project has one developer and no such audience split — deferred as a real distinction to make later if that ever changes, not built now.
+- **No evaluation or feedback-loop infrastructure.** No dataset pipeline, no release gate, no online monitoring — nothing in this project ships a "release" in the sense the article means. Pytest's existing suite already plays the role of regression coverage per this project's established testing philosophy (`CLAUDE.md`); that's judged sufficient at this scale, not a placeholder for something bigger.
+
+**Implementation status:** built and tested (3 new/extended load-bearing invariant tests in [`tests/test_runtime.py`](../tests/test_runtime.py) — full suite 41/41). Verified against the real `ModelClient` too, not just fakes: re-running the no-credentials case from the Layer 1 addendum now shows the user's message and a `run_error` record both surviving in the transcript, where previously nothing was committed at all.
 
 ---
 

@@ -143,7 +143,12 @@ def test_tool_execution_is_recorded_in_the_transcript():
 
     tool_items = [item for item in result.committed_state.transcript if item.kind == "tool_call"]
     assert len(tool_items) == 1
-    assert tool_items[0].payload == {"name": "get_time", "output": "10:00"}
+    assert tool_items[0].payload == {
+        "name": "get_time",
+        "input": {},
+        "status": "executed",
+        "output": "10:00",
+    }
 
 
 def make_get_time_registry(handler=None) -> ToolRegistry:
@@ -180,6 +185,54 @@ def test_runtime_honors_a_rejecting_approval_callback():
         )
 
     assert handler_calls == []
+
+
+def test_a_rejected_tool_call_still_leaves_evidence_in_the_transcript():
+    """Part 8's invariant: a failed run must still leave enough evidence to
+    explain how the system got there — a rejection must not vanish along
+    with the exception that carried it."""
+    store = SessionStore()
+    session = store.create_session(user_id="u1")
+    client = FakeToolCallingClient()
+    runtime = Runtime(model_client=client, session_store=store)
+
+    registry = make_get_time_registry()
+
+    with pytest.raises(ToolExecutionError):
+        runtime.run_turn(
+            session.session_id,
+            "what time is it?",
+            tool_registry=registry,
+            approve=lambda _tool_call: False,
+        )
+
+    transcript = store.get_state(session.session_id).transcript
+    assert transcript[0].payload == {"role": "user", "text": "what time is it?"}
+    tool_items = [item for item in transcript if item.kind == "tool_call"]
+    assert tool_items[0].payload["status"] == "failed"
+    assert tool_items[0].payload["name"] == "get_time"
+    assert any(item.kind == "run_error" for item in transcript)
+
+
+class FakeFailingClient:
+    """Fails on the very first model call — enough to prove a run-level
+    failure (unrelated to tools) still commits accumulated evidence."""
+
+    def send(self, messages, **kwargs) -> ModelResponse:
+        raise RuntimeError("model backend unavailable")
+
+
+def test_a_failed_model_call_still_leaves_the_user_message_as_evidence():
+    store = SessionStore()
+    session = store.create_session(user_id="u1")
+    runtime = Runtime(model_client=FakeFailingClient(), session_store=store)
+
+    with pytest.raises(RuntimeError):
+        runtime.run_turn(session.session_id, "hello")
+
+    transcript = store.get_state(session.session_id).transcript
+    assert transcript[0].payload == {"role": "user", "text": "hello"}
+    assert any(item.kind == "run_error" for item in transcript)
 
 
 def test_runtime_honors_an_approving_callback():

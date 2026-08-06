@@ -1,0 +1,86 @@
+"""Tests for the chain: ordering, skipping, and per-instance links."""
+
+from dataclasses import dataclass, field
+
+from fastpaip.core.adapters import FunctionalProcessor
+from fastpaip.core.handlers import StepHandler
+
+
+@dataclass
+class Doc:
+    """Data threaded through a chain, recording which steps touched it."""
+
+    text: str = ""
+    seen: list[str] = field(default_factory=list)
+
+
+def step(name: str, applies=lambda _doc: True) -> StepHandler:
+    def process(doc: Doc) -> Doc:
+        doc.seen.append(name)
+        return doc
+
+    return StepHandler(FunctionalProcessor(can_handle=applies, process=process))
+
+
+def test_steps_run_in_the_order_they_were_linked():
+    first, second, third = step("a"), step("b"), step("c")
+    first.set_next(second).set_next(third)
+
+    result = first.handle(Doc())
+
+    assert result.seen == ["a", "b", "c"]
+
+
+def test_set_next_returns_the_new_link_so_chains_read_forwards():
+    """`a.set_next(b).set_next(c)` must build a→b→c, not a→c.
+
+    Returning `self` instead would make the same expression silently build the
+    chain backwards — the fluent call still reads left to right, so the mistake
+    is invisible at the call site.
+    """
+    first, second, third = step("a"), step("b"), step("c")
+
+    assert first.set_next(second) is second
+    assert second.set_next(third) is third
+
+
+def test_a_declining_step_is_skipped_but_the_chain_continues():
+    """can_handle False must skip that step only, not end the pipeline.
+
+    Ending the chain would make one step's decision silently discard every step
+    after it, and the result would simply be wrong with nothing to point at.
+    """
+    chain = step("a")
+    chain.set_next(step("b", applies=lambda _doc: False)).set_next(step("c"))
+
+    result = chain.handle(Doc())
+
+    assert result.seen == ["a", "c"]
+
+
+def test_handlers_do_not_share_a_successor():
+    """Each handler's link is its own.
+
+    `_next_handler` was declared as a class attribute. It appeared to work,
+    because `set_next` assigns to the instance and shadows it — but every
+    handler that had not yet been given a successor read one shared default,
+    and anything inspecting the link before `set_next` saw the class's value
+    rather than that instance's.
+    """
+    linked, unlinked = step("a"), step("z")
+    linked.set_next(step("b"))
+
+    assert linked._next_handler is not None
+    assert unlinked._next_handler is None
+
+
+def test_a_single_handler_returns_its_data_unchanged_through_the_tail():
+    """The last link returns the data rather than None.
+
+    A chain's tail is the easiest place to drop the payload, and a caller that
+    receives None gets a failure far from the cause.
+    """
+    result = step("only").handle(Doc(text="payload"))
+
+    assert result.text == "payload"
+    assert result.seen == ["only"]

@@ -283,13 +283,13 @@ an entry point is for.
 3. ~~Create the workspace skeleton; move bacteria in.~~ **Done** — brought in
    with `git subtree`, so its history came along rather than arriving as an
    anonymous copy. `just test` runs both suites; `just agent` runs the CLI.
-4. **Next.** Repair the framework files now sitting in `core/`: drop the
-   `Repository` marker and the `CRUDRepository` composite, move
-   `_next_handler` into `__init__`, replace the `print()` calls with
-   structured logging. Add `settings.py` — every `os.environ` read in the tree
-   collapses into it. Fix `repositories.py`, which still has no imports at all
-   and raises `NameError`.
-5. First feature end to end, `chat/`, using the existing hello-world test as the
+4. ~~Repair the framework files in `core/`; add `settings.py`; fix
+   `repositories.py`.~~ **Done.** 14 application tests, `just cov` working.
+   One correction found along the way: `extra="forbid"` does *not* reject
+   unknown environment variables — pydantic-settings never collects prefixed
+   variables that match no field, so they never reach the extras check. The
+   guard is written by hand in `Settings._reject_unknown_prefixed_variables`.
+5. **Next.** First feature end to end, `chat/`, using the existing tests as the
    shape. This is where the `SessionRepository` implementation lands and where
    alembic gets introduced.
 6. Ingestion, then audio. Audio is the one that will re-open the model protocol

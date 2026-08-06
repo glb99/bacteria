@@ -1,117 +1,105 @@
+"""The contracts features are written against, rather than against each other.
+
+Structural, not nominal: a class satisfies anything here by having the methods.
+There is no base class to inherit and nothing to register, so a repository backed
+by SQLModel, by an HTTP call, or by a dict in a test are interchangeable without
+any of them knowing this module exists.
+
+The repository protocols are deliberately one method each. A repository declares
+the two or three it actually offers and no more, so a caller needing only reads
+cannot be handed something that also deletes.
+
+Two things were here and were removed, because both undid that:
+
+- ``CRUDRepository``, a composite of all four. Recombining them defeats the
+  split in a single line, and most repositories genuinely do not want all four —
+  bacteria's ``SessionStore`` is the sharp case, where an ``update`` method
+  would be a second write path through a store whose entire design rests on
+  having exactly one.
+- ``Repository``, an empty base marker. Under structural typing a marker adds no
+  constraint a checker can enforce and no capability a caller can rely on, so it
+  reads as documentation while behaving as nothing.
+
+Note what these protocols do *not* say: whether a method is a coroutine. A
+synchronous implementation and an async one both satisfy them structurally, and
+only the caller's ``await`` tells the difference. Pick one convention per
+application and hold to it.
 """
-Defines the core, abstract interfaces (Protocols) for the shared framework.
 
-This module contains the contracts that connect the framework's structural components
-to the application's business logic and persistence layers. Using Protocols enables
-a decoupled, pluggable architecture based on structural typing ("duck typing").
-"""
-
-from typing import Protocol, Any, TypeVar, Generic, Optional
-
-# ==============================================================================
-# 1. Generic Type Variables
-# ==============================================================================
-# These allow our protocols to be flexible and work with any data type.
+from typing import Any, Optional, Protocol, TypeVar
 
 DataType = TypeVar("DataType")
 CreateModelType = TypeVar("CreateModelType")
 IdType = TypeVar("IdType")
 
 
-# ==============================================================================
-# 2. Base Repository Protocol (Marker Interface)
-# ==============================================================================
-class Repository(Protocol):
-    """A base marker protocol for all repository interfaces."""
-
-    pass
-
-
-# ==============================================================================
-# 3. Granular, Composable Repository Protocols (Interface Segregation)
-# ==============================================================================
-# These small, single-method protocols define the most basic persistence behaviors.
-
-
-class CanRead(Repository, Protocol[DataType, IdType]):
-    """An interface for a repository that can read data."""
+class CanRead(Protocol[DataType, IdType]):
+    """Reads one entity by identity."""
 
     def get_by_id(self, id: IdType) -> Optional[DataType]:
-        """Retrieves an entity by its unique identifier."""
+        """Return the entity, or ``None`` when there is no such id.
+
+        ``None`` rather than an exception: "not found" is an ordinary answer to
+        a lookup. A caller that wants it to be exceptional can say so at the
+        call site far more cheaply than one that wants the reverse.
+        """
         ...
 
 
-class CanCreate(Repository, Protocol[DataType, CreateModelType]):
-    """An interface for a repository that can create data."""
+class CanCreate(Protocol[DataType, CreateModelType]):
+    """Creates an entity from a payload that is not one yet.
+
+    ``CreateModelType`` is separate from ``DataType`` deliberately: what a caller
+    supplies has no identity, and what comes back does. Collapsing them means
+    either inventing an id before the store assigns one, or making the id
+    optional forever on a type that always has one after creation.
+    """
 
     def create(self, data: CreateModelType) -> DataType:
-        """Creates a new entity in the repository."""
+        """Persist ``data`` and return the created entity, identity included."""
         ...
 
 
-class CanUpdate(Repository, Protocol[DataType]):
-    """An interface for a repository that can update data."""
+class CanUpdate(Protocol[DataType]):
+    """Writes back an entity that already exists."""
 
     def update(self, entity: DataType) -> DataType:
-        """Updates an existing entity."""
+        """Persist changes to ``entity`` and return the stored result."""
         ...
 
 
-class CanDelete(Repository, Protocol[IdType]):
-    """An interface for a repository that can delete data."""
+class CanDelete(Protocol[IdType]):
+    """Removes an entity by identity."""
 
     def delete(self, id: IdType) -> None:
-        """Deletes an entity by its unique identifier."""
+        """Remove the entity.
+
+        Deleting an absent id is a no-op rather than an error: the caller wanted
+        it gone, and it is.
+        """
         ...
-
-
-# --- Composite Protocol for full CRUD functionality ---
-class CRUDRepository(
-    CanRead[DataType, IdType],
-    CanCreate[DataType, CreateModelType],
-    CanUpdate[DataType],
-    CanDelete[IdType],
-    Protocol,
-):
-    """A composite interface for a repository with full CRUD capabilities."""
-
-    pass
-
-
-# ==============================================================================
-# 4. Protocol for Business Logic Components
-# ==============================================================================
 
 
 class Processable(Protocol[DataType]):
-    """
-    A protocol defining the contract for any business logic "processor".
+    """One step of business logic, plus whether it applies to this data.
 
-    Any object that implements `can_handle` and `process` methods with matching
-    signatures is considered a valid `Processable` component, allowing for
-    flexible integration with the framework's handlers.
+    Implementations are hosted by :class:`fastpaip.core.handlers.StepHandler`,
+    which is what links them into a chain. Separating the question ("does this
+    apply?") from the work ("do it") is what lets a pipeline be assembled from
+    steps that know nothing about which other steps exist.
+
+    Known limitation, worth understanding before depending on it: ``can_handle``
+    returns a bare ``bool``, so a step that declines cannot say *why*. The
+    handler logs that a skip happened and which processor skipped, which is
+    enough to see it and not enough to explain it. Carrying the reason means
+    returning something richer than a bool from every processor — a change worth
+    making deliberately rather than discovering halfway through an incident.
     """
 
     def can_handle(self, data: DataType) -> bool:
-        """
-        Determines if the component is capable of processing the given data.
-
-        Args:
-            data: The input data to be evaluated.
-
-        Returns:
-            True if the component can process the data, False otherwise.
-        """
+        """Whether this step applies to ``data``. Must not mutate anything."""
         ...
 
     def process(self, data: DataType) -> Any:
-        """
-        Executes the core business logic on the given data.
-
-        Args:
-            data: The input data to be processed.
-
-        Returns:
-            The result of the processing.
-        """
+        """Do the work, and return what should be passed onward."""
         ...

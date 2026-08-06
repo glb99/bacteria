@@ -59,6 +59,7 @@ async def create_tables() -> None:
     # Imported for the side effect of registering tables on SQLModel.metadata.
     # Without this, create_all sees an empty registry and silently creates
     # nothing — the failure then appears much later, as a missing table.
+    from fastpaip.auth import models as _auth_models  # noqa: F401
     from fastpaip.chat import models as _chat_models  # noqa: F401
     from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
 

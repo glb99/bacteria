@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from fastpaip.auth.dependencies import CurrentPrincipal
 from fastpaip.core.dependencies import DbSession
 from fastpaip.ingestion.service import ingest
 
@@ -36,12 +37,20 @@ class BatchResult(BaseModel):
 
 
 @router.post("/batches", response_model=BatchResult, status_code=201)
-async def submit_batch(body: Submission, db: DbSession) -> BatchResult:
+async def submit_batch(
+    body: Submission, principal: CurrentPrincipal, db: DbSession
+) -> BatchResult:
     """Ingest a batch and report exactly what happened to every record.
 
     Rejections are returned in full rather than counted. A caller that sent 50
     records and is told 42 were accepted has no way to find the eight, and the
     reason is the only part that lets them fix it.
+
+    Requires an authenticated caller. Note what is *not* here: a batch is not
+    owned by the principal that submitted it, so any authenticated caller
+    could read another's records once a read route exists. That is tolerable
+    while every key belongs to one operator and is the first thing to fix if
+    that changes -- see the tenancy gap in `fastpaip.ingestion`.
 
     A batch where nothing passes validation is still a 201, and still gets a
     batch row: the submission was received and recorded, and "your records were

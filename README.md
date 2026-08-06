@@ -45,6 +45,7 @@ packages/
   bacteria/           the agent — see its own README
   fastpaip/
     src/fastpaip/
+      auth/           API keys and principals — who is calling
       core/           protocols, handlers, adapters, settings, db — cross-cutting
       chat/           conversations with the agent, durably stored
       ingestion/      validate → normalize → persist, built from core.handlers
@@ -67,6 +68,13 @@ Measuring it produces a number whose only use is tempting someone to write the
 tests that record exists to decline. The application is measured; the agent is
 not.
 
+**Authentication and authorization are separate, and stay separate.** `auth/`
+answers *who is calling* and nothing else. Whether that caller may have a
+particular resource is decided next to the resource — `chat/access.py` — because
+only the owning feature knows what owning one means. This is the same
+distinction the agent is built around, and collapsing it is how a service ends
+up treating "you know the id" as "you may read it".
+
 **The application never imports `bacteria.interfaces`.** That package is the
 agent's own composition root, for running it standalone. The application
 composes what it needs in `entrypoints/`. Two composition roots is correct here
@@ -75,13 +83,21 @@ becoming one tangled one.
 
 ## Status
 
-Two features working end to end. `chat/` runs agent turns against durably
-stored sessions; `ingestion/` takes batches of records through a handler chain
-and records what happened to every one of them.
+Two features working end to end, behind API-key authentication. `chat/` runs
+agent turns against durably stored sessions, each owned by the principal that
+created it; `ingestion/` takes batches of records through a handler chain and
+records what happened to every one of them.
+
+Keys are issued by an operator command, not an endpoint:
+
+```bash
+uv run fastpaip-admin issue-key acme-corp --label "acme production"
+```
 
 Deliberately absent, each recorded where it would be filled: migrations
-(`create_all` stands in), background workers, tools over HTTP (approval has
-nobody to ask until a run can pause), and audio. What is planned and why is in
+(`create_all` stands in), background workers, key scopes and expiry, tenancy for
+ingested records, tools over HTTP (approval has nobody to ask until a run can
+pause), and audio. What is planned and why is in
 [`docs/MIGRATION.md`](docs/MIGRATION.md).
 
 ## License

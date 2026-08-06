@@ -328,6 +328,18 @@ an entry point is for.
    moves the blocking to a worker thread rather than removing it. `asyncpg` is
    genuinely non-blocking, and that is the production target.
 
-8. **Next.** Audio. This is the one that re-opens the model protocol for
+8. ~~Authentication and authorization.~~ **Done.** API keys, hashed at rest,
+   issued by an operator CLI rather than an endpoint — minting credentials over
+   HTTP needs a credential, and the first one has nowhere to come from. Every
+   route now requires a principal, sessions are owned by the principal that
+   created them, and the owner can no longer be named by the client.
+
+   The two halves are separate packages on purpose: `auth/` establishes who,
+   `chat/access.py` establishes whether. Not-yours returns 404 rather than 403,
+   so a session id cannot be probed for existence.
+
+   Still open: key scopes and expiry, and tenancy for ingested records.
+
+9. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

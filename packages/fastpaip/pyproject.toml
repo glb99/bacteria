@@ -11,6 +11,9 @@ dependencies = [
     "pydantic-settings",
 ]
 
+[project.scripts]
+fastpaip-admin = "fastpaip.entrypoints.cli:main"
+
 [tool.uv.sources]
 # Resolved from packages/bacteria rather than an index. The agent is developed
 # alongside this application, not consumed as a release.

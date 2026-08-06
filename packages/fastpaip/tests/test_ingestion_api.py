@@ -11,9 +11,14 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from fastpaip.auth.service import issue_key
 from fastpaip.core.db import session_scope
 from fastpaip.ingestion.models import IngestedRecord, IngestionBatch, RejectedRecord
 from fastpaip.views import create_app, lifespan_running
+
+
+def auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture(name="db_engine")
@@ -23,6 +28,17 @@ def _db_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+
+@pytest.fixture(name="token")
+async def _token(db_engine, client):
+    """An API key for the principal these tests act as.
+
+    Depends on `client` so the schema exists first: tables are built in the
+    app's lifespan, which runs when TestClient starts.
+    """
+    async with AsyncSession(db_engine) as session:
+        return await issue_key(session, principal_id="tester", label="tests")
 
 
 @pytest.fixture(name="client")
@@ -41,9 +57,10 @@ def _client(db_engine):
         yield client
 
 
-async def test_a_clean_batch_is_stored(client, db_engine):
+async def test_a_clean_batch_is_stored(client, token, db_engine):
     response = client.post(
         "/ingestion/batches",
+        headers=auth(token),
         json={"source": "crm", "records": [{"external_id": "1", "name": "Ada"}]},
     )
 
@@ -57,7 +74,7 @@ async def test_a_clean_batch_is_stored(client, db_engine):
         assert [r.external_id for r in stored] == ["1"]
 
 
-async def test_rejections_are_returned_in_full_not_counted(client):
+async def test_rejections_are_returned_in_full_not_counted(client, token):
     """A caller must be able to find and fix the records that failed.
 
     "42 of 50 accepted" is not actionable — the eight are unidentifiable, and
@@ -65,6 +82,7 @@ async def test_rejections_are_returned_in_full_not_counted(client):
     """
     response = client.post(
         "/ingestion/batches",
+        headers=auth(token),
         json={
             "source": "crm",
             "records": [{"external_id": "1", "name": "Ada"}, {"name": "nameless"}],
@@ -78,7 +96,7 @@ async def test_rejections_are_returned_in_full_not_counted(client):
     assert body["rejected"][0]["payload"] == {"name": "nameless"}
 
 
-async def test_rejected_records_are_persisted_alongside_the_batch(client, db_engine):
+async def test_rejected_records_are_persisted_alongside_the_batch(client, token, db_engine):
     """The rejection outlives the response that reported it.
 
     A caller who ignored the response, or a job that ran unattended, still needs
@@ -86,6 +104,7 @@ async def test_rejected_records_are_persisted_alongside_the_batch(client, db_eng
     """
     client.post(
         "/ingestion/batches",
+        headers=auth(token),
         json={"source": "crm", "records": [{"name": "nameless"}]},
     )
 
@@ -95,9 +114,10 @@ async def test_rejected_records_are_persisted_alongside_the_batch(client, db_eng
         assert rejected[0].payload == {"name": "nameless"}
 
 
-async def test_a_batch_records_its_own_counts(client, db_engine):
+async def test_a_batch_records_its_own_counts(client, token, db_engine):
     client.post(
         "/ingestion/batches",
+        headers=auth(token),
         json={
             "source": "crm",
             "records": [
@@ -114,7 +134,7 @@ async def test_a_batch_records_its_own_counts(client, db_engine):
         assert batch.source == "crm"
 
 
-async def test_a_wholly_invalid_batch_is_still_recorded(client, db_engine):
+async def test_a_wholly_invalid_batch_is_still_recorded(client, token, db_engine):
     """Nothing valid is the case where the evidence matters most.
 
     Not storing it would mean the only batch nobody can explain afterwards is
@@ -122,7 +142,9 @@ async def test_a_wholly_invalid_batch_is_still_recorded(client, db_engine):
     received and answered -- and the batch row carries the reasons.
     """
     response = client.post(
-        "/ingestion/batches", json={"source": "crm", "records": [{"name": "nameless"}]}
+        "/ingestion/batches",
+        headers=auth(token),
+        json={"source": "crm", "records": [{"name": "nameless"}]},
     )
 
     assert response.status_code == 201
@@ -134,7 +156,7 @@ async def test_a_wholly_invalid_batch_is_still_recorded(client, db_engine):
         assert len((await db.exec(select(RejectedRecord))).all()) == 1
 
 
-async def test_an_oversized_batch_is_refused_by_validation(client):
+async def test_an_oversized_batch_is_refused_by_validation(client, token):
     """The inline-execution limit is enforced before any work starts.
 
     The bound exists because ingestion runs in the request that submits it,
@@ -143,12 +165,16 @@ async def test_an_oversized_batch_is_refused_by_validation(client):
     """
     records = [{"external_id": str(i), "name": f"n{i}"} for i in range(501)]
 
-    response = client.post("/ingestion/batches", json={"source": "crm", "records": records})
+    response = client.post(
+        "/ingestion/batches", headers=auth(token), json={"source": "crm", "records": records}
+    )
 
     assert response.status_code == 422
 
 
-async def test_an_empty_batch_is_refused(client):
-    response = client.post("/ingestion/batches", json={"source": "crm", "records": []})
+async def test_an_empty_batch_is_refused(client, token):
+    response = client.post(
+        "/ingestion/batches", headers=auth(token), json={"source": "crm", "records": []}
+    )
 
     assert response.status_code == 422

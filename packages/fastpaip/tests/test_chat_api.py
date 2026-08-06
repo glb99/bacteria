@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from fastpaip.auth.service import issue_key
 from fastpaip.chat import service
 from fastpaip.core.db import session_scope
 from fastpaip.views import create_app, lifespan_running
@@ -34,18 +35,28 @@ class FailingModelClient:
         raise RuntimeError("model backend unavailable")
 
 
-@pytest.fixture(name="client")
-def _client(monkeypatch):
-    # StaticPool with check_same_thread off: an in-memory SQLite database lives
-    # inside its connection, and the default pool hands a different connection
-    # -- so a different, empty database -- to each thread. TestClient runs the
-    # app on its own thread, so without this the tables simply are not there.
-    engine = create_async_engine(
+@pytest.fixture(name="engine")
+def _engine():
+    return create_async_engine(
         "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
 
+
+@pytest.fixture(name="token")
+async def _token(engine, client):
+    """An API key for the principal these tests act as.
+
+    Depends on `client` so the schema exists before a key is written: the tables
+    are built in the app's lifespan, which runs when TestClient starts.
+    """
+    async with AsyncSession(engine) as session:
+        return await issue_key(session, principal_id="tester", label="tests")
+
+
+@pytest.fixture(name="client")
+def _client(engine, monkeypatch):
     async def _create_tables():
         async with engine.begin() as connection:
             await connection.run_sync(SQLModel.metadata.create_all)
@@ -65,92 +76,106 @@ def _client(monkeypatch):
         yield client
 
 
-def new_session(client, user_id: str = "u1") -> str:
-    response = client.post("/chat/sessions", json={"user_id": user_id})
+def auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def new_session(client, token: str) -> str:
+    response = client.post("/chat/sessions", headers=auth(token))
     assert response.status_code == 201
     return response.json()["session_id"]
 
 
-def test_health_does_not_touch_the_database(client):
+async def test_health_does_not_touch_the_database(client):
     assert client.get("/health").json() == {"status": "ok"}
 
 
-def test_a_session_can_be_created_and_is_given_an_identity(client):
-    body = client.post("/chat/sessions", json={"user_id": "u1"}).json()
+async def test_a_session_can_be_created_and_is_given_an_identity(client, token):
+    body = client.post("/chat/sessions", headers=auth(token)).json()
 
-    assert body["user_id"] == "u1"
+    assert body["user_id"] == "tester"
     assert body["session_id"]
 
 
-def test_a_turn_returns_the_model_reply(client):
-    session_id = new_session(client)
+async def test_a_turn_returns_the_model_reply(client, token):
+    session_id = new_session(client, token)
 
-    body = client.post(f"/chat/sessions/{session_id}/turns", json={"text": "hi"}).json()
+    body = client.post(
+        f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"}
+    ).json()
 
     assert body["reply"] == "hello from the model"
     assert body["run_id"]
 
 
-def test_a_turn_is_recorded_in_the_transcript(client):
+async def test_a_turn_is_recorded_in_the_transcript(client, token):
     """State must survive the request that produced it.
 
     This is what the whole persistence seam is for: the turn ran against a
     database-backed store, so a second request can see what the first did.
     """
-    session_id = new_session(client)
-    client.post(f"/chat/sessions/{session_id}/turns", json={"text": "hi"})
+    session_id = new_session(client, token)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
-    transcript = client.get(f"/chat/sessions/{session_id}/transcript").json()
+    transcript = client.get(
+        f"/chat/sessions/{session_id}/transcript", headers=auth(token)
+    ).json()
 
     assert [entry["kind"] for entry in transcript] == ["message", "message"]
     assert transcript[0]["payload"] == {"role": "user", "text": "hi"}
     assert transcript[1]["payload"]["role"] == "assistant"
 
 
-def test_a_second_turn_sees_the_first(client):
+async def test_a_second_turn_sees_the_first(client, token):
     """History comes from the store, not from anything held between requests.
 
     Each request builds a new runtime and a new repository. If this passes, the
     conversation is genuinely durable rather than living in a process.
     """
-    session_id = new_session(client)
-    client.post(f"/chat/sessions/{session_id}/turns", json={"text": "first"})
-    client.post(f"/chat/sessions/{session_id}/turns", json={"text": "second"})
+    session_id = new_session(client, token)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "first"})
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "second"})
 
-    transcript = client.get(f"/chat/sessions/{session_id}/transcript").json()
+    transcript = client.get(
+        f"/chat/sessions/{session_id}/transcript", headers=auth(token)
+    ).json()
 
     assert len(transcript) == 4
     assert [e["payload"].get("text") for e in transcript][::2] == ["first", "second"]
 
 
-def test_an_unknown_session_is_404_not_a_new_conversation(client):
+async def test_an_unknown_session_is_404_not_a_new_conversation(client, token):
     """A lost id must not silently become an empty session.
 
     The agent's store raises rather than creating one; this asserts that choice
     survives translation to HTTP instead of being flattened into a 500 or,
     worse, a successful turn against a session nobody asked for.
     """
-    assert client.get("/chat/sessions/nope/transcript").status_code == 404
+    assert client.get("/chat/sessions/nope/transcript", headers=auth(token)).status_code == 404
 
-    response = client.post("/chat/sessions/nope/turns", json={"text": "hi"})
+    response = client.post(
+        "/chat/sessions/nope/turns", headers=auth(token), json={"text": "hi"}
+    )
     assert response.status_code == 404
 
 
-def test_a_failed_turn_still_leaves_evidence(client, monkeypatch):
+async def test_a_failed_turn_still_leaves_evidence(client, token, monkeypatch):
     """The user's message and the failure survive a 500.
 
     Without this, the runs worth investigating are exactly the ones with no
     record — the request fails, the caller sees a stack trace, and the
     conversation shows nothing happened.
     """
-    session_id = new_session(client)
+    session_id = new_session(client, token)
     monkeypatch.setitem(service.PROVIDERS, "fake", FailingModelClient)
 
     with pytest.raises(RuntimeError):
-        client.post(f"/chat/sessions/{session_id}/turns", json={"text": "doomed"})
+        client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "doomed"})
 
     monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
-    transcript = client.get(f"/chat/sessions/{session_id}/transcript").json()
+    transcript = client.get(
+        f"/chat/sessions/{session_id}/transcript", headers=auth(token)
+    ).json()
 
     assert transcript[0]["payload"] == {"role": "user", "text": "doomed"}
     assert any(entry["kind"] == "run_error" for entry in transcript)

@@ -200,7 +200,7 @@ excludes 3.14, which is what the agent's virtualenv is currently running.
 | `src/handlers.py` | `core/handlers.py` | Two fixes — see below. |
 | `src/adapters.py` | `core/adapters.py` | As-is. |
 | `src/fastpaip/models.py` | per feature | `User` is not a feature; it belongs wherever accounts land. Drop the unused `Session`, `create_engine`, `select` imports. |
-| `src/fastpaip/repositories.py` | per feature | **Currently has no imports at all** — it references `Session`, `User`, `UserCreate`, `UserId`, `Optional` from nowhere and raises `NameError` on import. Fix during the move. |
+| `src/fastpaip/repositories.py` | per feature | **Has no imports at all** — references `Session`, `User`, `UserCreate`, `UserId`, `Optional` from nowhere. Note this is *worse* than it looks on Python 3.14: PEP 649 defers annotation evaluation, so the module now imports cleanly and fails at first **call** instead of at import. Moved as-is; still to fix. |
 | `src/fastpaip/services.py` | per feature | Empty today. |
 | `src/fastpaip/dependencies.py` | `core/dependencies.py` | Empty today. |
 | `src/fastpaip/views.py` | `<feature>/views.py` | The `/` hello route becomes a health check. |

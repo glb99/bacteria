@@ -1,0 +1,290 @@
+# Target structure and migration plan
+
+What this repository becomes: a uv workspace holding two packages — the agent
+(`bacteria`, unchanged in shape) and the application that hosts it (`fastpaip`).
+
+This document is the plan, not the state. Nothing below has been done yet.
+
+## Step 0 — put this under version control
+
+There is no `.git` here. Everything in this tree is unversioned, including work
+that took real effort. Before any file moves:
+
+```bash
+git init && git add -A && git commit -m "Import current state before restructure"
+```
+
+The rest of this plan moves and deletes files. Doing that without a commit to
+return to is the only genuinely reckless part of it.
+
+## Target tree
+
+```
+fastpaip/
+  pyproject.toml                 workspace root; builds nothing
+  uv.lock                        one lockfile for both packages
+  Justfile
+  .envrc  .gitignore  LICENSE  README.md
+  docs/
+    MIGRATION.md                 this file
+  packages/
+    bacteria/                    the agent — vendored whole, its own package
+      pyproject.toml
+      src/bacteria/              imports unchanged: `from bacteria...`
+      tests/
+      docs/adr/
+      CLAUDE.md  README.md
+    fastpaip/                    the application
+      pyproject.toml
+      src/fastpaip/
+        core/                    cross-cutting infrastructure
+          __init__.py
+          protocols.py           repository contracts
+          handlers.py            Chain of Responsibility
+          adapters.py            FunctionalProcessor
+          settings.py            pydantic-settings; the only env reader
+          db.py                  engine + session factory
+          logging.py             structured logging setup
+        ingestion/               feature: models, repositories, services,
+          __init__.py            steps (handler chain), views
+        audio/                   feature: real-time streaming
+          __init__.py
+        chat/                    feature: hosts the agent
+          __init__.py
+          session_repository.py  persistent SessionStore implementation
+          approval.py            out-of-band approval implementation
+          views.py
+        entrypoints/             configuration only; no logic; no coverage
+          __init__.py
+          asgi.py
+          worker.py
+          cli.py
+      tests/
+        core/  ingestion/  audio/  chat/
+```
+
+## The pyproject files
+
+### Root — `pyproject.toml`
+
+Builds nothing. It exists to declare the workspace and hold the shared dev
+toolchain.
+
+```toml
+[project]
+name = "fastpaip-workspace"
+version = "0"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "anyio>=4.6",
+    "coverage>=7.6",
+    "fastapi[standard]",
+]
+
+[tool.coverage.run]
+branch = true
+parallel = true
+source = ["fastpaip"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+omit = ["**/entrypoints/*"]
+```
+
+Two things in there are deliberate and worth not undoing.
+
+`source = ["fastpaip"]` excludes `bacteria`. The agent's test suite is
+[architectural fitness functions by design](../packages/bacteria/docs/adr/0013-test-load-bearing-invariants-only.md) —
+uneven coverage is the stated intent, and pointing a coverage report at it will
+produce a number that invites someone to "fix" it by writing the tests that ADR
+exists to decline. The application gets measured; the agent does not.
+
+`omit = ["**/entrypoints/*"]` replaces the current `omit = ["src/**/asgi.py"]`,
+matching your rule that entrypoints hold configuration only. If an entrypoint
+ever contains something worth testing, that is the signal it contains logic that
+belongs elsewhere.
+
+### `packages/bacteria/pyproject.toml`
+
+Unchanged from the agent's current file, except that `pytest-asyncio` joins the
+dev extra once [ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md)
+lands.
+
+```toml
+[project]
+name = "bacteria"
+version = "0.1.0"
+description = "A small AI agent built as infrastructure: layered ownership boundaries, kept minimal enough to read."
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "google-genai>=1.0.0",
+    "pydantic>=2.9.0",
+    "python-dotenv>=1.0.0",
+    "stamina>=24.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3.0", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+bacteria = "bacteria.interfaces.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+```
+
+`requires-python` stays `>=3.11`. The application pins tighter; a lower bound on
+the library costs nothing and keeps it vendorable elsewhere.
+
+### `packages/fastpaip/pyproject.toml`
+
+```toml
+[project]
+name = "fastpaip"
+version = "0"
+requires-python = ">=3.13"
+dependencies = [
+    "bacteria",
+    "fastapi",
+    "granian",
+    "sqlmodel",
+    "alembic",
+    "pydantic-settings",
+    "stamina",
+]
+
+[tool.uv.sources]
+bacteria = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+```
+
+The current file's `name = "hello-svc"` and its missing `sqlmodel` are both
+fixed here. `requires-python` moves from `==3.13.*` to `>=3.13` — the hard pin
+excludes 3.14, which is what the agent's virtualenv is currently running.
+
+## What moves where
+
+| Today | Target | Note |
+|---|---|---|
+| `src/agent/` | *delete* | Broken copy — the directory was renamed but every internal import still says `from bacteria...`. Replaced by the real package. |
+| `tests/agent/` | *delete* | Ships with the package. |
+| `src/protocols.py` | `core/protocols.py` | Trimmed — see below. |
+| `src/handlers.py` | `core/handlers.py` | Two fixes — see below. |
+| `src/adapters.py` | `core/adapters.py` | As-is. |
+| `src/fastpaip/models.py` | per feature | `User` is not a feature; it belongs wherever accounts land. Drop the unused `Session`, `create_engine`, `select` imports. |
+| `src/fastpaip/repositories.py` | per feature | **Currently has no imports at all** — it references `Session`, `User`, `UserCreate`, `UserId`, `Optional` from nowhere and raises `NameError` on import. Fix during the move. |
+| `src/fastpaip/services.py` | per feature | Empty today. |
+| `src/fastpaip/dependencies.py` | `core/dependencies.py` | Empty today. |
+| `src/fastpaip/views.py` | `<feature>/views.py` | The `/` hello route becomes a health check. |
+| `src/fastpaip/entrypoints/asgi.py` | `entrypoints/asgi.py` | Add the missing `__init__.py`. |
+| `tests/test_e2e.py` | `packages/fastpaip/tests/` | |
+| `Justfile` | root, edited | Three stale `hello_svc` references break `just serve` and `just cov`. |
+| `README.md` | rewrite | Currently a link to the uv video the template came from. |
+
+### Changes to the moved framework files
+
+**`core/protocols.py`** — drop `Repository` and `CRUDRepository`. The first is
+an empty marker interface, which structural typing makes unnecessary. The second
+recombines the four segregated protocols into the god-interface that segregating
+them was meant to avoid; compose the two or three a given repository actually
+needs at its definition instead.
+
+**`core/handlers.py`** — two fixes. `_next_handler` is declared as a class
+attribute and works only because `set_next` shadows it on the instance; move it
+into `__init__`. And replace the two `print()` calls with structured logging — a
+skipped step should leave a record of *why* it was skipped, which
+`can_handle` returning a bare `False` currently discards.
+
+## What changes in bacteria
+
+Three things, in dependency order.
+
+**1. Async at the I/O boundaries.** Already decided and recorded as
+[ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md).
+This has to land first — every item below is written against the async shape.
+
+**2. Persistence arrives by dependency inversion.** `session/store.py` names its
+own gap: persistence is "a second implementation of this class, not a change to
+any caller." The application supplies that implementation
+(`chat/session_repository.py`, SQLModel-backed), and bacteria declares the
+protocol it must satisfy.
+
+The direction matters. Bacteria declares `SessionRepository`; the application
+implements it. Bacteria never imports SQLModel, and the agent stays vendorable
+into a project that uses something else entirely.
+
+That protocol is **not** `CRUDRepository`. `SessionStore` exposes
+`create_session` / `get_state` / `commit` / `remember` / `forget` — deliberately
+no `update`, because an update method is a second write path and
+[ADR 0004](../packages/bacteria/docs/adr/0004-single-commit-path.md) exists to
+guarantee there is exactly one. The generic CRUD protocols serve the
+application's own entities, where CRUD genuinely is the shape.
+
+**3. Approval becomes an awaitable decision, not a prompt.**
+`tools/approval.py` reads stdin. That cannot exist in a request handler or a
+queue worker. It becomes an async protocol with two implementations: the
+existing interactive one for the CLI, and a persisted pending-approval record
+for the service, which the turn awaits and a later HTTP call resolves.
+
+That second implementation needs the agent to be able to pause and resume a
+turn — which is exactly the *session routing / resume* gap `session/store.py`
+already documents as deferred. Ingestion and audio will force it; it is worth
+knowing now that approval is what drags it in, and that it needs its own ADR.
+
+### What does *not* change: the two composition roots
+
+Correcting something I said earlier — `bacteria.interfaces` and
+`fastpaip.entrypoints` do not actually collide. They compose different
+processes. The agent keeps `interfaces/cli.py` and stays independently runnable
+via `uv run bacteria`, which is worth preserving: it is the reference
+implementation of how the layers wire together, and the thing you can run to
+check the agent still works without standing up a web service.
+
+The rule that keeps them from colliding is one line: **the application never
+imports `bacteria.interfaces`.** It composes `Runtime`, a model client, a
+registry, and a store itself, in `entrypoints/`. Provider selection exists in
+both places because both are entry points into the same library — that is what
+an entry point is for.
+
+## Order of work
+
+1. `git init` and commit the current state.
+2. Async refactor in bacteria, standalone, tests green, one live Gemini
+   tool-calling turn verified. ([ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md);
+   mocks passed and live calls failed on `thought_signature` once already.)
+3. Create the workspace skeleton; move bacteria in; confirm `uv run bacteria`
+   and both test suites still pass. No application code yet.
+4. Move and repair the framework files into `core/`. Add `settings.py` — every
+   `os.environ` read in the tree collapses into it.
+5. First feature end to end, `chat/`, using the existing hello-world test as the
+   shape. This is where the `SessionRepository` implementation lands and where
+   alembic gets introduced.
+6. Ingestion, then audio. Audio is the one that will re-open the model protocol
+   for `send_stream`; leave it last for that reason.

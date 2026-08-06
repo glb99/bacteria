@@ -74,7 +74,16 @@ class GeminiClient:
         id_to_name = self._collect_tool_names(messages)
         contents = [self._to_content(message, id_to_name) for message in messages]
 
-        config_kwargs: dict[str, Any] = {"max_output_tokens": max_tokens}
+        config_kwargs: dict[str, Any] = {
+            "max_output_tokens": max_tokens,
+            # Nothing in this project's scope needs Gemini's reasoning mode,
+            # so it's off for cost/latency. Does NOT avoid thought_signature —
+            # that's required on function_call parts unconditionally (verified
+            # live), independent of whether thinking itself is enabled. See
+            # the tool_use/provider_data handling in _to_content and
+            # _to_model_response below for how that requirement is actually met.
+            "thinking_config": types.ThinkingConfig(thinking_budget=0),
+        }
         if system:
             config_kwargs["system_instruction"] = system
         if tools:
@@ -129,7 +138,11 @@ class GeminiClient:
             if kind == "text":
                 parts.append(types.Part.from_text(text=block["text"]))
             elif kind == "tool_use":
-                parts.append(types.Part.from_function_call(name=block["name"], args=block["input"]))
+                part = types.Part.from_function_call(name=block["name"], args=block["input"])
+                signature = (block.get("provider_data") or {}).get("thought_signature")
+                if signature is not None:
+                    part.thought_signature = signature
+                parts.append(part)
             elif kind == "tool_result":
                 is_tool_result = True
                 name = id_to_name.get(block["tool_use_id"], "unknown_tool")
@@ -158,10 +171,24 @@ class GeminiClient:
 
     @staticmethod
     def _to_model_response(response: Any) -> ModelResponse:
-        tool_calls: list[dict[str, Any]] = [
-            {"id": f"call_{i}", "name": call.name, "input": dict(call.args or {})}
-            for i, call in enumerate(response.function_calls or [])
-        ]
+        # response.function_calls is a convenience view that drops
+        # thought_signature — read the real parts to keep it, or a
+        # multi-turn tool loop 400s on the follow-up call (thinking models
+        # require it echoed back verbatim; see docs/SYSTEM_DESIGN.md).
+        parts = response.candidates[0].content.parts if response.candidates else []
+        tool_calls: list[dict[str, Any]] = []
+        for i, part in enumerate(parts):
+            call = part.function_call
+            if call is None:
+                continue
+            tool_call: dict[str, Any] = {
+                "id": call.id or f"call_{i}",
+                "name": call.name,
+                "input": dict(call.args or {}),
+            }
+            if part.thought_signature:
+                tool_call["provider_data"] = {"thought_signature": part.thought_signature}
+            tool_calls.append(tool_call)
 
         stop_reason = None
         if response.candidates:

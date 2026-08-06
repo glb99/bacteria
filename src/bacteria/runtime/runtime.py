@@ -178,7 +178,17 @@ class Runtime:
         if response.text:
             blocks.append({"type": "text", "text": response.text})
         blocks.extend(
-            {"type": "tool_use", "id": call["id"], "name": call["name"], "input": call["input"]}
+            {
+                "type": "tool_use",
+                "id": call["id"],
+                "name": call["name"],
+                "input": call["input"],
+                # Opaque, provider-specific continuation data (e.g. Gemini's
+                # thought_signature) that a client attached to its own
+                # proposal — passed through unchanged, never inspected here.
+                # See docs/SYSTEM_DESIGN.md, GeminiClient section.
+                **({"provider_data": call["provider_data"]} if "provider_data" in call else {}),
+            }
             for call in response.tool_calls
         )
         return blocks

@@ -20,9 +20,17 @@ def make_client(**overrides) -> GeminiClient:
 
 
 def fake_response(text="hello", function_calls=None, finish_reason="STOP"):
-    calls = [SimpleNamespace(name=c["name"], args=c["input"]) for c in (function_calls or [])]
-    candidate = SimpleNamespace(finish_reason=finish_reason)
-    return SimpleNamespace(text=text, function_calls=calls, candidates=[candidate])
+    """function_calls entries may include an optional "signature" key to
+    simulate a thinking model's thought_signature on that part."""
+    parts = [
+        SimpleNamespace(
+            function_call=SimpleNamespace(id=c.get("id"), name=c["name"], args=c["input"]),
+            thought_signature=c.get("signature"),
+        )
+        for c in (function_calls or [])
+    ]
+    candidate = SimpleNamespace(finish_reason=finish_reason, content=SimpleNamespace(parts=parts))
+    return SimpleNamespace(text=text, candidates=[candidate])
 
 
 def make_api_error(cls, code, message="boom"):
@@ -168,6 +176,45 @@ def test_tool_use_and_tool_result_blocks_translate_to_function_call_and_response
     assert contents[2].role == "tool"
     assert contents[2].parts[0].function_response.name == "get_time"
     assert contents[2].parts[0].function_response.response == {"result": "10:00"}
+
+
+def test_thought_signature_is_captured_and_echoed_back_on_the_next_turn():
+    """Found against the real API, not in mocks: thinking models attach a
+    thought_signature to function_call parts that must be echoed back
+    verbatim on the follow-up turn, or Gemini rejects the request outright
+    ('Function call is missing a thought_signature'). response.function_calls
+    (the convenience property) drops it — _to_model_response must read the
+    real parts instead, and _to_content must re-attach it when the block
+    round-trips back through Runtime's follow-up message."""
+    client = make_client()
+    client._client.models.generate_content.return_value = fake_response(
+        text=None,
+        function_calls=[{"id": "call_0", "name": "get_time", "input": {}, "signature": b"opaque-sig"}],
+    )
+
+    result = client.send(messages=[{"role": "user", "content": "what time is it?"}])
+    assert result.tool_calls == [
+        {"id": "call_0", "name": "get_time", "input": {}, "provider_data": {"thought_signature": b"opaque-sig"}}
+    ]
+
+    # Simulate Runtime re-sending that same tool_use block on the follow-up call
+    follow_up = {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "call_0",
+                "name": "get_time",
+                "input": {},
+                "provider_data": {"thought_signature": b"opaque-sig"},
+            }
+        ],
+    }
+    client._client.models.generate_content.return_value = fake_response(text="done")
+    client.send(messages=[follow_up])
+
+    contents = client._client.models.generate_content.call_args.kwargs["contents"]
+    assert contents[0].parts[0].thought_signature == b"opaque-sig"
 
 
 def test_missing_credentials_at_construction_is_classified_not_raw(monkeypatch):

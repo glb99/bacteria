@@ -22,16 +22,16 @@ def step(name: str, applies=lambda _doc: True) -> StepHandler:
     return StepHandler(FunctionalProcessor(can_handle=applies, process=process))
 
 
-def test_steps_run_in_the_order_they_were_linked():
+async def test_steps_run_in_the_order_they_were_linked():
     first, second, third = step("a"), step("b"), step("c")
     first.set_next(second).set_next(third)
 
-    result = first.handle(Doc())
+    result = await first.handle(Doc())
 
     assert result.seen == ["a", "b", "c"]
 
 
-def test_set_next_returns_the_new_link_so_chains_read_forwards():
+async def test_set_next_returns_the_new_link_so_chains_read_forwards():
     """`a.set_next(b).set_next(c)` must build a→b→c, not a→c.
 
     Returning `self` instead would make the same expression silently build the
@@ -44,7 +44,7 @@ def test_set_next_returns_the_new_link_so_chains_read_forwards():
     assert second.set_next(third) is third
 
 
-def test_a_declining_step_is_skipped_but_the_chain_continues():
+async def test_a_declining_step_is_skipped_but_the_chain_continues():
     """can_handle False must skip that step only, not end the pipeline.
 
     Ending the chain would make one step's decision silently discard every step
@@ -53,12 +53,12 @@ def test_a_declining_step_is_skipped_but_the_chain_continues():
     chain = step("a")
     chain.set_next(step("b", applies=lambda _doc: False)).set_next(step("c"))
 
-    result = chain.handle(Doc())
+    result = await chain.handle(Doc())
 
     assert result.seen == ["a", "c"]
 
 
-def test_handlers_do_not_share_a_successor():
+async def test_handlers_do_not_share_a_successor():
     """Each handler's link is its own.
 
     `_next_handler` was declared as a class attribute. It appeared to work,
@@ -74,13 +74,50 @@ def test_handlers_do_not_share_a_successor():
     assert unlinked._next_handler is None
 
 
-def test_a_single_handler_returns_its_data_unchanged_through_the_tail():
+async def test_a_single_handler_returns_its_data_unchanged_through_the_tail():
     """The last link returns the data rather than None.
 
     A chain's tail is the easiest place to drop the payload, and a caller that
     receives None gets a failure far from the cause.
     """
-    result = step("only").handle(Doc(text="payload"))
+    result = await step("only").handle(Doc(text="payload"))
 
     assert result.text == "payload"
     assert result.seen == ["only"]
+
+
+async def test_a_coroutine_step_is_awaited_not_returned_unrun():
+    """An async step must run, not be handed back as a coroutine.
+
+    A coroutine object is truthy and passes silently down the chain, so the
+    pipeline reports success while that step never executed and every later step
+    operated on the wrong data.
+    """
+    async def process(doc: Doc) -> Doc:
+        doc.seen.append("async")
+        return doc
+
+    handler = StepHandler(FunctionalProcessor(can_handle=lambda _doc: True, process=process))
+
+    result = await handler.handle(Doc())
+
+    assert result.seen == ["async"]
+
+
+async def test_a_coroutine_can_handle_is_awaited():
+    """A gate that is a coroutine must be resolved before it is believed.
+
+    An un-awaited coroutine is truthy, so a declining async gate would run every
+    step it meant to skip.
+    """
+    async def declines(_doc: Doc) -> bool:
+        return False
+
+    ran = []
+    handler = StepHandler(
+        FunctionalProcessor(can_handle=declines, process=lambda doc: ran.append(1) or doc)
+    )
+
+    await handler.handle(Doc())
+
+    assert ran == []

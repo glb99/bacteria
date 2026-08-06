@@ -88,6 +88,11 @@ class Processable(Protocol[DataType]):
     apply?") from the work ("do it") is what lets a pipeline be assembled from
     steps that know nothing about which other steps exist.
 
+    Either method may be written synchronously or as a coroutine. The handler
+    awaits a coroutine and runs a plain function in a worker thread, so a pure
+    transformation stays a plain function and a step that touches a database
+    does not have to pretend it does not.
+
     Known limitation, worth understanding before depending on it: ``can_handle``
     returns a bare ``bool``, so a step that declines cannot say *why*. The
     handler logs that a skip happened and which processor skipped, which is

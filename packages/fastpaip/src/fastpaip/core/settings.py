@@ -46,7 +46,9 @@ class Settings(BaseSettings):
         database_url: Defaults to a local SQLite file so a fresh checkout runs
             without configuration. That default is a convenience for
             development and wrong everywhere else — it is deliberately obvious
-            in logs rather than clever.
+            in logs rather than clever. The driver must be an async one
+            (``+aiosqlite``, ``+asyncpg``); a synchronous URL fails at engine
+            creation rather than at first query, which is where you want it.
         log_level: Standard logging level name.
         model_provider: Which model backs the agent. Named here rather than read
             from the agent's own ``MODEL_PROVIDER`` because this application
@@ -64,7 +66,7 @@ class Settings(BaseSettings):
         extra="forbid",
     )
 
-    database_url: str = "sqlite:///./fastpaip.db"
+    database_url: str = "sqlite+aiosqlite:///./fastpaip.db"
     log_level: str = "INFO"
     model_provider: str = "anthropic"
 

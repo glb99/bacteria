@@ -1,36 +1,55 @@
 """The database engine and the unit of work built on it.
 
+Async throughout, because a query is I/O and this application's rule is that I/O
+is awaited. That rule was followed at the signature level and broken underneath
+for a while — the repositories were ``async def`` around synchronous SQLModel
+calls, which is async's shape without async's benefit.
+
 One engine per process, created lazily from :mod:`fastpaip.core.settings` and
 cached, because a second engine means a second connection pool competing for the
 same database.
 
-Not built:
-    Migrations. ``create_all`` creates tables that do not exist and does nothing
-    to ones that do — so it is correct exactly once per database and silently
-    insufficient every time a column changes afterwards. Alembic is what belongs
-    here, and until it exists this is a development convenience that must not be
-    what production relies on.
+A note on what "async" buys per backend, since it is not the same everywhere.
+SQLite has no async C API, so ``aiosqlite`` runs the same blocking calls on a
+worker thread and awaits the result — the blocking is moved off the event loop
+rather than eliminated. ``asyncpg`` is genuinely non-blocking, a real async
+socket protocol with no thread involved. The development default is SQLite,
+where the win is modest; the production target is Postgres, where it is the
+difference between serializing every request behind a network round trip and
+not.
 
-    An async engine. Sessions here are synchronous, so every query blocks its
-    thread. See ``SqlSessionRepository`` for what that costs and when it starts
-    mattering.
+Not built:
+    Migrations. ``create_tables`` creates tables that do not exist and does
+    nothing to ones that do — so it is correct exactly once per database and
+    silently insufficient every time a column changes afterwards. Alembic is
+    what belongs here, and until it exists this is a development convenience
+    that must not be what production relies on.
 """
 
 from collections.abc import AsyncIterator
 from functools import lru_cache
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.core.settings import get_settings
 
 
 @lru_cache
-def get_engine():
-    """Return the process-wide engine, created once."""
-    return create_engine(get_settings().database_url)
+def get_engine() -> AsyncEngine:
+    """Return the process-wide engine, created once.
+
+    Cached, and therefore bound to whichever event loop first touches it. That
+    is fine for a served process with one loop and is the reason table creation
+    happens in the application's lifespan rather than at import: an engine
+    created in a throwaway loop at import time holds connections to a loop that
+    no longer exists by the time a request arrives.
+    """
+    return create_async_engine(get_settings().database_url)
 
 
-def create_tables() -> None:
+async def create_tables() -> None:
     """Create any table that does not exist yet. See the migrations gap above."""
     # Imported for the side effect of registering tables on SQLModel.metadata.
     # Without this, create_all sees an empty registry and silently creates
@@ -38,28 +57,18 @@ def create_tables() -> None:
     from fastpaip.chat import models as _chat_models  # noqa: F401
     from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
 
-    SQLModel.metadata.create_all(get_engine())
+    async with get_engine().begin() as connection:
+        # create_all is a synchronous SQLAlchemy API; run_sync drives it on the
+        # async connection rather than opening a second, synchronous one.
+        await connection.run_sync(SQLModel.metadata.create_all)
 
 
-async def session_scope() -> AsyncIterator[Session]:
+async def session_scope() -> AsyncIterator[AsyncSession]:
     """Yield a session for one request, and close it afterwards.
 
     Deliberately does not commit. Committing here would make every request a
     single implicit transaction regardless of what it did, and hide from each
     caller the question of when its work is durable.
-
-    ``async`` despite everything inside being synchronous, and that is the whole
-    point. FastAPI runs a *synchronous* dependency in a worker thread, so the
-    session would be opened on one thread and then used by an ``async`` endpoint
-    on the event loop thread. A SQLAlchemy ``Session`` is not thread-safe. SQLite
-    refuses outright — "SQLite objects created in a thread can only be used in
-    that same thread" — and other drivers do something worse, which is to
-    proceed. Declaring this ``async`` keeps creation and use on one thread.
-
-    The cost is the one already noted above: the queries block the event loop.
-    That trade is deliberate — blocking is a latency problem with a known fix,
-    while sharing a session across threads is a correctness problem that shows
-    up as corruption under load.
     """
-    with Session(get_engine()) as session:
+    async with AsyncSession(get_engine()) as session:
         yield session

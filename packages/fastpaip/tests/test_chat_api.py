@@ -9,12 +9,14 @@ mocked the repository would be asserting its own wiring.
 import pytest
 from bacteria.model.protocol import ModelResponse
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.chat import service
 from fastpaip.core.db import session_scope
-from fastpaip.views import create_app
+from fastpaip.views import create_app, lifespan_running
 
 
 class FakeModelClient:
@@ -38,21 +40,26 @@ def _client(monkeypatch):
     # inside its connection, and the default pool hands a different connection
     # -- so a different, empty database -- to each thread. TestClient runs the
     # app on its own thread, so without this the tables simply are not there.
-    engine = create_engine(
-        "sqlite://",
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    SQLModel.metadata.create_all(engine)
 
-    def _test_session():
-        with Session(engine) as session:
+    async def _create_tables():
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+
+    async def _test_session():
+        async with AsyncSession(engine) as session:
             yield session
 
     monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
     monkeypatch.setenv("FASTPAIP_MODEL_PROVIDER", "fake")
 
-    app = create_app()
+    # Tables are built in the app's own lifespan, so they are created on the
+    # loop TestClient runs -- the same one the requests will use.
+    app = create_app(lifespan=lifespan_running(_create_tables))
     app.dependency_overrides[session_scope] = _test_session
     with TestClient(app) as client:
         yield client

@@ -3,9 +3,13 @@
 One method, called once per batch, inside a single transaction: a batch is
 either recorded whole or not at all. Committing per record would leave a
 half-ingested batch behind on failure, with no way to tell which half.
+
+``persist`` is a coroutine, which is only possible because the handler chain
+awaits its steps. While the chain was synchronous this method had to be too, and
+ingestion could not be made non-blocking by any change confined to this file.
 """
 
-from sqlmodel import Session as DbSession
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.ingestion.models import IngestedRecord, IngestionBatch, RejectedRecord
 from fastpaip.ingestion.pipeline import Batch
@@ -18,10 +22,10 @@ class IngestionRepository:
         session: Injected, so transaction scope belongs to the caller.
     """
 
-    def __init__(self, session: DbSession) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._db = session
 
-    def persist(self, batch: Batch) -> Batch:
+    async def persist(self, batch: Batch) -> Batch:
         """Store the whole batch and stamp it with its id.
 
         Rejections are written too. They are the only record of what a caller
@@ -38,21 +42,27 @@ class IngestionRepository:
             rejected_count=len(batch.rejected),
         )
         self._db.add(row)
-        self._db.flush()  # assigns row.id without ending the transaction
+        await self._db.flush()  # assigns row.id without ending the transaction
+
+        # Read the id now, not after the commit below. A session expires its
+        # objects on commit, so a later `row.id` would trigger a reload — which
+        # is IO, attempted outside an await, and fails as MissingGreenlet rather
+        # than as anything that names the real problem.
+        batch_id = row.id
 
         for record in batch.accepted:
             self._db.add(
                 IngestedRecord(
-                    batch_id=row.id, external_id=record["external_id"], payload=record
+                    batch_id=batch_id, external_id=record["external_id"], payload=record
                 )
             )
         for rejection in batch.rejected:
             self._db.add(
                 RejectedRecord(
-                    batch_id=row.id, reason=rejection.reason, payload=rejection.payload
+                    batch_id=batch_id, reason=rejection.reason, payload=rejection.payload
                 )
             )
 
-        self._db.commit()
-        batch.batch_id = row.id
+        await self._db.commit()
+        batch.batch_id = batch_id
         return batch

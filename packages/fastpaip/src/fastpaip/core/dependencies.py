@@ -8,13 +8,18 @@ where they can be tested without a request.
 from typing import Annotated
 
 from fastapi import Depends
-from sqlmodel import Session
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.core.db import session_scope
 from fastpaip.core.settings import Settings, get_settings
 
-DbSession = Annotated[Session, Depends(session_scope)]
-"""A database session scoped to one request."""
+DbSession = Annotated[AsyncSession, Depends(session_scope)]
+"""A database session scoped to one request.
+
+Named ``DbSession`` rather than ``Session`` because "session" already means two
+other things here — the identity of a conversation, and the row storing it. The
+alias is what keeps ``chat`` readable.
+"""
 
 AppSettings = Annotated[Settings, Depends(get_settings)]
 """The process-wide settings, as a dependency so a test can override them."""

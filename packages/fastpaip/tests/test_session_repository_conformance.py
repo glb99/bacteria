@@ -16,21 +16,30 @@ protocol exists to prevent.
 import pytest
 from bacteria.session.protocol import SessionRepository
 from bacteria.session.store import SessionStore, TranscriptItem, UnknownSessionError
-from sqlmodel import Session as DbSession
-from sqlmodel import SQLModel, create_engine
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.chat.repository import SqlSessionRepository
 
 
 @pytest.fixture(params=["in_memory", "sql"], name="repo")
-def _repo(request):
+async def _repo(request):
     if request.param == "in_memory":
         yield SessionStore()
         return
 
-    engine = create_engine("sqlite://")
-    SQLModel.metadata.create_all(engine)
-    with DbSession(engine) as db:
+    # StaticPool keeps every checkout pointed at the same in-memory database;
+    # the default pool would hand out a fresh, empty one.
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(SQLModel.metadata.create_all)
+    async with AsyncSession(engine) as db:
         yield SqlSessionRepository(db)
 
 

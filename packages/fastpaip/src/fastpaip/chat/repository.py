@@ -43,8 +43,8 @@ from bacteria.session.store import (
     UnknownSessionError,
 )
 from sqlalchemy import func
-from sqlmodel import Session as DbSession
 from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.chat.models import ChatMemoryEntry, ChatSession, ChatTranscriptItem
 
@@ -64,13 +64,11 @@ class SqlSessionRepository:
 
     Satisfies :class:`bacteria.session.protocol.SessionRepository` structurally.
 
-    The methods are ``async`` because the protocol is, while the SQLModel calls
-    inside them are synchronous — so each one blocks its thread for the duration
-    of a query. That is a real limitation and not a hidden one: it is fine
-    against SQLite and under light load, and it is the first thing to change if
-    this ever sits in front of a busy Postgres. Doing it properly means an async
-    engine and an async session, which is a larger change than this feature
-    needed to prove the seam works.
+    Genuinely async, not merely async-shaped: the session is an
+    :class:`~sqlmodel.ext.asyncio.session.AsyncSession` and every query is
+    awaited, so a request waiting on the database does not hold the event loop.
+    An earlier version had these methods ``async`` around synchronous calls,
+    which satisfied the protocol and delivered none of the benefit.
 
     Args:
         session: An open database session. Injected rather than created here,
@@ -78,14 +76,14 @@ class SqlSessionRepository:
             work is — for a request, that is the dependency that opened it.
     """
 
-    def __init__(self, session: DbSession) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self._db = session
 
     async def create_session(self, user_id: str) -> Session:
         row = ChatSession(session_id=str(uuid.uuid4()), user_id=user_id)
         self._db.add(row)
-        self._db.commit()
-        self._db.refresh(row)
+        await self._db.commit()
+        await self._db.refresh(row)
         return Session(
             session_id=row.session_id,
             user_id=row.user_id,
@@ -93,16 +91,16 @@ class SqlSessionRepository:
         )
 
     async def get_state(self, session_id: str) -> SessionState:
-        row = self._require(session_id)
+        row = await self._require(session_id)
 
-        items = self._db.exec(
+        items = (await self._db.exec(
             select(ChatTranscriptItem)
             .where(ChatTranscriptItem.session_id == session_id)
             .order_by(ChatTranscriptItem.seq)
-        ).all()
-        memories = self._db.exec(
+        )).all()
+        memories = (await self._db.exec(
             select(ChatMemoryEntry).where(ChatMemoryEntry.session_id == session_id)
-        ).all()
+        )).all()
 
         # Plain dataclasses, never the ORM rows themselves. See the module
         # docstring: this is the detached-read guarantee, not a formality.
@@ -137,16 +135,15 @@ class SqlSessionRepository:
         new_transcript_items: Optional[list[TranscriptItem]] = None,
         working_state_updates: Optional[dict[str, Any]] = None,
     ) -> SessionState:
-        row = self._require(session_id)
+        row = await self._require(session_id)
 
         next_seq = (
-            self._db.exec(
+            await self._db.exec(
                 select(func.coalesce(func.max(ChatTranscriptItem.seq), -1)).where(
                     ChatTranscriptItem.session_id == session_id
                 )
-            ).one()
-            + 1
-        )
+            )
+        ).one() + 1
         for offset, item in enumerate(new_transcript_items or []):
             self._db.add(
                 ChatTranscriptItem(
@@ -165,15 +162,15 @@ class SqlSessionRepository:
             row.working_state = {**row.working_state, **working_state_updates}
             self._db.add(row)
 
-        self._db.commit()
+        await self._db.commit()
         return await self.get_state(session_id)
 
     async def remember(
         self, session_id: str, key: str, value: Any, reason: str
     ) -> SessionState:
-        self._require(session_id)
+        await self._require(session_id)
 
-        existing = self._db.get(ChatMemoryEntry, (session_id, key))
+        existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:
             # Overwrite by key: updating a memory is a write, not an append.
             existing.value = {"value": value}
@@ -186,20 +183,20 @@ class SqlSessionRepository:
                 )
             )
 
-        self._db.commit()
+        await self._db.commit()
         return await self.get_state(session_id)
 
     async def forget(self, session_id: str, key: str) -> SessionState:
-        self._require(session_id)
+        await self._require(session_id)
 
-        existing = self._db.get(ChatMemoryEntry, (session_id, key))
+        existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:
-            self._db.delete(existing)
-            self._db.commit()
+            await self._db.delete(existing)
+            await self._db.commit()
         # Absent key is a no-op: the caller wanted it gone, and it is.
         return await self.get_state(session_id)
 
-    def _require(self, session_id: str) -> ChatSession:
+    async def _require(self, session_id: str) -> ChatSession:
         """Load the session row or raise the agent's own error type.
 
         Raising ``UnknownSessionError`` rather than returning ``None`` keeps this
@@ -207,7 +204,7 @@ class SqlSessionRepository:
         callers handle it — a runtime that caught one and not the other would
         behave differently depending on which store it was given.
         """
-        row = self._db.get(ChatSession, session_id)
+        row = await self._db.get(ChatSession, session_id)
         if row is None:
             raise UnknownSessionError(session_id)
         return row

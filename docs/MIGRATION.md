@@ -298,9 +298,9 @@ an entry point is for.
 
    Two things deferred deliberately, both recorded where they would be filled:
    tools are not offered over HTTP, because approval has nobody to ask until
-   runs can pause and resume; and the SQL repository's methods are async over
-   synchronous queries, which blocks the loop and is the first thing to change
-   under real load.
+   runs can pause and resume; and the SQL repository was async over synchronous
+   queries, which blocked the loop. *(That second one is now fixed — see step
+   7.)*
 6. ~~Ingestion.~~ **Done**, as generic record ingestion: a validate →
    normalize → persist chain built from `core.handlers`, which is the first
    real use of that machinery. Rejections are stored, not counted.
@@ -312,6 +312,22 @@ an entry point is for.
    someone to choose between "update the existing row" and "reject the new
    one".
 
-7. **Next.** Audio. This is the one that re-opens the model protocol for
+7. ~~Make the persistence layer genuinely async.~~ **Done.** The repositories
+   were `async def` around synchronous SQLModel calls — async's shape without
+   async's benefit. Now an async engine, `AsyncSession`, and awaited queries
+   throughout. The handler chain went async too, since a synchronous chain
+   meant ingestion could never be non-blocking by any change confined to its
+   repository; steps may still be written either way, and a plain function is
+   run in a worker thread.
+
+   Measured rather than assumed: a heartbeat ticking on the event loop during
+   200 sequential commits saw a worst-case gap of 6.5ms, so the loop stays
+   free.
+
+   Note what this buys per backend. SQLite has no async C API, so `aiosqlite`
+   moves the blocking to a worker thread rather than removing it. `asyncpg` is
+   genuinely non-blocking, and that is the production target.
+
+8. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

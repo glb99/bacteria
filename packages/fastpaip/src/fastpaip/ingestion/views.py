@@ -11,7 +11,7 @@ from fastpaip.ingestion.service import ingest
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
 MAX_RECORDS_PER_BATCH = 500
-"""Bounded because ingestion runs inline on the event loop.
+"""Bounded because ingestion runs inline, in the request that submits it.
 
 Not a business rule — a consequence of there being no worker yet. A caller with
 more than this to send has to page, and when background execution exists this
@@ -49,7 +49,7 @@ async def submit_batch(body: Submission, db: DbSession) -> BatchResult:
     it. That batch is the one whose stored rejections matter most, so it is
     emphatically not the case that nothing is written.
     """
-    batch = ingest(session=db, source=body.source, records=body.records)
+    batch = await ingest(session=db, source=body.source, records=body.records)
 
     return BatchResult(
         batch_id=batch.batch_id,

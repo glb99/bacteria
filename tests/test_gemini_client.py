@@ -8,7 +8,7 @@ that conversion is where a drop-in provider actually costs something.
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from google.genai import errors as genai_errors
@@ -23,6 +23,10 @@ from bacteria.session.store import SessionStore
 def make_client(**overrides) -> GeminiClient:
     client = GeminiClient(api_key="test-key", max_retries=2, backoff_seconds=0, **overrides)
     client._client = MagicMock()
+    # The client calls the SDK's async surface (`.aio`), so that is what the
+    # tests must drive. Mocking `.models` instead would leave the real `.aio`
+    # in place and attempt a network call.
+    client._client.aio.models.generate_content = AsyncMock()
     return client
 
 
@@ -48,120 +52,120 @@ def make_api_error(cls, code, message="boom"):
     return cls(code=code, response_json={"error": {"message": message}})
 
 
-def test_serving_failure_is_retried_with_identical_request_then_succeeds():
+async def test_serving_failure_is_retried_with_identical_request_then_succeeds():
     client = make_client()
-    client._client.models.generate_content.side_effect = [
+    client._client.aio.models.generate_content.side_effect = [
         make_api_error(genai_errors.ServerError, 500),
         fake_response(text="ok"),
     ]
 
-    result = client.send(messages=[{"role": "user", "content": "hi"}])
+    result = await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert result.text == "ok"
-    assert client._client.models.generate_content.call_count == 2
-    first_call, second_call = client._client.models.generate_content.call_args_list
+    assert client._client.aio.models.generate_content.call_count == 2
+    first_call, second_call = client._client.aio.models.generate_content.call_args_list
     assert first_call == second_call  # identical request both times
 
 
-def test_serving_failure_exhausts_retries_and_raises():
+async def test_serving_failure_exhausts_retries_and_raises():
     client = make_client()
-    client._client.models.generate_content.side_effect = make_api_error(
+    client._client.aio.models.generate_content.side_effect = make_api_error(
         genai_errors.ServerError, 500
     )
 
     with pytest.raises(ServingError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
-    assert client._client.models.generate_content.call_count == 1 + client.max_retries
+    assert client._client.aio.models.generate_content.call_count == 1 + client.max_retries
 
 
-def test_rate_limit_is_a_retryable_serving_error_despite_being_a_client_error():
+async def test_rate_limit_is_a_retryable_serving_error_despite_being_a_client_error():
     """429 must retry, even though the SDK files it under ClientError.
 
     The SDK splits by HTTP range, which does not line up with retryability.
     Classified by range alone, a rate limit would fail on the first attempt.
     """
     client = make_client()
-    client._client.models.generate_content.side_effect = [
+    client._client.aio.models.generate_content.side_effect = [
         make_api_error(genai_errors.ClientError, 429),
         fake_response(text="ok"),
     ]
 
-    result = client.send(messages=[{"role": "user", "content": "hi"}])
+    result = await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert result.text == "ok"
-    assert client._client.models.generate_content.call_count == 2
+    assert client._client.aio.models.generate_content.call_count == 2
 
 
-def test_credentials_failure_is_not_retried():
+async def test_credentials_failure_is_not_retried():
     client = make_client()
-    client._client.models.generate_content.side_effect = make_api_error(
+    client._client.aio.models.generate_content.side_effect = make_api_error(
         genai_errors.ClientError, 401, message="invalid api key"
     )
 
     with pytest.raises(CredentialsError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
-    assert client._client.models.generate_content.call_count == 1
+    assert client._client.aio.models.generate_content.call_count == 1
 
 
-def test_asset_failure_is_not_retried():
+async def test_asset_failure_is_not_retried():
     client = make_client()
-    client._client.models.generate_content.side_effect = make_api_error(
+    client._client.aio.models.generate_content.side_effect = make_api_error(
         genai_errors.ClientError, 400, message="maximum context length exceeded"
     )
 
     with pytest.raises(AssetError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
-    assert client._client.models.generate_content.call_count == 1
+    assert client._client.aio.models.generate_content.call_count == 1
 
 
-def test_contract_failure_is_not_retried():
+async def test_contract_failure_is_not_retried():
     client = make_client()
-    client._client.models.generate_content.side_effect = make_api_error(
+    client._client.aio.models.generate_content.side_effect = make_api_error(
         genai_errors.ClientError, 400, message="unknown field 'foo'"
     )
 
     with pytest.raises(ContractError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
-    assert client._client.models.generate_content.call_count == 1
+    assert client._client.aio.models.generate_content.call_count == 1
 
 
-def test_tool_calls_are_surfaced_as_proposals_with_synthetic_ids():
+async def test_tool_calls_are_surfaced_as_proposals_with_synthetic_ids():
     client = make_client()
-    client._client.models.generate_content.return_value = fake_response(
+    client._client.aio.models.generate_content.return_value = fake_response(
         text=None,
         function_calls=[{"name": "get_time", "input": {}}],
         finish_reason="STOP",
     )
 
-    result = client.send(messages=[{"role": "user", "content": "what time is it?"}])
+    result = await client.send(messages=[{"role": "user", "content": "what time is it?"}])
 
     assert result.tool_calls == [{"id": "call_0", "name": "get_time", "input": {}}]
     # Reported, not run. The synthetic id exists because Gemini does not always
     # issue one, and the internal format needs it to correlate the result.
 
 
-def test_text_messages_translate_user_and_assistant_roles():
+async def test_text_messages_translate_user_and_assistant_roles():
     client = make_client()
-    client._client.models.generate_content.return_value = fake_response(text="ok")
+    client._client.aio.models.generate_content.return_value = fake_response(text="ok")
 
-    client.send(
+    await client.send(
         messages=[
             {"role": "user", "content": "hi"},
             {"role": "assistant", "content": "hello"},
         ]
     )
 
-    contents = client._client.models.generate_content.call_args.kwargs["contents"]
+    contents = client._client.aio.models.generate_content.call_args.kwargs["contents"]
     assert [c.role for c in contents] == ["user", "model"]
     assert contents[0].parts[0].text == "hi"
     assert contents[1].parts[0].text == "hello"
 
 
-def test_tool_use_and_tool_result_blocks_translate_to_function_call_and_response():
+async def test_tool_use_and_tool_result_blocks_translate_to_function_call_and_response():
     """Tool blocks translate in both directions, including the role remapping.
 
     This is the real test of the seam. Plain text would pass with almost any
@@ -171,7 +175,7 @@ def test_tool_use_and_tool_result_blocks_translate_to_function_call_and_response
     because the result block carries only an id.
     """
     client = make_client()
-    client._client.models.generate_content.return_value = fake_response(text="done")
+    client._client.aio.models.generate_content.return_value = fake_response(text="done")
 
     messages = [
         {"role": "user", "content": "what time is it?"},
@@ -187,9 +191,9 @@ def test_tool_use_and_tool_result_blocks_translate_to_function_call_and_response
         },
     ]
 
-    client.send(messages=messages)
+    await client.send(messages=messages)
 
-    contents = client._client.models.generate_content.call_args.kwargs["contents"]
+    contents = client._client.aio.models.generate_content.call_args.kwargs["contents"]
     assert contents[1].role == "model"
     assert contents[1].parts[0].function_call.name == "get_time"
     assert contents[2].role == "tool"
@@ -197,7 +201,7 @@ def test_tool_use_and_tool_result_blocks_translate_to_function_call_and_response
     assert contents[2].parts[0].function_response.response == {"result": "10:00"}
 
 
-def test_thought_signature_is_captured_and_echoed_back_on_the_next_turn():
+async def test_thought_signature_is_captured_and_echoed_back_on_the_next_turn():
     """Opaque provider state survives a round trip through the runtime.
 
     Found against the real API, not in mocks — every mocked test passed while
@@ -212,12 +216,12 @@ def test_thought_signature_is_captured_and_echoed_back_on_the_next_turn():
     single-turn test and fatal to every multi-turn one.
     """
     client = make_client()
-    client._client.models.generate_content.return_value = fake_response(
+    client._client.aio.models.generate_content.return_value = fake_response(
         text=None,
         function_calls=[{"id": "call_0", "name": "get_time", "input": {}, "signature": b"opaque-sig"}],
     )
 
-    result = client.send(messages=[{"role": "user", "content": "what time is it?"}])
+    result = await client.send(messages=[{"role": "user", "content": "what time is it?"}])
     assert result.tool_calls == [
         {"id": "call_0", "name": "get_time", "input": {}, "provider_data": {"thought_signature": b"opaque-sig"}}
     ]
@@ -235,14 +239,14 @@ def test_thought_signature_is_captured_and_echoed_back_on_the_next_turn():
             }
         ],
     }
-    client._client.models.generate_content.return_value = fake_response(text="done")
-    client.send(messages=[follow_up])
+    client._client.aio.models.generate_content.return_value = fake_response(text="done")
+    await client.send(messages=[follow_up])
 
-    contents = client._client.models.generate_content.call_args.kwargs["contents"]
+    contents = client._client.aio.models.generate_content.call_args.kwargs["contents"]
     assert contents[0].parts[0].thought_signature == b"opaque-sig"
 
 
-def test_missing_credentials_at_construction_is_classified_not_raw(monkeypatch):
+async def test_missing_credentials_at_construction_is_classified_not_raw(monkeypatch):
     """A missing key fails at construction here, not on the first call.
 
     This SDK validates eagerly and raises a bare ValueError, so the failure
@@ -257,7 +261,7 @@ def test_missing_credentials_at_construction_is_classified_not_raw(monkeypatch):
         GeminiClient(api_key=None)
 
 
-def test_gemini_client_satisfies_the_sends_messages_protocol():
+async def test_gemini_client_satisfies_the_sends_messages_protocol():
     """The runtime accepts this client with no changes of its own.
 
     The weakest test in this file and worth keeping anyway: ``isinstance``

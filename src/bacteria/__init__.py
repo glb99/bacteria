@@ -33,6 +33,17 @@ lose:
 - **trace ≠ audit** — how the system reached a result, versus who is answerable
   for it.
 
+**On async.** The layers that touch the outside world are coroutines; the ones
+that only compute are not. So :mod:`bacteria.model`, :mod:`bacteria.session`,
+:func:`bacteria.tools.execution.execute_tool_call`, and
+:meth:`bacteria.runtime.runtime.Runtime.run_turn` are awaited, while
+:mod:`bacteria.context`, :mod:`bacteria.tools.registry`, and the error and
+output modules are ordinary functions. That split is a readable signal rather
+than a style: in this package, ``async def`` means *this reaches outside the
+process*. An event loop is started in exactly one place — the console entry
+point in :mod:`bacteria.interfaces` — because a library that starts its own
+cannot be embedded in a host that already has one.
+
 **This package is self-contained.** The reasoning behind every decision lives in
 the docstrings, not in an external document, so the code can be vendored into a
 larger project without losing why it is shaped this way. Reading order: this

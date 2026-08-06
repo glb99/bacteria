@@ -7,7 +7,7 @@ Each test therefore asserts the call *count* as well as the exception type.
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
 import pytest
@@ -19,6 +19,10 @@ from bacteria.model.errors import AssetError, ContractError, CredentialsError, S
 def make_client(**overrides) -> ModelClient:
     client = ModelClient(api_key="test-key", max_retries=2, backoff_seconds=0, **overrides)
     client._client = MagicMock()
+    # `create` specifically must be an AsyncMock: the client awaits it, and a
+    # plain MagicMock returns something un-awaitable that fails as a
+    # ContractError rather than as the case under test.
+    client._client.messages.create = AsyncMock()
     return client
 
 
@@ -50,7 +54,7 @@ def make_api_error(exc_cls, message="boom"):
     raise AssertionError(f"unhandled exc_cls {exc_cls}")
 
 
-def test_serving_failure_is_retried_with_identical_request_then_succeeds():
+async def test_serving_failure_is_retried_with_identical_request_then_succeeds():
     """A retry re-sends the identical request and does nothing else.
 
     That identity is what makes retrying safe: there is no side effect in this
@@ -62,7 +66,7 @@ def test_serving_failure_is_retried_with_identical_request_then_succeeds():
         fake_response(text="ok"),
     ]
 
-    result = client.send(messages=[{"role": "user", "content": "hi"}])
+    result = await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert result.text == "ok"
     assert client._client.messages.create.call_count == 2
@@ -70,41 +74,41 @@ def test_serving_failure_is_retried_with_identical_request_then_succeeds():
     assert first_call == second_call  # identical request both times
 
 
-def test_serving_failure_exhausts_retries_and_raises():
+async def test_serving_failure_exhausts_retries_and_raises():
     client = make_client()
     client._client.messages.create.side_effect = anthropic.APITimeoutError(MagicMock())
 
     with pytest.raises(ServingError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert client._client.messages.create.call_count == 1 + client.max_retries
 
 
-def test_asset_failure_is_not_retried():
+async def test_asset_failure_is_not_retried():
     client = make_client()
     client._client.messages.create.side_effect = make_api_error(
         anthropic.BadRequestError, message="maximum context length exceeded"
     )
 
     with pytest.raises(AssetError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert client._client.messages.create.call_count == 1
 
 
-def test_contract_failure_is_not_retried():
+async def test_contract_failure_is_not_retried():
     client = make_client()
     client._client.messages.create.side_effect = make_api_error(
         anthropic.BadRequestError, message="unknown field 'foo'"
     )
 
     with pytest.raises(ContractError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert client._client.messages.create.call_count == 1
 
 
-def test_missing_credentials_is_not_retried():
+async def test_missing_credentials_is_not_retried():
     """A missing key surfaces as a bare TypeError, before any network call.
 
     It belongs to no SDK exception hierarchy, so a client that only classifies
@@ -118,12 +122,12 @@ def test_missing_credentials_is_not_retried():
     )
 
     with pytest.raises(CredentialsError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert client._client.messages.create.call_count == 1
 
 
-def test_rejected_credentials_is_not_retried():
+async def test_rejected_credentials_is_not_retried():
     """A rejected key (401) classifies the same as a missing one.
 
     Different origin — this request reached the server — but the same thing is
@@ -135,12 +139,12 @@ def test_rejected_credentials_is_not_retried():
     )
 
     with pytest.raises(CredentialsError):
-        client.send(messages=[{"role": "user", "content": "hi"}])
+        await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert client._client.messages.create.call_count == 1
 
 
-def test_tool_calls_are_surfaced_as_proposals_not_executed():
+async def test_tool_calls_are_surfaced_as_proposals_not_executed():
     """The client reports a requested tool call and never acts on it.
 
     Uses a deliberately alarming tool name: if the model layer ever gained the
@@ -153,7 +157,7 @@ def test_tool_calls_are_surfaced_as_proposals_not_executed():
         stop_reason="tool_use",
     )
 
-    result = client.send(messages=[{"role": "user", "content": "hi"}])
+    result = await client.send(messages=[{"role": "user", "content": "hi"}])
 
     assert result.tool_calls == [{"id": "t1", "name": "delete_file", "input": {"path": "/etc/passwd"}}]
     # No filesystem module is imported or touched anywhere in this module —

@@ -19,8 +19,14 @@ than by discipline. The point is the boundaries, not the feature set.
 ## Status
 
 Working and exercised end to end against live APIs. Two model providers
-(Anthropic, Gemini), one tool, an interactive approval gate, and 57 tests
+(Anthropic, Gemini), one tool, an interactive approval gate, and 60 tests
 covering the load-bearing invariants.
+
+The layers that touch the outside world are async; the ones that only compute
+are not — `async def` here means *this reaches outside the process*. Tools and
+approval gates may be written either way, and a synchronous one is run in a
+worker thread rather than on the event loop. See
+[ADR 0014](docs/adr/0014-async-at-the-io-boundaries.md).
 
 It is also **deliberately incomplete**: no persistence, no retrieval, no
 sandboxing, no multi-round tool loop. Those absences are decisions with recorded

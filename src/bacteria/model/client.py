@@ -29,10 +29,10 @@ Not built:
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import anthropic
+import anyio
 
 from bacteria.model.errors import (
     AssetError,
@@ -67,7 +67,8 @@ class ModelClient:
             :class:`~bacteria.model.errors.ServingError` only.
         backoff_seconds: Multiplied by the attempt number — linear, not
             exponential, because at one concurrent caller there is no thundering
-            herd to spread out.
+            herd to spread out. Revisit alongside jitter if this ever runs
+            behind a surface with many callers.
     """
 
     def __init__(
@@ -77,12 +78,12 @@ class ModelClient:
         max_retries: int = 2,
         backoff_seconds: float = 1.0,
     ) -> None:
-        self._client = anthropic.Anthropic(api_key=api_key)
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
         self.max_retries = max_retries
         self.backoff_seconds = backoff_seconds
 
-    def send(
+    async def send(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -127,7 +128,11 @@ class ModelClient:
             try:
                 # `kwargs` is built once, outside the loop, so every attempt is
                 # provably the same request rather than the same by inspection.
-                response = self._client.messages.create(**kwargs)
+                response = await self._client.messages.create(**kwargs)
+                # Inside the `try` on purpose: a response whose shape this cannot
+                # read is a contract failure like any other, and belongs in the
+                # taxonomy rather than escaping as whatever AttributeError or
+                # TypeError the parsing happened to raise.
                 return self._to_model_response(response)
             except ModelLayerError:
                 # Already classified — re-raise rather than classifying twice.
@@ -139,7 +144,11 @@ class ModelClient:
                 attempt += 1
                 if attempt > self.max_retries:
                     raise classified from exc
-                time.sleep(self.backoff_seconds * attempt)
+                # `anyio.sleep`, not `time.sleep`: the point of this method being
+                # a coroutine is that waiting costs no thread, and a blocking
+                # sleep in the retry path would give that back at exactly the
+                # moment the provider is already struggling.
+                await anyio.sleep(self.backoff_seconds * attempt)
 
     @staticmethod
     def _classify(exc: Exception) -> ModelLayerError:

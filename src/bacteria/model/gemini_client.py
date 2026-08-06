@@ -27,9 +27,9 @@ Not built:
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
+import anyio
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
@@ -86,7 +86,7 @@ class GeminiClient:
         self.max_retries = max_retries
         self.backoff_seconds = backoff_seconds
 
-    def send(
+    async def send(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -124,12 +124,20 @@ class GeminiClient:
             config_kwargs["tools"] = [self._to_gemini_tools(tools)]
         config = types.GenerateContentConfig(**config_kwargs)
 
+        # Same retry arrangement as the Anthropic client, deliberately — the two
+        # stay interchangeable only if they fail and recover the same way.
         attempt = 0
         while True:
             try:
-                response = self._client.models.generate_content(
+                # `.aio` is the SDK's async surface. Calling the synchronous
+                # `.models` and awaiting a thread around it would keep the
+                # blocking cost and merely relocate it.
+                response = await self._client.aio.models.generate_content(
                     model=self.model, contents=contents, config=config
                 )
+                # Inside the `try`, for the same reason as the Anthropic client:
+                # an unreadable response is a contract failure, not an untyped
+                # parsing exception.
                 return self._to_model_response(response)
             except ModelLayerError:
                 raise
@@ -140,7 +148,7 @@ class GeminiClient:
                 attempt += 1
                 if attempt > self.max_retries:
                     raise classified from exc
-                time.sleep(self.backoff_seconds * attempt)
+                await anyio.sleep(self.backoff_seconds * attempt)
 
     @staticmethod
     def _collect_tool_names(messages: list[dict[str, Any]]) -> dict[str, str]:
@@ -246,7 +254,13 @@ class GeminiClient:
         :data:`~bacteria.model.protocol.ToolCall` ``provider_data``, which the
         runtime forwards without reading.
         """
-        parts = response.candidates[0].content.parts if response.candidates else []
+        # `or []` is load-bearing, not defensive habit: a candidate can carry
+        # `parts=None` rather than an empty list — observed live, on a
+        # follow-up call that finished with STOP — and iterating it raises a
+        # TypeError from inside response parsing. The sibling guard for "no
+        # candidates at all" was already here; this is the other half of the
+        # same shape.
+        parts = (response.candidates[0].content.parts or []) if response.candidates else []
         tool_calls: list[ToolCall] = []
         for i, part in enumerate(parts):
             call = part.function_call

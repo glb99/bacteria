@@ -148,12 +148,23 @@ class SessionStore:
     Every public method that returns state returns a deep copy. That is the
     whole enforcement mechanism behind this module's central invariant, and the
     reason it is worth the copying cost at this scale.
+
+    **Why these methods are coroutines when none of them wait for anything.**
+    This implementation is a dictionary, so every ``async def`` below wraps
+    work that finishes immediately, and in isolation each looks like ceremony.
+    The signature belongs to the interface rather than to this implementation:
+    the persistence gap above promises that adding a real backend is a second
+    implementation of this class and *not a change to any caller*. A synchronous
+    interface would make that false the first time the backend was a database —
+    every caller would have to grow an ``await``, which is precisely the
+    caller-side change the promise rules out. Paying for it once, here, is what
+    keeps the seam honest.
     """
 
     def __init__(self) -> None:
         self._sessions: dict[str, SessionState] = {}
 
-    def create_session(self, user_id: str) -> Session:
+    async def create_session(self, user_id: str) -> Session:
         """Open a new, empty session for ``user_id``.
 
         Returns:
@@ -168,7 +179,7 @@ class SessionStore:
         self._sessions[session.session_id] = SessionState(session=session)
         return session
 
-    def get_state(self, session_id: str) -> SessionState:
+    async def get_state(self, session_id: str) -> SessionState:
         """Read a session's state as a detached deep copy.
 
         Mutating the returned object has no effect on the store. This is not a
@@ -182,7 +193,7 @@ class SessionStore:
             raise UnknownSessionError(session_id)
         return copy.deepcopy(self._sessions[session_id])
 
-    def commit(
+    async def commit(
         self,
         session_id: str,
         new_transcript_items: list[TranscriptItem] | None = None,
@@ -213,7 +224,7 @@ class SessionStore:
         state.working_state.update(working_state_updates or {})
         return copy.deepcopy(state)
 
-    def remember(self, session_id: str, key: str, value: Any, reason: str) -> SessionState:
+    async def remember(self, session_id: str, key: str, value: Any, reason: str) -> SessionState:
         """Record a fact worth re-surfacing later. The only write path for memory.
 
         Separate from :meth:`commit` on purpose. Routing memory through
@@ -235,7 +246,7 @@ class SessionStore:
         state.memory[key] = MemoryEntry(value=value, reason=reason)
         return copy.deepcopy(state)
 
-    def forget(self, session_id: str, key: str) -> SessionState:
+    async def forget(self, session_id: str, key: str) -> SessionState:
         """Remove a memory. The other half of a memory's lifecycle.
 
         Exists because a store with no removal path makes every memory

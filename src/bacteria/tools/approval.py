@@ -25,10 +25,13 @@ stray keystroke, an empty line, or a piped EOF cannot become permission.
 Not built:
     Non-interactive approval. :func:`cli_approve` blocks on stdin, so it cannot
     be used by a server, a scheduled run, or any surface without a human
-    present. Those need a different implementation of the same
-    ``(ToolCall) -> bool`` shape — pause the run, notify someone, resume on
-    their answer — which in turn needs the durable run state that does not
-    exist yet.
+    present. The *shape* for one now exists —
+    :data:`bacteria.tools.execution.Approve` accepts a coroutine function, so a
+    gate that persists the question and awaits an answer arriving minutes later
+    is expressible. What is missing is everything behind it: pausing a run,
+    notifying someone, and resuming on their answer all need durable run state,
+    which does not exist. Until then this module holds the interactive
+    implementation only.
 
     Remembered decisions. Every call is asked about individually; there is no
     "always allow this tool". Adding one means deciding what the grant is scoped
@@ -58,6 +61,12 @@ def describe_tool_call(tool_call: ToolCall) -> str:
 
 def cli_approve(tool_call: ToolCall, input_fn: Callable[[str], str] = input) -> bool:
     """Ask the local user to approve one tool call.
+
+    Written synchronously even though the caller is async, and deliberately so:
+    :func:`bacteria.tools.execution.execute_tool_call` runs a synchronous gate
+    in a worker thread, which is exactly right for a blocking terminal read.
+    Making this a coroutine that awaited stdin would be more machinery for the
+    same behavior.
 
     Args:
         tool_call: The pending call, described to the user in full.

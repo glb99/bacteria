@@ -13,6 +13,16 @@ prompt can describe a real tool rather than an unresolved name — and before th
 handler is touched, so a rejection means nothing happened rather than something
 happened and was reported as refused.
 
+Invariant: a synchronous handler never runs on the event loop thread. Handlers
+and approval gates may be written either way and this module absorbs the
+difference — a coroutine is awaited, a plain function is run in a worker
+thread. The asymmetry is deliberate: most tools are a dict lookup or a file
+append, and requiring their authors to write ``async def`` would be a tax with
+no benefit. But a synchronous handler called directly would stall every other
+turn in the process for its duration, and that failure is invisible in a test
+and in a single-user CLI — it appears only when two requests overlap, which is
+why it is asserted rather than trusted.
+
 Not built:
     Isolation. A handler runs in this process with this process's full
     privileges. Approval answers "should this happen"; it does nothing about
@@ -35,11 +45,38 @@ Not built:
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable, TypeVar
+
+import anyio.to_thread
 
 from bacteria.model.protocol import ToolCall
 from bacteria.tools.registry import ToolRegistry, UnknownToolError
+
+_T = TypeVar("_T")
+
+Approve = Callable[[ToolCall], "bool | Awaitable[bool]"]
+"""The approval gate's shape: either a plain predicate or a coroutine function.
+
+Both are allowed because the two real implementations differ in kind. An
+interactive gate answers from a terminal and is naturally synchronous; a
+service's gate has to persist a pending decision and await someone answering it
+minutes later, which cannot be expressed synchronously at all.
+"""
+
+
+async def _call_either(fn: Callable[..., _T | Awaitable[_T]], *args: Any) -> _T:
+    """Call ``fn``, awaiting it or threading it depending on what it is.
+
+    ``inspect.iscoroutinefunction`` is asked about the function rather than
+    checking whether the *result* is awaitable, because the latter would have
+    already run a synchronous callable on the event loop by the time it could
+    tell — the check has to happen before the call, not after it.
+    """
+    if inspect.iscoroutinefunction(fn):
+        return await fn(*args)  # type: ignore[misc]
+    return await anyio.to_thread.run_sync(fn, *args)  # type: ignore[arg-type]
 
 
 class ToolExecutionError(Exception):
@@ -69,10 +106,10 @@ class ToolResult:
     output: Any
 
 
-def execute_tool_call(
+async def execute_tool_call(
     tool_call: ToolCall,
     registry: ToolRegistry,
-    approve: Callable[[ToolCall], bool] = lambda _tool_call: True,
+    approve: Approve = lambda _tool_call: True,
 ) -> ToolResult:
     """Resolve, approve, then run a single proposed tool call.
 
@@ -80,8 +117,9 @@ def execute_tool_call(
         tool_call: The model's proposal. Untrusted: the name may not exist and
             the arguments are whatever the model produced.
         registry: Where the name is resolved to a real handler.
-        approve: The gate. Defaults to allow-everything, which is right for
-            tests and wrong for anything with a user attached — the CLI passes
+        approve: The gate, synchronous or not — see :data:`Approve`. Defaults to
+            allow-everything, which is right for tests and wrong for anything
+            with a user attached — the CLI passes
             :func:`bacteria.tools.approval.cli_approve` instead. The default is
             permissive rather than restrictive because a default-deny would make
             every test assert its way past the gate, and the real deployment
@@ -102,12 +140,14 @@ def execute_tool_call(
         raise ToolExecutionError(f"unknown tool: {name}") from exc
 
     # Before the handler is touched, not after. A gate that reports on an
-    # action already taken is not a gate.
-    if not approve(tool_call):
+    # action already taken is not a gate. Note this stays outside the try below:
+    # a gate that raises is a broken gate, and must not be reported as a failed
+    # tool call — that would be indistinguishable from a refusal.
+    if not await _call_either(approve, tool_call):
         raise ToolExecutionError(f"tool call rejected: {name}")
 
     try:
-        output = tool.handler(tool_call["input"])
+        output = await _call_either(tool.handler, tool_call["input"])
     except Exception as exc:
         raise ToolExecutionError(f"tool handler failed: {name}") from exc
 

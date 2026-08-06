@@ -51,7 +51,7 @@ class FakeModelClient:
         self.calls = 0
         self._text = text
 
-    def send(self, messages, **kwargs) -> ModelResponse:
+    async def send(self, messages, **kwargs) -> ModelResponse:
         self.calls += 1
         return ModelResponse(text=self._text, tool_calls=[], stop_reason="end_turn", raw=None)
 

@@ -66,12 +66,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from bacteria.context.assembly import assemble_context
 from bacteria.model.protocol import ModelResponse, SendsMessages, ToolCall
 from bacteria.session.store import SessionState, SessionStore, TranscriptItem
-from bacteria.tools.execution import ToolExecutionError, ToolResult, execute_tool_call
+from bacteria.tools.execution import Approve, ToolExecutionError, ToolResult, execute_tool_call
 from bacteria.tools.registry import ToolRegistry
 
 
@@ -101,8 +101,8 @@ class StepTracker:
         """Whether ``step_id`` has already executed in this run."""
         return step_id in self._executed
 
-    def run_once(self, step_id: str, fn: Callable[[], Any]) -> Any:
-        """Execute ``fn``, or refuse if ``step_id`` already ran.
+    async def run_once(self, step_id: str, fn: Callable[[], Awaitable[Any]]) -> Any:
+        """Await ``fn()``, or refuse if ``step_id`` already ran.
 
         The id is recorded only after ``fn`` returns. A step that raises is
         therefore not marked as executed — but nothing retries it either, so
@@ -110,12 +110,20 @@ class StepTracker:
         retry would need to know whether the failure happened before or after
         the side effect landed, which this cannot tell.
 
+        Note what this does *not* protect against, now that ``fn`` is awaited:
+        the check and the recording are separated by a suspension point, so two
+        coroutines sharing one tracker could both pass the check before either
+        recorded itself. That race cannot arise today because a tracker is
+        created per run and never leaves it — the guarantee is single-run
+        idempotency, and it rests on that ownership rather than on any locking
+        here. Sharing a tracker across concurrent runs would silently void it.
+
         Raises:
             StepAlreadyExecutedError: ``step_id`` already ran.
         """
         if self.has_run(step_id):
             raise StepAlreadyExecutedError(step_id)
-        result = fn()
+        result = await fn()
         self._executed.add(step_id)
         return result
 
@@ -153,12 +161,12 @@ class Runtime:
         self._model_client = model_client
         self._session_store = session_store
 
-    def run_turn(
+    async def run_turn(
         self,
         session_id: str,
         user_text: str,
         tool_registry: ToolRegistry | None = None,
-        approve: Callable[[ToolCall], bool] | None = None,
+        approve: Approve | None = None,
     ) -> RunResult:
         """Run one turn: assemble, call, optionally use tools, call again, commit.
 
@@ -187,7 +195,7 @@ class Runtime:
         run_id = str(uuid.uuid4())
         step_tracker = StepTracker()
 
-        state = self._session_store.get_state(session_id)
+        state = await self._session_store.get_state(session_id)
         context = assemble_context(state, user_text)
         tools = tool_registry.schemas_for_run() if tool_registry else None
 
@@ -197,7 +205,7 @@ class Runtime:
         evidence = [TranscriptItem(kind="message", payload={"role": "user", "text": user_text})]
 
         try:
-            response: ModelResponse = step_tracker.run_once(
+            response: ModelResponse = await step_tracker.run_once(
                 f"{run_id}:model_call",
                 lambda: self._model_client.send(
                     messages=context.messages, system=context.system, tools=tools
@@ -205,7 +213,7 @@ class Runtime:
             )
 
             if response.tool_calls and tool_registry is not None:
-                results = self._execute_tool_calls(
+                results = await self._execute_tool_calls(
                     run_id=run_id,
                     step_tracker=step_tracker,
                     tool_calls=response.tool_calls,
@@ -213,7 +221,7 @@ class Runtime:
                     approve=approve if approve is not None else (lambda _tool_call: True),
                     evidence=evidence,
                 )
-                response = step_tracker.run_once(
+                response = await step_tracker.run_once(
                     f"{run_id}:model_call_after_tools",
                     lambda: self._model_client.send(
                         messages=self._follow_up_messages(context.messages, response, results),
@@ -227,19 +235,25 @@ class Runtime:
             )
         except Exception as exc:
             evidence.append(TranscriptItem(kind="run_error", payload={"error": str(exc)}))
-            self._session_store.commit(session_id, new_transcript_items=evidence)
+            # Deliberately not shielded from cancellation. If the surrounding
+            # task is being cancelled this commit may not complete, and that is
+            # the honest outcome: a shielded write would let a cancelled turn
+            # keep writing to a session whose owner has already gone away.
+            await self._session_store.commit(session_id, new_transcript_items=evidence)
             raise
 
-        committed_state = self._session_store.commit(session_id, new_transcript_items=evidence)
+        committed_state = await self._session_store.commit(
+            session_id, new_transcript_items=evidence
+        )
         return RunResult(run_id=run_id, response=response, committed_state=committed_state)
 
-    def _execute_tool_calls(
+    async def _execute_tool_calls(
         self,
         run_id: str,
         step_tracker: StepTracker,
         tool_calls: list[ToolCall],
         tool_registry: ToolRegistry,
-        approve: Callable[[ToolCall], bool],
+        approve: Approve,
         evidence: list[TranscriptItem],
     ) -> list[ToolResult]:
         """Run every proposed call in order, recording each outcome.
@@ -259,10 +273,14 @@ class Runtime:
                 abandoned; a turn that lost part of its work should not press on
                 with the rest of a plan built on it.
         """
+        # Sequential, not gathered. Concurrency here would overlap side effects
+        # whose ordering the model chose deliberately, and would ask the user to
+        # approve several actions at once — both of which trade a guarantee for
+        # latency that a turn dominated by model calls will not notice.
         results: list[ToolResult] = []
         for call in tool_calls:
             try:
-                result = step_tracker.run_once(
+                result = await step_tracker.run_once(
                     # Keyed by call id so two proposals of the same tool in one
                     # turn are distinct steps rather than a false duplicate.
                     f"{run_id}:tool_call:{call['id']}",

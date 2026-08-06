@@ -25,6 +25,7 @@ together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | [0011](0011-single-round-tool-loop.md) | Run one round of tool execution per turn | Accepted |
 | [0012](0012-commit-evidence-on-failure.md) | Commit evidence even when a run fails | Accepted |
 | [0013](0013-test-load-bearing-invariants-only.md) | Test load-bearing invariants only | Accepted |
+| [0014](0014-async-at-the-io-boundaries.md) | Make the I/O boundaries async; keep the pure layers synchronous | Accepted |
 
 ## Writing a new one
 

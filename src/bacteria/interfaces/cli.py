@@ -36,6 +36,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
+import anyio
 from dotenv import load_dotenv
 
 from bacteria.model.client import ModelClient
@@ -103,7 +104,7 @@ def build_tool_registry() -> ToolRegistry:
     return registry
 
 
-def main() -> None:
+async def _run() -> None:
     """Run the interactive loop until the user exits.
 
     Exits on an empty line, EOF, or interrupt. Exceptions from a turn are not
@@ -116,18 +117,22 @@ def main() -> None:
     runtime = Runtime(model_client=build_model_client(), session_store=session_store)
     tool_registry = build_tool_registry()
 
-    session = session_store.create_session(user_id="local-cli")
+    session = await session_store.create_session(user_id="local-cli")
     print(f"session: {session.session_id}  (empty line or Ctrl+C to quit)")
 
     while True:
         try:
+            # Blocking `input` on the event loop, knowingly. This process runs
+            # one turn at a time and has nothing else to schedule, so there is
+            # no concurrency for it to stall. A surface that serves more than
+            # one caller must not read its input this way.
             user_text = input("> ").strip()
         except (EOFError, KeyboardInterrupt):
             break
         if not user_text:
             break
 
-        result = runtime.run_turn(
+        result = await runtime.run_turn(
             session.session_id,
             user_text,
             tool_registry=tool_registry,
@@ -136,6 +141,16 @@ def main() -> None:
             approve=cli_approve,
         )
         print(result.response.text)
+
+
+def main() -> None:
+    """Console-script entry point: start an event loop and hand off to :func:`_run`.
+
+    The loop is started *here*, at the outermost edge, and nowhere else. A
+    library that starts its own loop cannot be embedded in a process that
+    already has one — which is the entire situation this agent is heading into.
+    """
+    anyio.run(_run)
 
 
 if __name__ == "__main__":

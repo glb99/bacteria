@@ -116,8 +116,17 @@ worth its cost — which is why it is a layer and not a formatting step.
 
 ### `model` — talking to a provider
 
-`protocol.py` defines the contract: `send(messages, **kwargs) -> ModelResponse`,
-plus the `ToolCall` shape. Both clients implement it; every caller uses it.
+`protocol.py` defines the contract: `async send(messages, **kwargs) ->
+ModelResponse`, plus the `ToolCall` shape. Both clients implement it; every
+caller uses it. Implementations use their SDK's async surface —
+`AsyncAnthropic`, `genai`'s `.aio` — rather than threading a blocking call,
+which would relocate the cost of waiting rather than remove it.
+
+Retry stays a hand-written loop in each client, waiting with `anyio.sleep` so a
+backoff costs no thread. A retry library was tried and backed out: it brought
+jitter and exponential backoff worth having eventually, but the loop it replaced
+is fifteen readable lines, and trading them for a dependency is not a trade this
+project wants to make before a second caller exists to need it.
 
 The three concerns behind a model call are kept nameable even though one hosted
 API covers all of them — **asset** (which model), **serving** (delivery, retry),
@@ -173,6 +182,8 @@ the source with `grep -rn "Invariant:" src/`.
 | A failed run still commits evidence | Otherwise the runs worth investigating are the ones with no record | `test_a_failed_model_call_still_leaves_the_user_message_as_evidence` |
 | Tool calls are executed only via `execution` | Concentrates every side effect in one auditable place | `test_runtime_executes_tool_calls_via_the_execution_module_not_the_model_client` |
 | Opaque provider state survives a round trip | Some providers reject a follow-up call without it | `test_thought_signature_is_captured_and_echoed_back_on_the_next_turn` |
+| A synchronous handler never runs on the event loop thread | One blocking tool would stall every concurrent turn in the process | `test_a_synchronous_handler_does_not_run_on_the_event_loop_thread` |
+| A coroutine handler or gate is awaited, not returned | An un-awaited coroutine is truthy and stringifies — the tool appears to succeed and returns nonsense, the gate approves everything | `test_a_coroutine_handler_is_awaited_not_returned_unrun`, `test_a_coroutine_approval_gate_is_awaited` |
 
 ---
 

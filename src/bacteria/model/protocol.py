@@ -105,9 +105,16 @@ class SendsMessages(Protocol):
     SendsMessages)``) rather than only discovered at call time.
 
     Note that ``runtime_checkable`` only verifies the method *exists*; it does
-    not check the signature. The tests that matter for a new provider are the
-    behavioral ones — translation, retry classification, tool-call round
-    tripping — not the ``isinstance`` check.
+    not check the signature — including whether it is a coroutine function. The
+    tests that matter for a new provider are the behavioral ones — translation,
+    retry classification, tool-call round tripping — not the ``isinstance``
+    check.
+
+    ``send`` is a coroutine because it is the system's dominant wait: a turn
+    spends seconds inside it, and a synchronous version costs an OS thread for
+    every one of those seconds. Implementations must use their SDK's async
+    surface rather than wrapping a blocking call, which would move the thread
+    cost rather than remove it.
     """
 
-    def send(self, messages: list[dict[str, Any]], **kwargs: Any) -> ModelResponse: ...
+    async def send(self, messages: list[dict[str, Any]], **kwargs: Any) -> ModelResponse: ...

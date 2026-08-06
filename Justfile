@@ -9,10 +9,21 @@ ARGS_SERVE := env("_UV_RUN_ARGS_SERVE", "")
     just --list
 
 
-# Run tests
+# Run every package's tests
 [group('qa')]
 test *args:
-    uv run {{ ARGS_TEST }} -m pytest {{ args }}
+    just test-agent {{ args }}
+    just test-app {{ args }}
+
+# Run the agent's tests alone — proves bacteria stands without the application
+[group('qa')]
+test-agent *args:
+    uv run --package bacteria {{ ARGS_TEST }} -m pytest packages/bacteria/tests {{ args }}
+
+# Run the application's tests alone
+[group('qa')]
+test-app *args:
+    uv run --package fastpaip {{ ARGS_TEST }} -m pytest packages/fastpaip/tests {{ args }}
 
 _cov *args:
     uv run -m coverage {{ args }}
@@ -21,10 +32,12 @@ _cov *args:
 [group('qa')]
 @cov:
     just _cov erase
-    just _cov run -m pytest tests
-    # Ensure ASGI entrypoint is importable.
-    # You can also use coverage to run your CLI entrypoints.
-    just _cov run -m hello_svc.asgi
+    # The application only. The agent's suite is excluded on purpose --
+    # see the note on `source` in pyproject.toml.
+    just _cov run -m pytest packages/fastpaip/tests
+    # Ensure the ASGI entrypoint is importable. Entrypoints are omitted from the
+    # report, so this proves it loads without counting toward a number.
+    just _cov run -m fastpaip.entrypoints.asgi
     just _cov combine
     just _cov report
     just _cov html
@@ -38,7 +51,7 @@ lint:
 # Check types
 [group('qa')]
 typing:
-    uvx ty check --python .venv src
+    uvx ty check --python .venv packages/bacteria/src packages/fastpaip/src
 
 # Perform all checks
 [group('qa')]
@@ -48,7 +61,12 @@ check-all: lint cov typing
 # Run development server
 [group('run')]
 serve:
-    uv run {{ ARGS_SERVE }} -m fastapi dev src/hello_svc/asgi.py --port {{ PORT }}
+    uv run {{ ARGS_SERVE }} -m fastapi dev packages/fastpaip/src/fastpaip/entrypoints/asgi.py --port {{ PORT }}
+
+# Talk to the agent in a terminal
+[group('run')]
+agent:
+    uv run bacteria
 
 # Send HTTP request to development server
 [group('run')]

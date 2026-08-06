@@ -3,9 +3,10 @@
 What this repository becomes: a uv workspace holding two packages — the agent
 (`bacteria`, unchanged in shape) and the application that hosts it (`fastpaip`).
 
-This document is the plan, not the state. Nothing below has been done yet.
+Steps 0-3 are **done**. The tree below is what exists now; the remaining work
+is in [Order of work](#order-of-work) at the end.
 
-## Step 0 — put this under version control
+## Step 0 — put this under version control *(done)*
 
 There is no `.git` here. Everything in this tree is unversioned, including work
 that took real effort. Before any file moves:
@@ -17,7 +18,7 @@ git init && git add -A && git commit -m "Import current state before restructure
 The rest of this plan moves and deletes files. Doing that without a commit to
 return to is the only genuinely reckless part of it.
 
-## Target tree
+## Target tree *(steps 3-4 realize the skeleton; feature packages are not created yet)*
 
 ```
 fastpaip/
@@ -275,14 +276,19 @@ an entry point is for.
 
 ## Order of work
 
-1. `git init` and commit the current state.
-2. Async refactor in bacteria, standalone, tests green, one live Gemini
-   tool-calling turn verified. ([ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md);
-   mocks passed and live calls failed on `thought_signature` once already.)
-3. Create the workspace skeleton; move bacteria in; confirm `uv run bacteria`
-   and both test suites still pass. No application code yet.
-4. Move and repair the framework files into `core/`. Add `settings.py` — every
-   `os.environ` read in the tree collapses into it.
+1. ~~`git init` and commit the current state.~~ **Done.**
+2. ~~Async refactor in bacteria.~~ **Done** — 60 tests, one live Gemini
+   tool-calling turn verified end to end.
+   ([ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md).)
+3. ~~Create the workspace skeleton; move bacteria in.~~ **Done** — brought in
+   with `git subtree`, so its history came along rather than arriving as an
+   anonymous copy. `just test` runs both suites; `just agent` runs the CLI.
+4. **Next.** Repair the framework files now sitting in `core/`: drop the
+   `Repository` marker and the `CRUDRepository` composite, move
+   `_next_handler` into `__init__`, replace the `print()` calls with
+   structured logging. Add `settings.py` — every `os.environ` read in the tree
+   collapses into it. Fix `repositories.py`, which still has no imports at all
+   and raises `NameError`.
 5. First feature end to end, `chat/`, using the existing hello-world test as the
    shape. This is where the `SessionRepository` implementation lands and where
    alembic gets introduced.

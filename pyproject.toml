@@ -1,23 +1,39 @@
-[build-system]
-requires = ["uv-build"]
-build-backend = "uv_build"
-
 [project]
-name = "hello-svc"
+name = "fastpaip-workspace"
 version = "0"
-requires-python = "==3.13.*"
-dependencies = ["fastapi", "granian", "stamina"]
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv]
+# The root builds nothing. It exists to declare the workspace and to hold the
+# toolchain both members are developed with.
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [dependency-groups]
-dev = ["fastapi[standard]", "pytest", "coverage"]
-
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "coverage>=7.6",
+    "fastapi[standard]",
+]
 
 [tool.coverage.run]
 branch = true
 parallel = true
-source = ["fastpaip", "tests"]
+# `bacteria` is deliberately absent. Its suite is architectural fitness
+# functions, not line coverage, and its unevenness is the stated intent
+# (packages/bacteria/docs/adr/0013). Pointing a coverage report at it produces a
+# number whose only use is tempting someone to write the tests that record
+# exists to decline. The application gets measured; the agent does not.
+source = ["fastpaip"]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-omit = ["src/**/asgi.py"]
+# Entrypoints hold configuration and nothing else. If one ever contains
+# something worth testing, that is the signal it contains logic belonging
+# somewhere else.
+omit = ["**/entrypoints/*"]

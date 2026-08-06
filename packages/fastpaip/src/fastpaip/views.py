@@ -17,13 +17,26 @@ from fastpaip.ingestion.views import router as ingestion_router
 def lifespan_running(setup: Callable[[], Awaitable[None]]):
     """Wrap a coroutine as a lifespan that runs it at startup.
 
-    Startup work has to happen *inside* the serving event loop, not at import.
-    An async engine binds to whichever loop first touches it, so creating tables
-    in a throwaway loop at import time leaves the application holding
-    connections to a loop that no longer exists by the time a request arrives.
+    Startup work belongs here rather than at module import, for three reasons
+    of decreasing certainty.
+
+    Importing a module must not touch a database. At import, ``create_tables()``
+    would connect to whatever ``FASTPAIP_DATABASE_URL`` names, so collecting
+    tests on a machine without one fails at import, and any tool that imports
+    the app merely to read its routes has to have a database first.
+
+    ``anyio.run()`` at import would spin up and tear down a whole event loop as
+    a side effect of an import statement.
+
+    And a driver-dependent one: an ``asyncpg`` connection is bound to the loop
+    that created it, so a pool filled by a throwaway import-time loop is holding
+    connections to a loop that is gone by the first request. ``aiosqlite``
+    tolerates this, so it is not currently observable — but Postgres is the
+    target, and it will be.
 
     Taking the work as an argument keeps the decision — whether this deployment
     builds its own schema — in the entrypoint, where deployment decisions live.
+    Once migrations exist, no deployment does, and this disappears.
     """
 
     @asynccontextmanager

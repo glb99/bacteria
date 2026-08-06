@@ -40,11 +40,16 @@ from fastpaip.core.settings import get_settings
 def get_engine() -> AsyncEngine:
     """Return the process-wide engine, created once.
 
-    Cached, and therefore bound to whichever event loop first touches it. That
-    is fine for a served process with one loop and is the reason table creation
-    happens in the application's lifespan rather than at import: an engine
-    created in a throwaway loop at import time holds connections to a loop that
-    no longer exists by the time a request arrives.
+    Cached, so one pool serves the process.
+
+    How well a pooled connection survives the event loop changing underneath it
+    depends on the driver, and the difference is worth knowing before assuming
+    either way. ``aiosqlite`` tolerates it — each connection owns a worker
+    thread and awaits on whatever loop is currently running — and this was
+    checked rather than assumed. ``asyncpg`` does not: its connections are
+    documented as bound to the loop that created them. Since Postgres is the
+    production target, treat the engine as loop-bound even though the
+    development driver forgives it.
     """
     return create_async_engine(get_settings().database_url)
 

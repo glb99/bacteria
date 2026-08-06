@@ -18,9 +18,8 @@ logging.basicConfig(level=settings.log_level)
 # adds missing tables and is silently insufficient once a column changes. See
 # the migrations gap in fastpaip.core.db.
 #
-# It runs in the application's lifespan rather than here at import, because the
-# async engine binds to whichever event loop first touches it — and that has to
-# be the loop serving requests, not a throwaway one that ends on the next line.
+# It runs in the application's lifespan rather than here at import, so that
+# importing this module does not connect to a database. See lifespan_running.
 app = create_app(lifespan=lifespan_running(create_tables))
 
 __all__ = ["app"]

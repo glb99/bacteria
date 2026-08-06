@@ -1,4 +1,4 @@
-"""Load-bearing invariant tests for context assembly (Part 5 decisions)."""
+"""Invariant tests for context assembly: what the model is and is not shown."""
 
 from bacteria.context.assembly import assemble_context
 from bacteria.session.store import SessionStore, TranscriptItem
@@ -16,8 +16,12 @@ def make_state_with_messages(count: int):
 
 
 def test_window_caps_transcript_length_to_the_most_recent_messages():
-    """'Transcript stuffing' (failure mode #1) — the assembled context must
-    not grow unbounded with a long conversation."""
+    """Context must not grow with the conversation.
+
+    The failure this prevents is gradual and then sudden: cost and latency
+    climb turn over turn, and then one turn overflows the window and the
+    conversation stops working entirely.
+    """
     state = make_state_with_messages(count=50)
 
     context = assemble_context(state, user_text="latest", window_size=10)
@@ -37,8 +41,12 @@ def test_no_memory_means_no_system_prompt():
 
 
 def test_memory_is_surfaced_via_system_not_mixed_into_transcript_messages():
-    """Memory and transcript are different concerns (Part 3/5) — memory must
-    not silently become just another transcript message."""
+    """Memory must stay distinguishable from things that were actually said.
+
+    Appended to the message list, a preserved fact would be indistinguishable
+    from a user's utterance this turn — the model would treat what the system
+    chose to remember as what someone just told it.
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     store.commit(session.session_id, new_transcript_items=[

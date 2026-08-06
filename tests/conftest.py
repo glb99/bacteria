@@ -1,14 +1,17 @@
-"""Shared test fixtures. Auto-discovered by pytest for every file under tests/."""
+"""Fixtures shared across the suite. Auto-discovered by pytest; never imported."""
 
 import pytest
 
-from bacteria.model.client import ModelResponse
+from bacteria.model.protocol import ModelResponse
 
 
 class FakeModelClient:
-    """A minimal stand-in satisfying the same shape ModelClient.send() has,
-    without touching the real Anthropic SDK. Used wherever a test needs a
-    model client but isn't testing ModelClient itself."""
+    """A model client that satisfies the protocol and calls no API.
+
+    Used wherever a test needs *a* model client but is not testing one — the
+    runtime tests, mainly. Counts its calls, because "how many times was the
+    model called" is itself an invariant worth asserting.
+    """
 
     def __init__(self, text: str = "hi there") -> None:
         self.calls = 0
@@ -21,13 +24,12 @@ class FakeModelClient:
 
 @pytest.fixture(name="make_fake_model_client")
 def _make_fake_model_client():
-    """Factory fixture — tests that need a custom response text call this
-    instead of importing FakeModelClient directly.
+    """Factory for :class:`FakeModelClient`, so tests can set the reply text.
 
-    Defining function is underscore-prefixed with the fixture name set
-    explicitly, so accidentally referencing the raw function instead of
-    requesting the fixture (forgetting the test-parameter dependency) is
-    visibly wrong rather than silently passing the wrong object.
+    The defining function is underscore-prefixed with the fixture name given
+    explicitly. A test that forgets to declare the fixture as a parameter and
+    reaches for the module-level name instead then gets an obvious failure
+    rather than silently closing over the wrong object.
     """
 
     def _make(text: str = "hi there") -> FakeModelClient:

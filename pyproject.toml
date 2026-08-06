@@ -1,7 +1,7 @@
 [project]
 name = "bacteria"
 version = "0.1.0"
-description = "An AI agent built from The Agent Stack series, layer by layer."
+description = "A small AI agent built as infrastructure: layered ownership boundaries, kept minimal enough to read."
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40.0",

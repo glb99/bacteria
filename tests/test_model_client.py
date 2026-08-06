@@ -1,4 +1,10 @@
-"""Load-bearing invariant tests for the model client (Part 2 decisions)."""
+"""Invariant tests for the Anthropic client: what is retried, and what is not.
+
+Retry classification is the load-bearing behavior here. Getting it wrong is
+expensive in both directions: retrying a non-transient failure burns quota to
+fail identically, and not retrying a transient one turns a blip into an outage.
+Each test therefore asserts the call *count* as well as the exception type.
+"""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -45,8 +51,11 @@ def make_api_error(exc_cls, message="boom"):
 
 
 def test_serving_failure_is_retried_with_identical_request_then_succeeds():
-    """'Retry logic must be side-effect-aware' — verified narrowly here as:
-    a retry re-sends the exact same request, nothing more, nothing less."""
+    """A retry re-sends the identical request and does nothing else.
+
+    That identity is what makes retrying safe: there is no side effect in this
+    module for a second attempt to duplicate.
+    """
     client = make_client()
     client._client.messages.create.side_effect = [
         make_api_error(anthropic.RateLimitError),
@@ -96,10 +105,12 @@ def test_contract_failure_is_not_retried():
 
 
 def test_missing_credentials_is_not_retried():
-    """The SDK raises a bare TypeError (not an anthropic.APIError) when no
-    api_key/auth_token/credentials can be resolved at all, before any
-    network call. Must be classified distinctly, not swept into ContractError
-    or (worse) mistaken for a retryable ServingError."""
+    """A missing key surfaces as a bare TypeError, before any network call.
+
+    It belongs to no SDK exception hierarchy, so a client that only classifies
+    the SDK's own errors lets it escape untyped. Sweeping it into ContractError
+    would hide the one failure an operator can actually fix.
+    """
     client = make_client()
     client._client.messages.create.side_effect = TypeError(
         "Could not resolve authentication method. Expected one of api_key, "
@@ -113,9 +124,11 @@ def test_missing_credentials_is_not_retried():
 
 
 def test_rejected_credentials_is_not_retried():
-    """A request that does reach the server but is rejected for bad
-    credentials (401) must classify the same way as the local
-    missing-credentials case above, not as a generic ContractError."""
+    """A rejected key (401) classifies the same as a missing one.
+
+    Different origin — this request reached the server — but the same thing is
+    wrong and the same person has to fix it.
+    """
     client = make_client()
     client._client.messages.create.side_effect = make_api_error(
         anthropic.AuthenticationError, message="invalid x-api-key"
@@ -128,8 +141,11 @@ def test_rejected_credentials_is_not_retried():
 
 
 def test_tool_calls_are_surfaced_as_proposals_not_executed():
-    """'Tool calls treated as proposals, not execution' — the client must
-    only report a tool_use block, never act on it."""
+    """The client reports a requested tool call and never acts on it.
+
+    Uses a deliberately alarming tool name: if the model layer ever gained the
+    ability to execute what it reports, this is what that would look like.
+    """
     client = make_client()
     client._client.messages.create.return_value = fake_response(
         text=None,

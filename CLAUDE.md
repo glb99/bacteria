@@ -1,41 +1,141 @@
-# bacteria — Project Instructions
+# bacteria — working in this repository
 
 ## What this is
 
-An AI agent, built from scratch, whose architecture is derived from *The Agent Stack* series by Vinoth Govindarajan (https://theagentstack.substack.com/p/the-agent-stack-part-1-a-systems). The series is the source of truth for the design; this repo is the implementation.
+A small AI agent built as reusable infrastructure: the layered skeleton and the
+ownership boundaries you would want in place before an agent grows, kept
+deliberately minimal so the boundaries stay visible.
 
-## Working methodology
+Read first, in order:
 
-We go through the series **one part at a time**, in order. For each part:
+1. `src/bacteria/__init__.py` — the layer map and the distinctions that matter.
+2. `docs/ARCHITECTURE.md` — request path, ownership, invariants, gaps.
+3. `docs/adr/` — why any particular thing is the way it is.
 
-1. **Fetch and archive** the article into [`articles/`](articles/) as `part-N-slug.md` — a faithful, condensed set of notes (thesis, key structure, definitions, checklists), not a full reproduction of the text.
-2. **Explain** the article's content in chat before jumping to implementation — what it argues, why it matters, how it connects to prior parts.
-3. **Discuss as a team.** Don't unilaterally decide how the article's ideas apply to this project. Ask what the user thinks, surface tradeoffs, propose an interpretation, and let the conclusion be reached jointly. As the discussion happens (including follow-up questions the user asks about the article), keep a running "Discussion" recap for that part in `docs/SYSTEM_DESIGN.md` — update it incrementally after each meaningful Q&A exchange, not just once at the end. Each entry should capture the question and the settled answer/conclusion, not a verbatim transcript.
-4. **Record the conclusion** in [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) under that part's section: the accumulated "Discussion" recap from step 3, the "Team conclusion," and concrete "Decisions for this project" (what we will actually build, and why, not just what the article said). When a decision implies a concrete code artifact, note the intended location inline under that bullet (e.g. `→ src/session/store.ts (planned)`).
-5. Only after the design conclusion is recorded do we write or scaffold code for that part, if the part calls for it. When that code lands, update the corresponding decision bullet's inline note from "planned" to the actual path, so the design doc stays a live map from article concept → decision → implementation instead of drifting from the codebase.
-6. Update the status table at the top of `docs/SYSTEM_DESIGN.md` as parts move from not started → in discussion → recorded.
+## Commands
 
-Do not skip ahead to later parts before the current part's conclusion is recorded, unless the user explicitly asks to jump around.
+```bash
+uv sync --extra dev      # install
+uv run pytest            # test
+uv run bacteria          # interactive CLI (needs a key in .env)
+```
 
-Reading ahead in the *source articles* yourself, for personal awareness, is fine and encouraged (light skim, not a close read) — it helps you spot cross-layer dependencies early. That is separate from the team formally discussing/designing/recording a part, which must still happen strictly in order.
+Provider selection is `MODEL_PROVIDER` (`anthropic` by default, or `gemini`),
+with the matching `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` in `.env`.
 
-## Implementation timing
+## The two markers
 
-Build code **interleaved, part by part** — implement a part's planned artifact right after its design conclusion is recorded, not after all 8 parts are designed. Reasons: untested design assumptions compound silently across later parts if left on paper too long, and a module only really validates a decision once it's actually run. This applies even though later parts sometimes contain knowledge relevant to an earlier part's implementation (e.g. Part 8's observability concerns touching Part 2's error handling):
+Grep-discoverable conventions. Both are load-bearing for anyone — human or
+agent — arriving without context.
 
-- If implementing a part needs a hook into a later, undiscussed layer, build the **smallest possible stub** and flag it explicitly as provisional (e.g. a comment or doc note: "minimal stub, revisit in Part N"). Do not fully design that later layer early just to support the stub.
+**`Not built:`** — a deliberate gap, documented at the exact place it would be
+filled. Every block names *what* is missing, *why*, and *where it goes*. Never
+add a gap without all three.
 
-## Testing approach
+```bash
+grep -rn "Not built:" src/
+```
 
-Not every design decision needs an automated test. Split "Decisions for this project" bullets into two kinds:
+**`Invariant:`** — a property that is enforced and tested. Breaking one is a
+bug, not a design change.
 
-- **Load-bearing invariants** — a claim about behavior that, if silently violated, causes a real bug or incident (e.g. "a retry must never re-execute a tool call that already ran," "the model never writes directly to the session store"). These get a real, automated test that fails when the invariant is broken. This is the same idea as an "architectural fitness function" (Ford/Parsons/Kua, *Building Evolutionary Architectures*): an executable, repeatable check that preserves an architectural characteristic over time.
-- **Rationale/preference decisions** — a judgment call about *why* we built something a certain way, with no runtime behavior to assert (e.g. "we chose Anthropic direct over a provider abstraction because it was premature abstraction"). These stay as documentation in `docs/SYSTEM_DESIGN.md` only — do not write a test for them.
+```bash
+grep -rn "Invariant:" src/
+```
 
-Keep the number of tests per part small and deliberate (a handful of genuinely load-bearing boundaries, not one test per decision bullet) — the point is targeted verification of what would actually hurt if it broke, not exhaustive coverage of every design nuance. When verifying a module, also prefer a real end-to-end run over isolated unit tests alone, and specifically try to reproduce any failure modes named in that part's article (e.g. Part 3's six named failure modes) rather than only testing the happy path.
+Keeping these accurate matters more than keeping them tidy. A `Not built:` block
+that is now built, or an `Invariant:` with no test behind it, is worse than no
+marker at all.
 
-## Repo layout
+## Documentation conventions
 
-- `articles/` — condensed notes per article part, one file each, cited with source URL and fetch date.
-- `docs/SYSTEM_DESIGN.md` — the living system design document. This is the actual deliverable of the discussion process; keep it professional and terse, not a transcript.
-- (implementation directories to be added as the design calls for them, once we're past enough of the series to know what we're building)
+**Docstrings are the reference.** Detail lives next to the code, not in a doc
+that drifts from it. Reading a module should tell you what it owns, what it
+refuses to do, and what is missing — without a second file open.
+
+PEP 257 shape: a one-line summary, a blank line, then the body. Google-style
+`Args:` / `Returns:` / `Raises:` sections **only where they carry information the
+signature does not**. Type hints already state the types; restating them is
+noise. Document the non-obvious: invariants, side effects, why a default is what
+it is, what a caller will get wrong.
+
+Two things worth writing down explicitly, because they are what a reader cannot
+recover from the code:
+
+- **Why, not what.** `# increment the counter` is worthless. "Bound as a default
+  argument, because a bare closure would capture the loop variable" is not.
+- **The rejected alternative.** When a plausible simpler approach was tried and
+  failed, say so. Someone will otherwise try it again.
+
+Comments inside a function explain a decision at that line. If a comment is
+explaining *what* the code does, rewrite the code instead.
+
+**Where each kind of knowledge goes:**
+
+| Kind | Home |
+|---|---|
+| How to run it | `README.md` |
+| How it fits together | `docs/ARCHITECTURE.md` |
+| Why a decision was made | `docs/adr/NNNN-*.md` |
+| What a thing does | Its docstring |
+
+Do not restate one in another. Cross-reference instead.
+
+## Decision records
+
+Any decision that constrains future work, that a reasonable engineer would make
+differently, or that is a deliberate omission which will look like a bug, gets an
+ADR. Nygard format — Status, Context, Decision, Consequences.
+
+Records are immutable. Supersede with a new record; do not edit an old one. The
+Consequences section must include the ones you dislike, or the record is useless
+to whoever later considers reversing it.
+
+Library choices and formatting conventions do not qualify.
+
+## Testing
+
+The bar for a test is: **would its silent violation cause a real bug?** If yes,
+it is a load-bearing invariant and gets a test that fails when the invariant
+breaks. If it is a judgment call with no runtime behavior — "we chose X over Y
+because Y was premature" — it gets an ADR and no test.
+
+Small and deliberate per module. There is no coverage gate, on purpose; see
+[ADR 0013](docs/adr/0013-test-load-bearing-invariants-only.md).
+
+Test docstrings state the invariant *and the consequence of breaking it*. They
+are documentation as much as verification.
+
+Mocks are not sufficient verification for anything touching a provider API.
+Gemini's `thought_signature` requirement passed every mocked test and failed
+every live multi-turn tool call. Run it for real before believing it works.
+
+## Boundaries not to erode
+
+These are the point of the project. Each is easy to break in a way that still
+passes the tests and still runs.
+
+- **The runtime orchestrates and implements nothing.** It decides *when* each
+  layer acts, never *how*. Formatting a prompt inline or appending to the
+  transcript directly is always briefly easier and is always wrong here.
+- **The model layer cannot execute.** `model/` imports no tool module, no
+  filesystem, no subprocess. That is what makes retries provably side-effect
+  free.
+- **Only `session/` writes state.** Everything else proposes.
+- **`tools/` keeps three questions in three modules** — what exists, whether it
+  may run, running it. Merging any two makes a control invisible.
+- **`interfaces/` owns composition, and nothing below it reads configuration.**
+
+## Working style
+
+Discuss before implementing when a change touches a boundary above, or adds a
+`Not built:` gap — those are design decisions, and they get recorded rather than
+inferred. Small internal changes do not need that ceremony.
+
+When something needs a hook into a layer that does not exist yet, build the
+smallest possible stub and mark it `Not built:` with what it is waiting on. Do
+not design the absent layer speculatively in order to support a stub.
+
+`articles/` and `pdfs/` are archived background reading that informed the
+original design. They are not part of this system's documentation, nothing
+depends on them, and they should not be cited from code or docs.

@@ -1,4 +1,8 @@
-"""Load-bearing invariant tests for the add_note tool (Part 6 decisions)."""
+"""Invariant tests for the add_note tool — the template a new tool's tests follow.
+
+The registry's own tests cover registration and exposure. These cover the thing
+only this file can: what the handler actually does to the filesystem.
+"""
 
 from bacteria.tools.notes import build_add_note_tool
 

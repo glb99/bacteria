@@ -1,4 +1,4 @@
-"""Load-bearing invariant tests for the tool registry (Part 6 decisions)."""
+"""Invariant tests for the capability surface: what the model gets told about."""
 
 import pytest
 
@@ -15,8 +15,11 @@ def make_tool(name="echo") -> ToolDefinition:
 
 
 def test_schema_never_exposes_the_handler():
-    """'The model only ever sees name/description/input_schema' — the schema
-    sent to the model must never carry anything capable of running code."""
+    """Nothing capable of running code may reach the model.
+
+    Asserted as an exact key set rather than an absence check, so that a field
+    added to ToolDefinition later fails here instead of silently shipping.
+    """
     registry = ToolRegistry()
     registry.register(make_tool())
 
@@ -26,8 +29,11 @@ def test_schema_never_exposes_the_handler():
 
 
 def test_schemas_for_run_filters_to_the_allowed_list():
-    """Checklist item 1: 'expose only tools needed for this run,' not the
-    whole registry by default when a caller narrows it."""
+    """A run can be given fewer tools than the registry holds.
+
+    Everything a model can see, it will eventually try — so narrowing has to
+    actually narrow.
+    """
     registry = ToolRegistry()
     registry.register(make_tool("echo"))
     registry.register(make_tool("delete_file"))

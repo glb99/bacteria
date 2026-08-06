@@ -1,23 +1,26 @@
-"""Gemini client — a second ModelClient implementation, proving out the
-SendsMessages Protocol seam from Part 2. Runtime depends only on the
-`.send(messages, **kwargs) -> ModelResponse` shape
-(bacteria.runtime.runtime.SendsMessages), never on ModelClient itself, so
-this class is a drop-in alternative with zero changes to Runtime.
+"""Gemini-backed implementation of :class:`~bacteria.model.protocol.SendsMessages`.
 
-Reuses the model-layer error taxonomy from bacteria.model.errors — the
-asset/serving/contract/credentials split isn't Anthropic-specific, it's
-about which part of "talking to a model" failed, so a second provider maps
-onto the same categories rather than inventing its own.
+Exists to keep the provider seam honest. A protocol with one implementation is
+an assertion; with two it is a tested claim. Swapping this in requires no
+change to :mod:`bacteria.runtime.runtime`, the tool loop, or the session store
+— only the CLI's provider table names it.
 
-Messages/tools travel through Runtime in Anthropic's wire shapes (plain
-text content, or {"type": "tool_use"/"tool_result", ...} blocks) because
-that's what Runtime and the tool-execution loop actually construct — this
-client translates those into Gemini's Content/Part/FunctionDeclaration
-shapes on the way in, and translates Gemini's response back into the same
-ModelResponse shape on the way out. Verified against the real google-genai
-SDK source (github.com/googleapis/python-genai) rather than guessed —
-two independent doc pages described a different, non-existent
-"interactions" API that turned out to be hallucinated.
+This class is also the concrete cost of the decision recorded in
+``docs/adr/0006-anthropic-block-shapes-as-internal-format.md``: because the
+runtime speaks Anthropic's block vocabulary, a second provider does real
+translation work rather than merely matching a method signature. Everything
+below the constructor is that translation, in both directions.
+
+Failures are classified into the same
+:mod:`~bacteria.model.errors` taxonomy the Anthropic client uses. Those
+categories describe which part of "talking to a model" broke, which is not an
+Anthropic-specific question, so a provider-specific taxonomy would only make
+callers branch on the provider.
+
+Not built:
+    Streaming, prompt caching, and the ``thinking`` modes Gemini exposes —
+    matching the Anthropic client's scope rather than exceeding it, so that the
+    two remain genuinely interchangeable rather than one being a superset.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
-from bacteria.model.client import ModelResponse
 from bacteria.model.errors import (
     AssetError,
     ContractError,
@@ -37,12 +39,30 @@ from bacteria.model.errors import (
     ModelLayerError,
     ServingError,
 )
+from bacteria.model.protocol import ModelResponse, ToolCall
 
+# Gemini reports "request too large" as a plain 400, same as Anthropic, so the
+# same message sniffing is needed to separate it from an integration bug.
 _ASSET_HINTS = ("context", "maximum context length", "token", "too long")
+
 _AUTH_HINTS = ("api key", "api_key", "credential", "unauthenticated", "permission")
 
 
 class GeminiClient:
+    """Sends messages to Gemini, translating to and from the internal format.
+
+    Args:
+        api_key: Falls back to the SDK's ``GEMINI_API_KEY`` /
+            ``GOOGLE_API_KEY`` lookup when omitted.
+        model: Pinned, for the same reason as the Anthropic client.
+        max_retries: Additional attempts, :class:`~bacteria.model.errors.ServingError` only.
+        backoff_seconds: Linear multiplier on the attempt number.
+
+    Raises:
+        CredentialsError: When no API key can be resolved. Note this fires
+            *here*, at construction, not on the first call — see below.
+    """
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -50,13 +70,13 @@ class GeminiClient:
         max_retries: int = 2,
         backoff_seconds: float = 1.0,
     ) -> None:
-        # Unlike Anthropic's SDK (lazy — fails on the first send()), a missing
-        # key here raises a bare ValueError at construction time. Classify it
-        # the same way as every other credentials failure, or this exact
-        # failure mode escapes the error taxonomy entirely.
         try:
             self._client = genai.Client(api_key=api_key)
         except ValueError as exc:
+            # This SDK validates credentials eagerly and raises a bare
+            # ValueError, where the Anthropic SDK defers to the first request.
+            # Without this branch the failure never reaches send()'s handler
+            # and escapes the error taxonomy entirely as a raw ValueError.
             if any(hint in str(exc).lower() for hint in _AUTH_HINTS):
                 raise CredentialsError(str(exc)) from exc
             raise
@@ -71,17 +91,29 @@ class GeminiClient:
         system: str | None = None,
         max_tokens: int = 1024,
     ) -> ModelResponse:
+        """Make one model call, retrying only transient serving failures.
+
+        Accepts the same internal (Anthropic-shaped) arguments as
+        :meth:`bacteria.model.client.ModelClient.send` and returns the same
+        :class:`~bacteria.model.protocol.ModelResponse`; the translation in
+        between is this class's entire reason to exist.
+
+        Raises:
+            ServingError: Transient failure that outlived ``max_retries``.
+            AssetError: Request cannot succeed as shaped.
+            ContractError: Malformed request, unsupported content block, or an
+                unrecognized failure.
+            CredentialsError: Credentials rejected by the server.
+        """
         id_to_name = self._collect_tool_names(messages)
         contents = [self._to_content(message, id_to_name) for message in messages]
 
         config_kwargs: dict[str, Any] = {
             "max_output_tokens": max_tokens,
-            # Nothing in this project's scope needs Gemini's reasoning mode,
-            # so it's off for cost/latency. Does NOT avoid thought_signature —
-            # that's required on function_call parts unconditionally (verified
-            # live), independent of whether thinking itself is enabled. See
-            # the tool_use/provider_data handling in _to_content and
-            # _to_model_response below for how that requirement is actually met.
+            # Reasoning mode off, for cost and latency. This is *not* how the
+            # thought_signature requirement below is satisfied — that applies
+            # whether or not thinking is enabled, which was established by
+            # trying exactly this as a fix and watching it fail.
             "thinking_config": types.ThinkingConfig(thinking_budget=0),
         }
         if system:
@@ -99,7 +131,7 @@ class GeminiClient:
                 return self._to_model_response(response)
             except ModelLayerError:
                 raise
-            except Exception as exc:  # noqa: BLE001 — classified below
+            except Exception as exc:  # noqa: BLE001 — classified immediately below
                 classified = self._classify(exc)
                 if not isinstance(classified, ServingError):
                     raise classified from exc
@@ -110,9 +142,15 @@ class GeminiClient:
 
     @staticmethod
     def _collect_tool_names(messages: list[dict[str, Any]]) -> dict[str, str]:
-        """tool_result blocks only carry tool_use_id, not the tool name Gemini's
-        function_response needs — recover it from the tool_use block that
-        proposed the call, which Runtime always places earlier in the list."""
+        """Index tool-call ids to tool names across the whole message list.
+
+        Needed because the two formats correlate a result with its call
+        differently: an Anthropic ``tool_result`` block carries only
+        ``tool_use_id``, while Gemini's ``function_response`` is keyed by
+        function *name*. The name is recoverable from the ``tool_use`` block
+        that proposed the call, which the runtime always places earlier in the
+        list, so this pre-pass builds the lookup before translation starts.
+        """
         id_to_name: dict[str, str] = {}
         for message in messages:
             content = message.get("content")
@@ -124,6 +162,19 @@ class GeminiClient:
 
     @staticmethod
     def _to_content(message: dict[str, Any], id_to_name: dict[str, str]) -> types.Content:
+        """Translate one internal message into a Gemini ``Content``.
+
+        Three role vocabularies have to be reconciled: the internal format uses
+        ``user``/``assistant`` and marks tool results as a ``user`` message
+        whose blocks are ``tool_result``, whereas Gemini uses
+        ``user``/``model``/``tool`` and infers nothing from part type. Hence the
+        ``is_tool_result`` flag rather than a direct role mapping.
+
+        Raises:
+            ContractError: Unknown block type. Raised rather than skipped —
+                silently dropping a block would send the model a conversation
+                that never happened.
+        """
         role = message["role"]
         content = message["content"]
 
@@ -139,6 +190,9 @@ class GeminiClient:
                 parts.append(types.Part.from_text(text=block["text"]))
             elif kind == "tool_use":
                 part = types.Part.from_function_call(name=block["name"], args=block["input"])
+                # Re-attach the opaque continuation token this same provider
+                # emitted on the previous turn. Gemini rejects a function_call
+                # part that arrives without it. See _to_model_response.
                 signature = (block.get("provider_data") or {}).get("thought_signature")
                 if signature is not None:
                     part.thought_signature = signature
@@ -159,6 +213,12 @@ class GeminiClient:
 
     @staticmethod
     def _to_gemini_tools(tools: list[dict[str, Any]]) -> types.Tool:
+        """Wrap internal tool schemas as Gemini function declarations.
+
+        Note ``parameters_json_schema``, not ``parameters``: the former takes a
+        JSON Schema document directly, which is what the registry already
+        produces, while the latter expects a hand-built ``Schema`` object.
+        """
         declarations = [
             types.FunctionDeclaration(
                 name=tool["name"],
@@ -171,17 +231,28 @@ class GeminiClient:
 
     @staticmethod
     def _to_model_response(response: Any) -> ModelResponse:
-        # response.function_calls is a convenience view that drops
-        # thought_signature — read the real parts to keep it, or a
-        # multi-turn tool loop 400s on the follow-up call (thinking models
-        # require it echoed back verbatim; see docs/SYSTEM_DESIGN.md).
+        """Translate a Gemini response back into the protocol's shape.
+
+        Reads ``candidates[0].content.parts`` rather than the far tidier
+        ``response.function_calls`` convenience property, because that property
+        returns only the function calls and drops the ``thought_signature``
+        attached to the part carrying them. That signature is opaque state tied
+        to the model's own reasoning, and it must be echoed back verbatim on
+        the next turn or the follow-up request is rejected with
+        ``400 INVALID_ARGUMENT``. Losing it does not degrade the reply; it ends
+        the conversation. It travels onward as
+        :data:`~bacteria.model.protocol.ToolCall` ``provider_data``, which the
+        runtime forwards without reading.
+        """
         parts = response.candidates[0].content.parts if response.candidates else []
-        tool_calls: list[dict[str, Any]] = []
+        tool_calls: list[ToolCall] = []
         for i, part in enumerate(parts):
             call = part.function_call
             if call is None:
                 continue
-            tool_call: dict[str, Any] = {
+            tool_call: ToolCall = {
+                # Gemini does not always issue call ids; the internal format
+                # requires one to correlate the result, so synthesize by index.
                 "id": call.id or f"call_{i}",
                 "name": call.name,
                 "input": dict(call.args or {}),
@@ -203,6 +274,14 @@ class GeminiClient:
 
     @staticmethod
     def _classify(exc: Exception) -> ModelLayerError:
+        """Map a raw Gemini SDK exception onto the model-layer taxonomy.
+
+        The SDK splits failures by HTTP range — ``ClientError`` for 4xx,
+        ``ServerError`` for 5xx — which does not line up with retryability.
+        429 is a 4xx but is exactly the case worth retrying, so it is pulled
+        out of the client-error branch explicitly; without that, rate limits
+        would fail on the first attempt.
+        """
         if isinstance(exc, genai_errors.ClientError):
             message = str(exc).lower()
             if exc.code in (401, 403) or any(hint in message for hint in _AUTH_HINTS):

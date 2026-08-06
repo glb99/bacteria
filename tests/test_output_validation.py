@@ -1,5 +1,4 @@
-"""Load-bearing invariant test for structured output validation (Part 2:
-'schema validity is shape, not truth' — but shape must still be enforced)."""
+"""Invariant tests for output validation: shape is enforced, truth is not claimed."""
 
 import pytest
 from pydantic import BaseModel

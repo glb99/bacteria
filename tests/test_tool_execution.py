@@ -1,4 +1,4 @@
-"""Load-bearing invariant tests for tool execution (Part 6 decisions)."""
+"""Invariant tests for the one place a side effect can happen."""
 
 import pytest
 
@@ -26,9 +26,12 @@ def test_unknown_tool_call_is_rejected():
 
 
 def test_rejected_approval_prevents_the_handler_from_running():
-    """The approval hook must gate execution *before* the handler runs, not
-    just report rejection after the fact — Part 6's failure mode #7
-    ('approval hidden in implementation') is exactly this happening silently."""
+    """Rejection must mean nothing happened, not that something is regretted.
+
+    A gate checked after the handler runs still reports "rejected" and is
+    worthless — the side effect already landed. The assertion that matters is
+    the empty ``called`` list, not the raised exception.
+    """
     called = []
     registry = make_registry(handler=lambda tool_input: called.append(tool_input))
 

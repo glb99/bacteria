@@ -1,8 +1,12 @@
-"""Load-bearing invariant tests for the runtime (Part 4, 6, and 7 decisions)."""
+"""Invariant tests for the runtime: ordering, delegation, and what survives failure.
+
+The runtime is where the layers meet, so these are mostly integration tests —
+they assert that a turn *delegates* correctly, not that any one layer works.
+"""
 
 import pytest
 
-from bacteria.model.client import ModelResponse
+from bacteria.model.protocol import ModelResponse
 from bacteria.runtime.runtime import Runtime, StepAlreadyExecutedError, StepTracker
 from bacteria.session.store import SessionStore
 from bacteria.tools.execution import ToolExecutionError
@@ -10,8 +14,11 @@ from bacteria.tools.registry import ToolDefinition, ToolRegistry
 
 
 def test_step_cannot_silently_run_twice():
-    """The load-bearing property this part is actually about: a step, once
-    executed, refuses to run again within the same run."""
+    """A step, once executed, refuses to run again within the same run.
+
+    Guards the expensive bug class here: control flow looping back over a step
+    whose side effect already landed.
+    """
     tracker = StepTracker()
     tracker.run_once("step-1", lambda: "done")
 
@@ -31,10 +38,13 @@ def test_each_turn_gets_a_fresh_run_id(make_fake_model_client):
     assert result_a.run_id != result_b.run_id
 
 
-def test_runtime_commits_via_propose_commit_not_direct_write(make_fake_model_client):
-    """'Model/runtime output is always a proposal, never a direct write' (Part 3)
-    — verified here at the integration level: after a turn, the change is
-    visible only through the store's own committed state."""
+def test_runtime_commits_via_the_store_not_by_direct_write(make_fake_model_client):
+    """The runtime proposes; only the store writes.
+
+    Checked at the integration level: after a turn, the change is visible
+    through the store's own state, which is only possible if it went through
+    commit().
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     client = make_fake_model_client(text="assistant reply")
@@ -47,8 +57,11 @@ def test_runtime_commits_via_propose_commit_not_direct_write(make_fake_model_cli
 
 
 def test_runtime_calls_model_client_exactly_once_per_turn(make_fake_model_client):
-    """The runtime orchestrates the model client; it doesn't retry or
-    duplicate the call on its own."""
+    """The runtime does not retry or duplicate the model call.
+
+    Retry lives in the model client, where the request is known to be
+    side-effect free. A second retry layer here would multiply attempts.
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     client = make_fake_model_client()
@@ -60,8 +73,11 @@ def test_runtime_calls_model_client_exactly_once_per_turn(make_fake_model_client
 
 
 def test_second_turn_sees_prior_transcript(make_fake_model_client):
-    """Runtime reads existing transcript state before assembling the next
-    turn's messages — session store remains the source of truth."""
+    """History comes from the store, not from anything the runtime kept.
+
+    The runtime holds no state between turns; a second turn sees the first only
+    because it re-reads the source of truth.
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     client = make_fake_model_client()
@@ -94,9 +110,13 @@ class FakeToolCallingClient:
 
 
 def test_runtime_executes_tool_calls_via_the_execution_module_not_the_model_client():
-    """The load-bearing property Part 6 is actually about: a tool call is
-    executed by the dedicated execution module, orchestrated by Runtime —
-    never by the model client itself, which only ever reports the proposal."""
+    """A proposal becomes an action only by passing through the execution module.
+
+    The model client reports; the runtime sequences; execution runs. This
+    asserts all three at once — the handler ran exactly once, and the model was
+    called twice, meaning the second call carried real results rather than the
+    model having somehow acted for itself.
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     client = FakeToolCallingClient()
@@ -121,9 +141,12 @@ def test_runtime_executes_tool_calls_via_the_execution_module_not_the_model_clie
 
 
 def test_tool_execution_is_recorded_in_the_transcript():
-    """Checklist item 7: 'trace the whole path.' A tool call must be visible
-    in session state, not disappear between the two model calls — directly
-    guards failure mode #7 ('approval hidden in implementation')."""
+    """A tool call must be visible in session state, not only in the model exchange.
+
+    Without this, what ran and what it returned exists only inside a callback
+    and between two API calls — so the one durable record of the conversation
+    would show an assistant answer with no account of where it came from.
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     client = FakeToolCallingClient()
@@ -165,9 +188,12 @@ def make_get_time_registry(handler=None) -> ToolRegistry:
 
 
 def test_runtime_honors_a_rejecting_approval_callback():
-    """The load-bearing property Part 7 is actually about: Runtime must not
-    execute a tool call the approval boundary rejected, and must not silently
-    swallow the rejection either."""
+    """A rejected call does not run, and the rejection is not swallowed.
+
+    Both halves matter. Running it anyway defeats the gate; catching the
+    rejection and continuing quietly leaves the user believing they stopped
+    something they did not.
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     client = FakeToolCallingClient()
@@ -188,9 +214,12 @@ def test_runtime_honors_a_rejecting_approval_callback():
 
 
 def test_a_rejected_tool_call_still_leaves_evidence_in_the_transcript():
-    """Part 8's invariant: a failed run must still leave enough evidence to
-    explain how the system got there — a rejection must not vanish along
-    with the exception that carried it."""
+    """A failed run still commits enough evidence to explain itself.
+
+    The exception carries the failure to the caller and then it is gone. What
+    remains has to be in the transcript: the user's message, the attempt, and
+    why it stopped.
+    """
     store = SessionStore()
     session = store.create_session(user_id="u1")
     client = FakeToolCallingClient()
@@ -215,8 +244,12 @@ def test_a_rejected_tool_call_still_leaves_evidence_in_the_transcript():
 
 
 class FakeFailingClient:
-    """Fails on the very first model call — enough to prove a run-level
-    failure (unrelated to tools) still commits accumulated evidence."""
+    """Fails on the first model call, before any tool is involved.
+
+    Covers the other route into the failure path: not a rejected tool, but the
+    model call itself. This is the case that loses the user's own message if
+    evidence is not committed.
+    """
 
     def send(self, messages, **kwargs) -> ModelResponse:
         raise RuntimeError("model backend unavailable")

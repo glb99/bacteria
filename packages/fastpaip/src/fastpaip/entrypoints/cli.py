@@ -6,18 +6,22 @@ into `fastpaip.auth.service`, and prints the result; the decisions live there.
 Exists as a command rather than a route because issuing a key over HTTP needs a
 key to authorize it, and the first one has nowhere to come from. Running this
 requires access to the machine and the database, which is the correct bar.
+
+Does not create the schema. It used to, which made it a second way for tables to
+appear -- and a tool that quietly builds a database when pointed at an empty one
+will eventually be pointed at the wrong one and build it there. Run
+``just migrate`` first.
 """
 
 import argparse
 import asyncio
 
 from fastpaip.auth.service import issue_key, revoke_key
-from fastpaip.core.db import create_tables, get_engine
+from fastpaip.core.db import get_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 async def _issue(principal_id: str, label: str) -> int:
-    await create_tables()
     async with AsyncSession(get_engine()) as session:
         token = await issue_key(session, principal_id=principal_id, label=label)
 

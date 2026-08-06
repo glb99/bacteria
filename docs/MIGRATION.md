@@ -340,6 +340,20 @@ an entry point is for.
 
    Still open: key scopes and expiry, and tenancy for ingested records.
 
-9. **Next.** Audio. This is the one that re-opens the model protocol for
+9. ~~Migrations.~~ **Done.** Alembic owns the schema. Nothing creates tables at
+   startup any more — the server does not, and the admin CLI stopped doing so
+   too, since a tool that quietly builds a database when pointed at an empty one
+   will eventually be pointed at the wrong one.
+
+   The part worth keeping is `test_migrations.py`: it replays every migration
+   and asserts no autogenerate diff against the models. Without it, the drift
+   is silent in exactly the wrong direction — tests build from the models and
+   pass, while production is missing a column. It was verified by adding a
+   field without a migration and watching it fail.
+
+   It earned its keep immediately: it found that the leftover `User` model from
+   the template had never been in any migration.
+
+10. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

@@ -1,25 +1,23 @@
 """ASGI entrypoint: configuration, and nothing else.
 
-Everything here is a deployment decision — build the app, decide whether it
-creates its own schema, set the log level. The logic being configured lives
-elsewhere.
+Everything here is a deployment decision — build the app and set the log level.
+The logic being configured lives elsewhere.
+
+Note what this does *not* do: create tables. The schema belongs to Alembic, and
+a deployment runs ``alembic upgrade head`` before starting this process. An
+application that builds its own schema on boot will, the first time a model
+changes, start successfully against a database that is missing a column and fail
+later at the query — which is a worse failure than refusing to start.
 """
 
 import logging
 
-from fastpaip.core.db import create_tables
 from fastpaip.core.settings import get_settings
-from fastpaip.views import create_app, lifespan_running
+from fastpaip.views import create_app
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
 
-# Creating the schema is a development convenience and wrong for production: it
-# adds missing tables and is silently insufficient once a column changes. See
-# the migrations gap in fastpaip.core.db.
-#
-# It runs in the application's lifespan rather than here at import, so that
-# importing this module does not connect to a database. See lifespan_running.
-app = create_app(lifespan=lifespan_running(create_tables))
+app = create_app()
 
 __all__ = ["app"]

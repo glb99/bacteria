@@ -8,6 +8,7 @@ dependencies = [
     "granian",
     "sqlmodel",
     "aiosqlite",
+    "alembic",
     "pydantic-settings",
 ]
 

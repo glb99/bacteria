@@ -21,6 +21,10 @@ just install
 ```
 
 ```bash
+just migrate
+```
+
+```bash
 just test
 ```
 
@@ -94,10 +98,15 @@ Keys are issued by an operator command, not an endpoint:
 uv run fastpaip-admin issue-key acme-corp --label "acme production"
 ```
 
-Deliberately absent, each recorded where it would be filled: migrations
-(`create_all` stands in), background workers, key scopes and expiry, tenancy for
-ingested records, tools over HTTP (approval has nobody to ask until a run can
-pause), and audio. What is planned and why is in
+The schema belongs to Alembic. Nothing creates tables on startup — not the
+server, not the admin CLI — because a process that builds its own schema starts
+happily against a database missing a column and fails later at the query. A test
+asserts the migrations and the models describe the same thing, so a model
+changed without a migration fails where it is cheap to fix.
+
+Deliberately absent, each recorded where it would be filled: background workers,
+key scopes and expiry, tenancy for ingested records, tools over HTTP (approval
+has nobody to ask until a run can pause), and audio. What is planned and why is in
 [`docs/MIGRATION.md`](docs/MIGRATION.md).
 
 ## License

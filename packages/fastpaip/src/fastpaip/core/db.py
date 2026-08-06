@@ -18,12 +18,12 @@ where the win is modest; the production target is Postgres, where it is the
 difference between serializing every request behind a network round trip and
 not.
 
-Not built:
-    Migrations. ``create_tables`` creates tables that do not exist and does
-    nothing to ones that do — so it is correct exactly once per database and
-    silently insufficient every time a column changes afterwards. Alembic is
-    what belongs here, and until it exists this is a development convenience
-    that must not be what production relies on.
+Schema is owned by Alembic, in ``packages/fastpaip/migrations``. Nothing here
+creates tables at startup: a deployment runs ``alembic upgrade head`` before the
+application starts, so the schema a running process sees is one someone wrote
+down and reviewed. ``create_tables`` below exists for tests, which want a schema
+in one call and do not want to replay a migration history to get it — and a test
+asserts the two agree, since a schema built two ways is a schema that can drift.
 """
 
 from collections.abc import AsyncIterator
@@ -54,16 +54,27 @@ def get_engine() -> AsyncEngine:
     return create_async_engine(get_settings().database_url)
 
 
-async def create_tables() -> None:
-    """Create any table that does not exist yet. See the migrations gap above."""
+async def create_tables(engine: AsyncEngine | None = None) -> None:
+    """Build the whole schema in one call, from the models.
+
+    For tests. A deployment runs ``alembic upgrade head`` instead — this skips
+    the migration history entirely, so it can produce a schema that no sequence
+    of migrations would, which is exactly the drift
+    ``test_migrations.py`` exists to catch.
+
+    Args:
+        engine: Defaults to the process engine. Tests pass their own, which is
+            the only reason this takes an argument.
+    """
     # Imported for the side effect of registering tables on SQLModel.metadata.
     # Without this, create_all sees an empty registry and silently creates
     # nothing — the failure then appears much later, as a missing table.
+    from fastpaip import models as _root_models  # noqa: F401
     from fastpaip.auth import models as _auth_models  # noqa: F401
     from fastpaip.chat import models as _chat_models  # noqa: F401
     from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
 
-    async with get_engine().begin() as connection:
+    async with (engine or get_engine()).begin() as connection:
         # create_all is a synchronous SQLAlchemy API; run_sync drives it on the
         # async connection rather than opening a second, synchronous one.
         await connection.run_sync(SQLModel.metadata.create_all)

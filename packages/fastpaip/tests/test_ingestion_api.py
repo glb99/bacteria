@@ -12,7 +12,7 @@ from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.auth.service import issue_key
-from fastpaip.core.db import session_scope
+from fastpaip.core.db import create_tables, session_scope
 from fastpaip.ingestion.models import IngestedRecord, IngestionBatch, RejectedRecord
 from fastpaip.views import create_app, lifespan_running
 
@@ -44,8 +44,7 @@ async def _token(db_engine, client):
 @pytest.fixture(name="client")
 def _client(db_engine):
     async def _create_tables():
-        async with db_engine.begin() as connection:
-            await connection.run_sync(SQLModel.metadata.create_all)
+        await create_tables(db_engine)
 
     async def _test_session():
         async with AsyncSession(db_engine) as session:

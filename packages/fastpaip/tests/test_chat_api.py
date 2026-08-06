@@ -16,7 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.auth.service import issue_key
 from fastpaip.chat import service
-from fastpaip.core.db import session_scope
+from fastpaip.core.db import create_tables, session_scope
 from fastpaip.views import create_app, lifespan_running
 
 
@@ -58,8 +58,7 @@ async def _token(engine, client):
 @pytest.fixture(name="client")
 def _client(engine, monkeypatch):
     async def _create_tables():
-        async with engine.begin() as connection:
-            await connection.run_sync(SQLModel.metadata.create_all)
+        await create_tables(engine)
 
     async def _test_session():
         async with AsyncSession(engine) as session:

@@ -58,9 +58,30 @@ typing:
 check-all: lint cov typing
 
 
-# Run development server
+# Apply all pending migrations
+[group('db')]
+migrate *args="head":
+    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini upgrade {{ args }}
+
+# Generate a migration from changes to the models -- always read it before committing
+[group('db')]
+makemigration message:
+    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini revision --autogenerate -m "{{ message }}"
+
+# Undo the last migration
+[group('db')]
+rollback *args="-1":
+    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini downgrade {{ args }}
+
+# Show the migration the database is currently at
+[group('db')]
+db-version:
+    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini current
+
+
+# Run development server -- migrates first, as a deployment would
 [group('run')]
-serve:
+serve: migrate
     uv run {{ ARGS_SERVE }} -m fastapi dev packages/fastpaip/src/fastpaip/entrypoints/asgi.py --port {{ PORT }}
 
 # Talk to the agent in a terminal

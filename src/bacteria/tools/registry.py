@@ -20,7 +20,11 @@ Not built:
     needs. If adopted, the role would be MCP *client* — this system is the one
     that wants capabilities, not the one exposing them. It would attach as an
     alternative source of ``ToolDefinition`` objects feeding ``register``, so
-    execution and approval would not change. See ``docs/adr/0009-local-tools-not-mcp.md``.
+    execution and approval would not change — name, description, and input
+    schema map over directly, with the handler becoming an RPC call. The cost of
+    staying local is that no third-party MCP server can be used, so any
+    capability someone else already built has to be reimplemented here; that
+    cost grows with the appetite for integrations.
 
     Policy behind ``schemas_for_run``. The narrowing mechanism exists; nothing
     decides what to narrow *to*. Real policy would key off the caller's identity,

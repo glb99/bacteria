@@ -4,9 +4,10 @@ A single ``ModelCallFailed`` exception would be easier to write and useless to
 act on: the caller could not tell a rate limit (wait and retry) from a blown
 context window (reshape the request) from a missing API key (stop and tell the
 operator). Retry policy is decided by the class of the exception raised here,
-so the split is load-bearing rather than cosmetic — see
-``docs/adr/0007-tool-calls-are-proposals.md`` for the adjacent decision that
-keeps retries side-effect-free.
+so the split is load-bearing rather than cosmetic. Working alongside it is
+also the rule that keeps retrying safe at all: model clients cannot execute
+anything, so there is no side effect in this layer for a second attempt to
+duplicate (:mod:`bacteria.tools.execution` is the only place a handler runs).
 
 The three-way asset/serving/contract split describes ways a *well-formed,
 authorized attempt* to reach a model can fail. :class:`CredentialsError` sits

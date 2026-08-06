@@ -9,9 +9,14 @@ and it is the reason ``bacteria.model.client`` (Anthropic) and
 no other module noticing.
 
 The contract is deliberately narrow: one method returning one shape. It does
-not abstract over streaming, token accounting, prompt caching, or batching. A
+not abstract over streaming, token accounting, prompt caching, or batching. The
+rejected alternative was a full provider abstraction layer covering all of
+those — written before a second provider exists, such a layer is a guess about
+what providers have in common, and the guess generalizes from one SDK's shape.
+The second provider then either does not fit or forces the interface wider,
+until it is the union of every vendor's surface area and abstracts nothing. A
 wide contract has to be re-widened for every provider added; a narrow one only
-has to be honored. See ``docs/adr/0005-narrow-model-protocol.md``.
+has to be honored.
 
 Wire-format caveat, and it is a real one: the *messages* passed to
 :meth:`SendsMessages.send` are **not** provider-neutral. They use Anthropic's
@@ -21,8 +26,17 @@ non-Anthropic client must therefore translate those shapes on the way in and
 translate its own response back into :class:`ModelResponse` on the way out —
 see :mod:`bacteria.model.gemini_client` for a worked example of how much
 translation that actually is. The protocol guarantees the *call* is swappable,
-not that the payload crossing it is format-neutral. See
-``docs/adr/0006-anthropic-block-shapes-as-internal-format.md``.
+not that the payload crossing it is format-neutral.
+
+A third, neutral format was considered and rejected. It is more principled and
+costs more than it looks: another format to design, document, version, and keep
+in sync with two moving vendor formats, whose correctness is only observable
+through the clients consuming it — so it adds a layer without adding a place to
+catch bugs. It would also have been designed by generalizing from a single known
+vendor format, which makes "neutral" aspirational. The cost of the choice made
+instead is real and falls entirely on non-Anthropic clients; it is paid in
+:mod:`bacteria.model.gemini_client`, and it is worth reading that module before
+adding a third provider.
 """
 
 from __future__ import annotations

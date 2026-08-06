@@ -13,9 +13,13 @@ by reading one function instead of auditing the orchestration path.
 
 The current strategy is a hard recent-message window — the last N messages,
 nothing older. Blunt on purpose. It fixes unbounded growth, which is the
-failure that actually happens, without the machinery of summarization, which
-introduces a failure of its own (silently lossy history) in exchange for
-capacity nothing here needs yet. See ``docs/adr/0010-bounded-context-window.md``.
+failure that actually happens, without the machinery of summarization. That was
+the rejected alternative, and it trades one failure for a worse-behaved one: a
+summarizer decides what to discard, silently, and when it discards the wrong
+thing the model behaves as though something never happened. Running out of
+window is at least loud. Losing the start of a long conversation is the accepted
+cost here, and it is accepted because it is *comprehensible* — "we keep the last
+twenty messages" is something a user can be told.
 
 Memory is surfaced through ``system``, never appended to ``messages``. Merged
 into the message list it would be indistinguishable from something the user

@@ -33,9 +33,15 @@ lose:
 - **trace ≠ audit** — how the system reached a result, versus who is answerable
   for it.
 
-Reading order for someone new: this file, then ``docs/ARCHITECTURE.md`` for the
-request path and the ownership map, then ``docs/adr/`` for why any particular
-thing is the way it is.
+**This package is self-contained.** The reasoning behind every decision lives in
+the docstrings, not in an external document, so the code can be vendored into a
+larger project without losing why it is shaped this way. Reading order: this
+file, then each subpackage's ``__init__``, then the module you need. Each states
+what it owns, what it refuses to do, and — where a plausible simpler approach was
+tried and failed — what was rejected and why, so nobody tries it again.
+
+If a ``docs/`` directory travelled alongside, it holds the same decisions in
+long form as numbered records. It is supplementary; nothing here depends on it.
 
 **On the gaps.** This system is deliberately incomplete — no persistence, no
 retrieval, no isolation, no multi-round tool loop. Those absences are decisions
@@ -49,4 +55,12 @@ companion marker is ``Invariant:``, flagging properties that are load-bearing �
 those have tests, and breaking one is a bug rather than a design change::
 
     grep -rn "Invariant:" src/
+
+Keep both accurate when changing things. A ``Not built:`` block describing
+something that now exists, or an ``Invariant:`` with no test behind it, is worse
+than no marker at all — it is a claim a reader has no reason to doubt.
+
+**On the sparse test suite.** The tests here cover architectural invariants, not
+lines. That is deliberate and explained in ``tests/conftest.py``; read it before
+concluding the coverage is an oversight, and before adding a coverage gate.
 """

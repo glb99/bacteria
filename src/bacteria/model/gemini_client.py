@@ -5,11 +5,13 @@ an assertion; with two it is a tested claim. Swapping this in requires no
 change to :mod:`bacteria.runtime.runtime`, the tool loop, or the session store
 — only the CLI's provider table names it.
 
-This class is also the concrete cost of the decision recorded in
-``docs/adr/0006-anthropic-block-shapes-as-internal-format.md``: because the
-runtime speaks Anthropic's block vocabulary, a second provider does real
+This class is also where the cost of the internal message format is paid.
+Because the runtime speaks Anthropic's block vocabulary rather than a neutral
+one (see :mod:`bacteria.model.protocol`), a second provider does real
 translation work rather than merely matching a method signature. Everything
-below the constructor is that translation, in both directions.
+below the constructor is that translation, in both directions — role remapping,
+a pre-pass to recover function names, and schema field differences. Budget for
+it when adding a third provider.
 
 Failures are classified into the same
 :mod:`~bacteria.model.errors` taxonomy the Anthropic client uses. Those

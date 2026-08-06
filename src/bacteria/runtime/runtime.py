@@ -24,7 +24,9 @@ inside a turn commits everything accumulated so far, tagged with a
 ``run_error`` item, before re-raising. A failed run that commits nothing is the
 worst of both outcomes: the user's message is gone, the failure is unexplained,
 and the only record is a stack trace in a terminal someone has since closed.
-See ``docs/adr/0012-commit-evidence-on-failure.md``.
+This is why evidence accumulates as the turn progresses rather than being
+assembled at the end from results — the natural implementation loses exactly the
+runs worth investigating.
 
 Invariant: within a run, a step executes at most once. :class:`StepTracker`
 refuses a repeated step id rather than trusting that no code path loops back.
@@ -39,15 +41,20 @@ Not built:
     property than idempotency across restarts. Making runs durable means
     persisting ``run_id`` and the executed-step set after each step, and
     reloading them on resume; the session store's persistence gap has to be
-    closed first, since a resumed run needs the state it was operating on. See
-    ``docs/adr/0003-in-memory-state.md``.
+    closed first, since a resumed run needs the state it was operating on.
+    Worth doing deliberately rather than approximately: retry, replay, resume,
+    and idempotency are four different properties, and a system that persists a
+    checkpoint while getting step boundaries wrong resumes into a state where a
+    side effect runs twice — silently, and with confidence it has not earned.
 
     Multi-round tool loops. Exactly one round of tool execution happens per
     turn: model, tools, model, done. A model that wants a second round after
-    seeing results cannot have one. Lifting this means looping until the model
-    stops requesting tools, which needs a round cap, a cost budget, and a
-    story for partial failure mid-loop. See
-    ``docs/adr/0011-single-round-tool-loop.md``.
+    seeing results cannot have one — its follow-up response is the final answer.
+    This bounds a turn's cost to two model calls and makes it knowable in
+    advance, and it is also the ceiling on what this agent can do. Lifting it is
+    confined to ``run_turn`` but is not merely a ``while`` loop: the round cap,
+    the cost budget, and the policy for partial failure after earlier rounds
+    already had side effects all have to be decided at the same time.
 
     Run resolution. Every turn starts a new run. Deciding whether an incoming
     event resumes an existing run, appends to it, or forks a new one is a

@@ -22,9 +22,11 @@ copy the invariant would hold only as long as every caller behaved, and the
 class of bug it prevents (authoritative state quietly edited from outside the
 module that owns it) is close to untraceable once it happens.
 
-Everything a model or runtime produces reaches this store as a *proposal*: it
-is passed to ``commit`` and becomes canonical only if ``commit`` applies it.
-Nothing else may write. See ``docs/adr/0004-single-commit-path.md``.
+Everything a model or runtime produces reaches this store as a *proposal*: it is
+passed to ``commit`` and becomes canonical only if ``commit`` applies it. The
+model cannot see concurrency, ordering, or what the record looks like right now,
+so it cannot hold commit authority — and neither can code holding a stale copy.
+Nothing else may write.
 
 Not built:
     Persistence. Sessions live in a process-local dict and vanish on exit, so
@@ -32,8 +34,9 @@ Not built:
     already the right shape for it: ``SessionStore``'s four public methods are
     the complete set of operations a backing store would need to implement, so
     persistence means a second implementation of this class (SQLite, Postgres,
-    Redis) plus a way to pick one, not a change to any caller. See
-    ``docs/adr/0003-in-memory-state.md``.
+    Redis) plus a way to pick one, not a change to any caller. It drags in two
+    things beyond the backend itself: serialization for :class:`TranscriptItem`
+    and :class:`MemoryEntry`, and the concurrency control below.
 
     Concurrency control. ``commit`` assumes it is the only writer. With more
     than one, it would need a staleness check — a version or ETag on

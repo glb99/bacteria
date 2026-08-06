@@ -8,12 +8,14 @@ every other test shares.
 from fastapi import FastAPI
 
 from fastpaip.chat.views import router as chat_router
+from fastpaip.ingestion.views import router as ingestion_router
 
 
 def create_app() -> FastAPI:
     """Build the application. Adding a feature means adding a router here."""
     app = FastAPI(title="fastpaip")
     app.include_router(chat_router)
+    app.include_router(ingestion_router)
 
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, str]:

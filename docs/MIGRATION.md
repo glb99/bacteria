@@ -301,5 +301,17 @@ an entry point is for.
    runs can pause and resume; and the SQL repository's methods are async over
    synchronous queries, which blocks the loop and is the first thing to change
    under real load.
-6. Ingestion, then audio. Audio is the one that will re-open the model protocol
-   for `send_stream`; leave it last for that reason.
+6. ~~Ingestion.~~ **Done**, as generic record ingestion: a validate →
+   normalize → persist chain built from `core.handlers`, which is the first
+   real use of that machinery. Rejections are stored, not counted.
+
+   Deferred and recorded where they would go: background execution
+   (`entrypoints/queue_worker.py` is a documented stub — the open question is
+   which broker and whether jobs survive a restart, and batches are capped at
+   500 inline in the meantime), and cross-batch duplicate handling, which needs
+   someone to choose between "update the existing row" and "reject the new
+   one".
+
+7. **Next.** Audio. This is the one that re-opens the model protocol for
+   `send_stream`, which is a boundary change in bacteria and gets its own ADR
+   before any code.

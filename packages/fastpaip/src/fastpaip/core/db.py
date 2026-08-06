@@ -36,6 +36,7 @@ def create_tables() -> None:
     # Without this, create_all sees an empty registry and silently creates
     # nothing — the failure then appears much later, as a missing table.
     from fastpaip.chat import models as _chat_models  # noqa: F401
+    from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
 
     SQLModel.metadata.create_all(get_engine())
 

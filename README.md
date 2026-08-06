@@ -45,7 +45,9 @@ packages/
   bacteria/           the agent — see its own README
   fastpaip/
     src/fastpaip/
-      core/           protocols, handlers, adapters — cross-cutting infrastructure
+      core/           protocols, handlers, adapters, settings, db — cross-cutting
+      chat/           conversations with the agent, durably stored
+      ingestion/      validate → normalize → persist, built from core.handlers
       entrypoints/    asgi · cli · worker — configuration only, no logic
     tests/
 docs/
@@ -73,9 +75,14 @@ becoming one tangled one.
 
 ## Status
 
-Skeleton. The agent works end to end; the application is a health endpoint and
-a set of empty modules waiting for their first feature. What is planned, in what
-order, and why, is in [`docs/MIGRATION.md`](docs/MIGRATION.md).
+Two features working end to end. `chat/` runs agent turns against durably
+stored sessions; `ingestion/` takes batches of records through a handler chain
+and records what happened to every one of them.
+
+Deliberately absent, each recorded where it would be filled: migrations
+(`create_all` stands in), background workers, tools over HTTP (approval has
+nobody to ask until a run can pause), and audio. What is planned and why is in
+[`docs/MIGRATION.md`](docs/MIGRATION.md).
 
 ## License
 

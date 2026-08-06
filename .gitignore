@@ -9,3 +9,6 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 dist/
+
+# Local database created by create_tables()
+*.db

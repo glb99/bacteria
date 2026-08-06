@@ -26,6 +26,7 @@ together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | [0012](0012-commit-evidence-on-failure.md) | Commit evidence even when a run fails | Accepted |
 | [0013](0013-test-load-bearing-invariants-only.md) | Test load-bearing invariants only | Accepted |
 | [0014](0014-async-at-the-io-boundaries.md) | Make the I/O boundaries async; keep the pure layers synchronous | Accepted |
+| [0015](0015-session-store-behind-a-protocol.md) | Put the session store behind a protocol the host implements | Accepted |
 
 ## Writing a new one
 

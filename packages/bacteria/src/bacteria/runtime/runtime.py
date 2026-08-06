@@ -4,8 +4,9 @@ The runtime is a conductor, not a performer. It decides what happens in what
 order and delegates every step: context assembly to
 :mod:`bacteria.context.assembly`, the model call to a
 :class:`~bacteria.model.protocol.SendsMessages` implementation, tool execution
-to :mod:`bacteria.tools.execution`, and every state write to
-:class:`~bacteria.session.store.SessionStore`. It reimplements none of them.
+to :mod:`bacteria.tools.execution`, and every state write to a
+:class:`~bacteria.session.protocol.SessionRepository`. It reimplements none of
+them.
 When that boundary erodes — when the runtime starts formatting prompts or
 touching the transcript directly — the system stops having answerable ownership
 questions, and every one of those decisions becomes a search of the orchestration
@@ -70,7 +71,8 @@ from typing import Any, Awaitable, Callable
 
 from bacteria.context.assembly import assemble_context
 from bacteria.model.protocol import ModelResponse, SendsMessages, ToolCall
-from bacteria.session.store import SessionState, SessionStore, TranscriptItem
+from bacteria.session.protocol import SessionRepository
+from bacteria.session.store import SessionState, TranscriptItem
 from bacteria.tools.execution import Approve, ToolExecutionError, ToolResult, execute_tool_call
 from bacteria.tools.registry import ToolRegistry
 
@@ -153,11 +155,14 @@ class Runtime:
             :class:`~bacteria.model.protocol.SendsMessages`. The runtime is
             written against the protocol and never against a provider, which is
             what makes providers swappable without touching this file.
-        session_store: The authoritative store. The runtime proposes; only the
-            store writes.
+        session_store: Anything satisfying
+            :class:`~bacteria.session.protocol.SessionRepository`. The runtime
+            proposes; only the store writes. Typed as the protocol rather than
+            the in-memory class so that a durable store is a second
+            implementation and not a change to this file.
     """
 
-    def __init__(self, model_client: SendsMessages, session_store: SessionStore) -> None:
+    def __init__(self, model_client: SendsMessages, session_store: SessionRepository) -> None:
         self._model_client = model_client
         self._session_store = session_store
 

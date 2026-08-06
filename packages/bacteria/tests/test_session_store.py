@@ -6,6 +6,7 @@ would cause a real bug — not every method, and not every branch.
 
 import pytest
 
+from bacteria.session.protocol import SessionRepository
 from bacteria.session.store import SessionStore, TranscriptItem, UnknownSessionError
 
 
@@ -120,3 +121,14 @@ async def test_forget_removes_a_memory_entry():
     await store.forget(session.session_id, key="pref")
 
     assert (await store.get_state(session.session_id)).memory == {}
+
+
+def test_the_in_memory_store_satisfies_the_repository_protocol():
+    """The shipped implementation must conform to the contract it defines.
+
+    Weak on its own — this checks that the methods exist, not that they behave —
+    but it fails immediately if the protocol and the store drift apart, which is
+    the likeliest way a host's implementation would be written against a shape
+    that no longer matches what the runtime calls.
+    """
+    assert isinstance(SessionStore(), SessionRepository)

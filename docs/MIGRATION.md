@@ -289,8 +289,17 @@ an entry point is for.
    unknown environment variables — pydantic-settings never collects prefixed
    variables that match no field, so they never reach the extras check. The
    guard is written by hand in `Settings._reject_unknown_prefixed_variables`.
-5. **Next.** First feature end to end, `chat/`, using the existing tests as the
-   shape. This is where the `SessionRepository` implementation lands and where
-   alembic gets introduced.
+5. ~~First feature end to end, `chat/`.~~ **Done.** The agent declares
+   `SessionRepository` (bacteria ADR 0015) and `chat/` implements it against
+   SQLModel; a conformance suite runs the same ten behaviours against both
+   implementations. Routes create a session, take a turn, and read a
+   transcript. Alembic is **not** done — `create_all` stands in, with the gap
+   recorded in `core/db.py`.
+
+   Two things deferred deliberately, both recorded where they would be filled:
+   tools are not offered over HTTP, because approval has nobody to ask until
+   runs can pause and resume; and the SQL repository's methods are async over
+   synchronous queries, which blocks the loop and is the first thing to change
+   under real load.
 6. Ingestion, then audio. Audio is the one that will re-open the model protocol
    for `send_stream`; leave it last for that reason.

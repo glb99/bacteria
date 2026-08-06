@@ -29,14 +29,16 @@ so it cannot hold commit authority — and neither can code holding a stale copy
 Nothing else may write.
 
 Not built:
-    Persistence. Sessions live in a process-local dict and vanish on exit, so
-    there is no cross-session memory and no resume after a restart. The seam is
-    already the right shape for it: ``SessionStore``'s four public methods are
-    the complete set of operations a backing store would need to implement, so
-    persistence means a second implementation of this class (SQLite, Postgres,
-    Redis) plus a way to pick one, not a change to any caller. It drags in two
-    things beyond the backend itself: serialization for :class:`TranscriptItem`
-    and :class:`MemoryEntry`, and the concurrency control below.
+    Persistence *here*. Sessions in this implementation live in a process-local
+    dict and vanish on exit, so on its own the agent has no cross-session memory
+    and no resume after a restart. The seam for a durable one is now explicit:
+    :class:`bacteria.session.protocol.SessionRepository` is the complete set of
+    operations a backing store must provide, and the runtime depends on that
+    protocol rather than on this class. A durable store is therefore an addition
+    made by whoever hosts this package, not a change to any caller here. What it
+    drags in beyond the backend itself: serialization for
+    :class:`TranscriptItem` and :class:`MemoryEntry`, and the concurrency
+    control below.
 
     Concurrency control. ``commit`` assumes it is the only writer. With more
     than one, it would need a staleness check — a version or ETag on

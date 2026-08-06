@@ -48,6 +48,13 @@ class Settings(BaseSettings):
             development and wrong everywhere else — it is deliberately obvious
             in logs rather than clever.
         log_level: Standard logging level name.
+        model_provider: Which model backs the agent. Named here rather than read
+            from the agent's own ``MODEL_PROVIDER`` because this application
+            composes the agent explicitly — two packages agreeing on an
+            environment variable is a coupling no import graph would reveal.
+            Provider *credentials* are not here: the SDKs read their own
+            variables, and routing a secret through this class would mean
+            holding it in a place with no reason to.
     """
 
     model_config = SettingsConfigDict(
@@ -59,6 +66,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./fastpaip.db"
     log_level: str = "INFO"
+    model_provider: str = "anthropic"
 
     @model_validator(mode="after")
     def _reject_unknown_prefixed_variables(self) -> "Settings":

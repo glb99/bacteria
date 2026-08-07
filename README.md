@@ -56,8 +56,13 @@ packages/
       entrypoints/    asgi · cli · worker — configuration only, no logic
     tests/
 docs/
+  ARCHITECTURE.md     sequence diagrams of each path through the system
   MIGRATION.md        the plan this structure came from, and what is left of it
 ```
+
+Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — a chat turn drawn
+end to end touches nearly every layer, and the boundaries below are visible in
+it.
 
 ## Conventions worth knowing before changing things
 

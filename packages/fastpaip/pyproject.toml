@@ -8,12 +8,16 @@ dependencies = [
     "granian",
     "sqlmodel",
     "aiosqlite",
+    "procrastinate",
+    "psycopg[binary,pool]",
     "alembic",
     "pydantic-settings",
 ]
 
 [project.scripts]
 fastpaip-admin = "fastpaip.entrypoints.cli:main"
+fastpaip-serve = "fastpaip.entrypoints.asgi:main"
+fastpaip-worker = "fastpaip.entrypoints.queue_worker:main"
 
 [tool.uv.sources]
 # Resolved from packages/bacteria rather than an index. The agent is developed

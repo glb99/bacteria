@@ -1,17 +1,53 @@
-"""Background worker entrypoint.
+"""Background worker entrypoint: configuration, and nothing else.
 
-Not built:
-    All of it. Ingestion currently runs inline in the request that submits it,
-    which bounds a batch to what a caller is willing to wait for and blocks the
-    event loop while it runs.
+Runs jobs enqueued by anything else in the system. It defines no work of its
+own — the tasks live with the features that own them, and this process only
+decides which queues to serve and with what concurrency.
 
-    What goes here: a loop that consumes ingestion jobs from a broker and calls
-    `fastpaip.ingestion.service.ingest`. What it is waiting on is a decision
-    rather than code — which broker, and whether jobs need to be durable across
-    a worker restart. Both are infrastructure commitments, and picking one to
-    make this file non-empty would be choosing the least considered part of the
-    system by accident.
+Run it alongside the web server:
 
-    Until then this module exists as the named place for it, so that the absence
-    is visible rather than merely true.
+    uv run fastpaip-worker
+
+A worker and the API are separate processes on purpose. They fail differently,
+scale differently, and a slow import must not be able to make the API
+unresponsive — which is precisely what happens while ingestion runs inline.
 """
+
+import argparse
+import logging
+
+from fastpaip.core.jobs import register_tasks
+from fastpaip.core import platform
+from fastpaip.core.settings import get_settings
+
+
+async def _run(queues: list[str] | None, concurrency: int) -> None:
+    app = register_tasks()
+    async with app.open_async():
+        await app.run_worker_async(queues=queues, concurrency=concurrency)
+
+
+def main() -> int:
+    """Parse arguments and run the worker until interrupted."""
+    parser = argparse.ArgumentParser(prog="fastpaip-worker", description=__doc__)
+    parser.add_argument(
+        "--queue",
+        action="append",
+        dest="queues",
+        help="serve only this queue; repeatable. Omit to serve all of them.",
+    )
+    parser.add_argument("--concurrency", type=int, default=4)
+    args = parser.parse_args()
+
+    logging.basicConfig(level=get_settings().log_level)
+    try:
+        platform.run(_run(args.queues, args.concurrency))
+    except KeyboardInterrupt:
+        # An interrupted worker is an ordinary way to stop one, not a crash.
+        # Procrastinate finishes the job in hand before the loop exits.
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

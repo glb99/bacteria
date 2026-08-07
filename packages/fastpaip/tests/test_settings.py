@@ -32,4 +32,4 @@ def test_unset_settings_fall_back_to_defaults(monkeypatch):
     settings = Settings(_env_file=None)
 
     assert settings.log_level == "INFO"
-    assert settings.database_url.startswith("sqlite+aiosqlite://")
+    assert settings.database_url.startswith("postgresql+psycopg://")

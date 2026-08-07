@@ -14,10 +14,10 @@ will eventually be pointed at the wrong one and build it there. Run
 """
 
 import argparse
-import asyncio
 
 from fastpaip.auth.service import issue_key, revoke_key
 from fastpaip.core.db import get_engine
+from fastpaip.core import platform
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 
@@ -58,8 +58,8 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.command == "issue-key":
-        return asyncio.run(_issue(args.principal_id, args.label or args.principal_id))
-    return asyncio.run(_revoke(args.key_id))
+        return platform.run(_issue(args.principal_id, args.label or args.principal_id))
+    return platform.run(_revoke(args.key_id))
 
 
 if __name__ == "__main__":

@@ -354,6 +354,12 @@ an entry point is for.
    It earned its keep immediately: it found that the leftover `User` model from
    the template had never been in any migration.
 
-10. **Next.** Audio. This is the one that re-opens the model protocol for
+10. ~~Background worker.~~ **Done.** Postgres as the queue via procrastinate,
+    chosen for transactional enqueue: a job commits with the data change that
+    justifies it, so the "row saved, job lost" window a broker leaves does not
+    exist. Development moved onto Postgres in the same step, which is what
+    `docker-compose.yml` is for.
+
+11. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

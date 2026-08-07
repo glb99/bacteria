@@ -54,6 +54,24 @@ def get_engine() -> AsyncEngine:
     return create_async_engine(get_settings().database_url)
 
 
+def include_name(name: str | None, type_: str, parent_names: dict) -> bool:
+    """Hide tables this application does not own from Alembic's autogenerate.
+
+    Procrastinate's four tables are installed by a migration that runs its
+    shipped SQL, so they exist in the database and in no SQLModel metadata.
+    Without this filter, autogenerate sees tables it does not recognize and
+    writes a migration to drop them — and the drift test reports a difference
+    that is not one.
+
+    Lives here rather than in ``migrations/env.py`` because that module calls
+    into Alembic's context at import and cannot be imported by anything else,
+    including the test that needs the same filter to compare like with like.
+    """
+    if type_ == "table" and name is not None and name.startswith("procrastinate"):
+        return False
+    return True
+
+
 async def create_tables(engine: AsyncEngine | None = None) -> None:
     """Build the whole schema in one call, from the models.
 

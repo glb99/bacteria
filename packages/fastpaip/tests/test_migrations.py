@@ -8,40 +8,91 @@ passes, because tests use the models — and production is missing a column.
 The usual way in is ordinary. Someone adds a field, runs the tests, sees green,
 and ships without generating a migration. This test is what makes that fail
 where it is cheap to fix.
+
+These run against real Postgres, not SQLite, and have to: one migration installs
+procrastinate's schema from its own Postgres SQL, so replaying the history is
+not something SQLite can do at all. Start it with `just db-up`.
 """
 
 import pathlib
+import uuid
 
 import pytest
+import sqlalchemy
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlmodel import SQLModel
 
 # Imported for the side effect of registering every table on SQLModel.metadata,
 # which is the thing being compared against.
+from fastpaip import models as _root_models  # noqa: F401
 from fastpaip.auth import models as _auth_models  # noqa: F401
 from fastpaip.chat import models as _chat_models  # noqa: F401
+from fastpaip.core.db import include_name
 from fastpaip.core.settings import get_settings
 from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
 
 ALEMBIC_INI = pathlib.Path(__file__).parent.parent / "alembic.ini"
 
 
+def _sync_url(url: str) -> str:
+    """No conversion needed, and saying so is the point.
+
+    `postgresql+psycopg://` is psycopg 3's dialect and serves both modes:
+    `create_engine` gives a synchronous engine, `create_async_engine` an async
+    one. This function exists so the next person does not "fix" the apparent
+    mismatch by stripping the prefix, which routes the URL to psycopg2.
+    """
+    return url
+
+
 @pytest.fixture(name="migrated_db")
-def _migrated_db(tmp_path, monkeypatch):
-    """A database built by replaying every migration."""
-    database = tmp_path / "migrated.db"
-    monkeypatch.setenv("FASTPAIP_DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    # env.py reads the URL through get_settings, which is cached for the process.
+def _migrated_db(monkeypatch):
+    """A throwaway database built by replaying every migration.
+
+    A fresh database per run rather than a shared one, because a migration
+    history is only meaningfully tested from empty — replaying it onto a
+    database that already has the tables proves nothing.
+    """
+    settings_url = get_settings().database_url
+    admin_url = _sync_url(settings_url.rsplit("/", 1)[0] + "/postgres")
+    name = f"fastpaip_migtest_{uuid.uuid4().hex[:12]}"
+
+    # An explicit connect_timeout, because the default is no timeout at all:
+    # with nothing listening on 5432 this blocks for minutes rather than being
+    # refused, and a suite that hangs when Postgres is down is worse than one
+    # that fails.
+    admin = create_engine(
+        admin_url, isolation_level="AUTOCOMMIT", connect_args={"connect_timeout": 3}
+    )
+    try:
+        with admin.connect() as connection:
+            connection.execute(text(f'CREATE DATABASE "{name}"'))
+    except sqlalchemy.exc.OperationalError:
+        pytest.skip("Postgres unreachable; run `just db-up`")
+
+    target = settings_url.rsplit("/", 1)[0] + "/" + name
+    monkeypatch.setenv("FASTPAIP_DATABASE_URL", target)
+    # env.py reads the URL through get_settings, which is cached per process.
     get_settings.cache_clear()
 
-    command.upgrade(Config(str(ALEMBIC_INI)), "head")
-
-    get_settings.cache_clear()
-    return database
+    try:
+        command.upgrade(Config(str(ALEMBIC_INI)), "head")
+        yield _sync_url(target)
+    finally:
+        get_settings.cache_clear()
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    f"WHERE datname = '{name}' AND pid <> pg_backend_pid()"
+                )
+            )
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin.dispose()
 
 
 def test_migrations_produce_exactly_what_the_models_describe(migrated_db):
@@ -50,16 +101,18 @@ def test_migrations_produce_exactly_what_the_models_describe(migrated_db):
     Fails when a model changed without a migration, and equally when a migration
     was hand-edited into saying something the models do not.
     """
-    # A synchronous engine purely to inspect: alembic's comparison API is
-    # synchronous, and this connection reads schema rather than serving traffic.
-    engine = create_engine(f"sqlite:///{migrated_db}")
+    engine = create_engine(migrated_db)
     with engine.connect() as connection:
-        context = MigrationContext.configure(connection, opts={"compare_type": True})
+        context = MigrationContext.configure(
+            connection,
+            opts={"compare_type": True, "include_name": include_name},
+        )
         differences = compare_metadata(context, SQLModel.metadata)
+    engine.dispose()
 
     assert differences == [], (
         "migrations and models disagree; run:\n"
-        "  just makemigration -m 'describe the change'\n"
+        '  just makemigration "describe the change"\n'
         f"differences: {differences}"
     )
 
@@ -69,11 +122,25 @@ def test_every_model_table_exists_after_migrating(migrated_db):
 
     When something is simply missing, this names the table.
     """
-    engine = create_engine(f"sqlite:///{migrated_db}")
+    engine = create_engine(migrated_db)
     with engine.connect() as connection:
-        from sqlalchemy import inspect
-
         present = set(inspect(connection).get_table_names())
+    engine.dispose()
 
     expected = set(SQLModel.metadata.tables)
     assert expected <= present, f"missing after migration: {sorted(expected - present)}"
+
+
+def test_the_job_schema_is_installed_by_the_migration_history(migrated_db):
+    """Procrastinate's tables come from its SQL, not from a model.
+
+    Nothing above would notice if that migration stopped running, because the
+    metadata comparison is told to ignore these tables — so the absence would
+    look exactly like agreement.
+    """
+    engine = create_engine(migrated_db)
+    with engine.connect() as connection:
+        present = set(inspect(connection).get_table_names())
+    engine.dispose()
+
+    assert {"procrastinate_jobs", "procrastinate_events"} <= present

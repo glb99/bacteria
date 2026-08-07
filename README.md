@@ -22,8 +22,14 @@ Needs Python 3.13+, [uv](https://docs.astral.sh/uv/), and
 `.env` is required for anything that calls a model.
 
 ```bash
-just install && just migrate && just test
+just db-up && just install && just migrate && just test
 ```
+
+`just db-up` starts Postgres in Docker and waits until it accepts queries.
+Development runs on the same database production does — SQLite was the default
+for a while and hid two things: it has no `SKIP LOCKED`, which the job queue
+needs, and its DDL differs enough that a migration could pass here and fail in
+production.
 
 Issue yourself a credential — an operator command, not an endpoint:
 
@@ -35,6 +41,13 @@ It prints the key once. Only a hash is stored, so it cannot be shown again.
 
 ```bash
 just serve
+```
+
+Run a worker alongside it, in another terminal, if you want deferred work to
+actually happen:
+
+```bash
+just worker
 ```
 
 Then have a conversation:
@@ -65,7 +78,8 @@ which half of a guess was right.
 | `POST` | `/chat/sessions` | Open a conversation. Takes no body — the owner is the authenticated caller and cannot be named by the client. |
 | `POST` | `/chat/sessions/{id}/turns` | `{"text": "..."}` → `{"run_id", "reply"}`. Runs one agent turn. |
 | `GET` | `/chat/sessions/{id}/transcript` | Everything that happened in the conversation, in order. |
-| `POST` | `/ingestion/batches` | `{"source", "records": [...]}` → what happened to every record. |
+| `POST` | `/ingestion/batches` | `{"source", "records": [...]}` → what happened to every record. Runs inline; capped at 500 records. |
+| `POST` | `/ingestion/batches:defer` | Same body → `202 {"job_id"}`. Hands it to a worker and answers immediately. |
 
 A session that does not exist and one belonging to someone else both return
 `404`. A `403` would confirm the session exists, which turns a session id into
@@ -153,8 +167,19 @@ tests that record exists to decline.
 
 **I/O is awaited; computation is not.** In the agent, `async def` means "this
 reaches outside the process". In the application the same rule holds down to the
-database driver, which is `aiosqlite` in development and expects `asyncpg` in
-production.
+database driver — one driver, `psycopg` 3, serving both SQLAlchemy and the job
+queue.
+
+**Background work goes through Postgres, not a broker.** A job is enqueued
+inside the transaction that justifies it, so work cannot be silently lost in the
+window between committing a row and reaching a queue. That gap is the one this
+codebase is otherwise organized against, and it is why the queue is not Redis.
+See `core/jobs.py`.
+
+**Entrypoints choose the event loop.** On Windows psycopg cannot run on the
+default `ProactorEventLoop`, and uvicorn hardcodes it — so `fastpaip-serve`
+drives the server itself rather than calling `uvicorn.run()`. All of that is in
+`core/platform.py`; nothing else needs to know.
 
 ---
 
@@ -194,7 +219,8 @@ rather than only here:
 | Missing | Why it is missing |
 |---|---|
 | Tools over HTTP | Approval has nobody to ask until a run can pause and resume. Passing no tool registry is the only option that neither silently approves everything nor pretends to gate. |
-| Background workers | Ingestion runs in the request, so batches cap at 500. The open question is which broker, and whether jobs survive a restart. |
+| A way to ask how a deferred job went | The job id is real and queryable by hand, but no route reports it, so `:defer` is fire-and-forget today. |
+| Retries on ingestion jobs | Ingestion is not idempotent — duplicates are only caught within a batch — so a retried job would store everything twice. Needs the cross-batch decision first. |
 | Key scopes and expiry | Every key grants identity and therefore everything; there is no read-only key to hand a script. |
 | Tenancy for ingested records | Submitting requires authentication, but a batch is not owned by its submitter. Urgent the moment a read route exists. |
 | Cross-batch duplicates | A repeated `external_id` in a later batch is stored twice. Needs someone to choose between "update" and "reject". |

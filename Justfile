@@ -58,6 +58,23 @@ typing:
 check-all: lint cov typing
 
 
+# Start Postgres and wait until it is actually accepting queries
+[group('db')]
+db-up:
+    docker compose up -d --wait
+
+# Stop Postgres, keeping its data
+[group('db')]
+db-down:
+    docker compose down
+
+# Stop Postgres and delete its data
+[group('db')]
+db-reset:
+    docker compose down -v
+    just db-up
+    just migrate
+
 # Apply all pending migrations
 [group('db')]
 migrate *args="head":
@@ -81,8 +98,13 @@ db-version:
 
 # Run development server -- migrates first, as a deployment would
 [group('run')]
-serve: migrate
-    uv run {{ ARGS_SERVE }} -m fastapi dev packages/fastpaip/src/fastpaip/entrypoints/asgi.py --port {{ PORT }}
+serve: db-up migrate
+    uv run {{ ARGS_SERVE }} fastpaip-serve
+
+# Run the background worker
+[group('run')]
+worker *args:
+    uv run fastpaip-worker {{ args }}
 
 # Talk to the agent in a terminal
 [group('run')]

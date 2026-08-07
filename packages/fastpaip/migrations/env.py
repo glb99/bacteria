@@ -1,26 +1,32 @@
 """Alembic environment: how migrations find the database and the models.
 
-Two things here are deliberate and easy to get wrong when copying a template.
+Three things here are deliberate and easy to get wrong when copying a template.
 
 The database URL comes from :mod:`fastpaip.core.settings`, not from
 ``alembic.ini``. A URL in the ini file is a second place the database can be
 named, and the failure that produces — migrating one database while the
 application talks to another — is quiet and confusing.
 
-The engine is async, because the application's is. Alembic's migration API is
-synchronous, so ``run_sync`` drives it over an async connection rather than
-opening a second, synchronous one with different pooling and a different URL
-dialect.
+The engine here is **synchronous**, unlike the application's. Alembic's
+migration API is synchronous, so an async engine bought nothing but a
+``run_sync`` wrapper — and on Windows it bought an outright failure, because
+psycopg's async mode cannot run on the default event loop. Migrations are a
+short-lived administrative task with no concurrency to gain from, so the driver
+prefix is stripped and a normal engine is used.
+
+``include_name`` comes from :mod:`fastpaip.core.db` rather than being defined
+here, because this module calls into Alembic's context at import and so cannot
+be imported by anything else — including the drift test, which needs the same
+filter to compare like with like.
 """
 
-import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy.ext.asyncio import async_engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
+from fastpaip.core.db import include_name
 from fastpaip.core.settings import get_settings
 
 # Imported for the side effect of registering tables on SQLModel.metadata.
@@ -36,6 +42,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# The URL is used as-is. `postgresql+psycopg://` is psycopg 3's dialect and it
+# serves both modes: `create_engine` gives a synchronous engine from it,
+# `create_async_engine` an async one. Stripping the prefix to "make it sync"
+# hands the URL to psycopg2 instead, which is not installed.
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 target_metadata = SQLModel.metadata
@@ -52,39 +62,36 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    """Run migrations against a live database."""
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
+        do_run_migrations(connection)
+    connectable.dispose()
 
 
 def do_run_migrations(connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        # SQLite cannot ALTER most things; batch mode rebuilds the table
-        # instead. Harmless on Postgres, and the alternative is migrations that
-        # only run on one of the two backends this project uses.
-        render_as_batch=True,
         compare_type=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
-async def run_migrations_online() -> None:
-    """Run migrations against a live database."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-    await connectable.dispose()
-
-
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    asyncio.run(run_migrations_online())
+    run_migrations_online()

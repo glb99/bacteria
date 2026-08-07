@@ -4,59 +4,45 @@ Nothing is faked here — there is no model in this path — so these exercise t
 route, the pipeline, and the repository together.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, select
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.auth.service import issue_key
-from fastpaip.core.db import create_tables, session_scope
+from fastpaip.core.db import session_scope
 from fastpaip.ingestion.models import IngestedRecord, IngestionBatch, RejectedRecord
-from fastpaip.views import create_app, lifespan_running
+from fastpaip.views import create_app
 
 
 def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.fixture(name="db_engine")
-def _db_engine():
-    return create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-
 @pytest.fixture(name="token")
-async def _token(db_engine, client):
-    """An API key for the principal these tests act as.
-
-    Depends on `client` so the schema exists first: tables are built in the
-    app's lifespan, which runs when TestClient starts.
-    """
-    async with AsyncSession(db_engine) as session:
+async def _token(engine):
+    """An API key for the principal these tests act as."""
+    async with AsyncSession(engine) as session:
         return await issue_key(session, principal_id="tester", label="tests")
 
 
 @pytest.fixture(name="client")
-def _client(db_engine):
-    async def _create_tables():
-        await create_tables(db_engine)
-
+def _client(engine, backend_options):
     async def _test_session():
-        async with AsyncSession(db_engine) as session:
+        async with AsyncSession(engine) as session:
             yield session
 
-    app = create_app(lifespan=lifespan_running(_create_tables))
+    # No lifespan: conftest builds the schema once per run, which is the same
+    # position a deployment is in after `alembic upgrade head`.
+    app = create_app()
     app.dependency_overrides[session_scope] = _test_session
-    with TestClient(app) as client:
+    with TestClient(app, backend_options=backend_options) as client:
         yield client
 
 
-async def test_a_clean_batch_is_stored(client, token, db_engine):
+async def test_a_clean_batch_is_stored(client, token, engine):
     response = client.post(
         "/ingestion/batches",
         headers=auth(token),
@@ -68,9 +54,39 @@ async def test_a_clean_batch_is_stored(client, token, db_engine):
     assert body["accepted"] == 1
     assert body["rejected"] == []
 
-    async with AsyncSession(db_engine) as db:
+    async with AsyncSession(engine) as db:
         stored = (await db.exec(select(IngestedRecord))).all()
         assert [r.external_id for r in stored] == ["1"]
+
+
+async def test_a_stored_timestamp_comes_back_timezone_aware(client, token, engine):
+    """`_tz_column` must actually preserve the offset, not merely declare it.
+
+    This is the test the backend split was hiding. Every timestamp in this
+    application is `DateTime(timezone=True)`, and SQLite ignores that flag and
+    returns a naive datetime — so under the old in-memory fixtures this
+    assertion would have failed while production was fine, and the inverse
+    failure is the one that matters: any code comparing a stored timestamp
+    against `datetime.now(timezone.utc)` raises `TypeError: can't compare
+    offset-naive and offset-aware` on one backend and not the other.
+
+    `ApiKey.revoked_at` is the sharpest case — an expiry check that raises is an
+    expiry check that does not deny.
+    """
+    client.post(
+        "/ingestion/batches",
+        headers=auth(token),
+        json={"source": "crm", "records": [{"external_id": "1", "name": "Ada"}]},
+    )
+
+    async with AsyncSession(engine) as db:
+        batch = (await db.exec(select(IngestionBatch))).one()
+
+    assert batch.received_at.tzinfo is not None
+    assert batch.received_at.utcoffset() == timedelta(0)
+    # The comparison itself, because that is what breaks in practice rather
+    # than an inspection of tzinfo.
+    assert batch.received_at <= datetime.now(timezone.utc)
 
 
 async def test_rejections_are_returned_in_full_not_counted(client, token):
@@ -96,7 +112,7 @@ async def test_rejections_are_returned_in_full_not_counted(client, token):
     assert body["rejected"][0]["index"] == 1
 
 
-async def test_rejected_records_are_persisted_alongside_the_batch(client, token, db_engine):
+async def test_rejected_records_are_persisted_alongside_the_batch(client, token, engine):
     """The rejection outlives the response that reported it.
 
     A caller who ignored the response, or a job that ran unattended, still needs
@@ -108,13 +124,13 @@ async def test_rejected_records_are_persisted_alongside_the_batch(client, token,
         json={"source": "crm", "records": [{"name": "nameless"}]},
     )
 
-    async with AsyncSession(db_engine) as db:
+    async with AsyncSession(engine) as db:
         rejected = (await db.exec(select(RejectedRecord))).all()
         assert len(rejected) == 1
         assert rejected[0].payload == {"name": "nameless"}
 
 
-async def test_a_batch_records_its_own_counts(client, token, db_engine):
+async def test_a_batch_records_its_own_counts(client, token, engine):
     client.post(
         "/ingestion/batches",
         headers=auth(token),
@@ -128,13 +144,13 @@ async def test_a_batch_records_its_own_counts(client, token, db_engine):
         },
     )
 
-    async with AsyncSession(db_engine) as db:
+    async with AsyncSession(engine) as db:
         batch = (await db.exec(select(IngestionBatch))).one()
         assert (batch.accepted_count, batch.rejected_count) == (2, 1)
         assert batch.source == "crm"
 
 
-async def test_a_wholly_invalid_batch_is_still_recorded(client, token, db_engine):
+async def test_a_wholly_invalid_batch_is_still_recorded(client, token, engine):
     """Nothing valid is the case where the evidence matters most.
 
     Not storing it would mean the only batch nobody can explain afterwards is
@@ -150,7 +166,7 @@ async def test_a_wholly_invalid_batch_is_still_recorded(client, token, db_engine
     assert response.status_code == 201
     assert response.json()["batch_id"] is not None
 
-    async with AsyncSession(db_engine) as db:
+    async with AsyncSession(engine) as db:
         batch = (await db.exec(select(IngestionBatch))).one()
         assert (batch.accepted_count, batch.rejected_count) == (0, 1)
         assert len((await db.exec(select(RejectedRecord))).all()) == 1
@@ -180,7 +196,7 @@ async def test_an_empty_batch_is_refused(client, token):
     assert response.status_code == 422
 
 
-async def test_a_stored_rejection_keeps_its_position(client, token, db_engine):
+async def test_a_stored_rejection_keeps_its_position(client, token, engine):
     """The index outlives the response, so the record stays identifiable.
 
     A caller that lost the response, or a deferred job nobody watched, still
@@ -199,6 +215,6 @@ async def test_a_stored_rejection_keeps_its_position(client, token, db_engine):
         },
     )
 
-    async with AsyncSession(db_engine) as db:
+    async with AsyncSession(engine) as db:
         stored = (await db.exec(select(RejectedRecord).order_by(RejectedRecord.id))).all()
         assert [r.source_index for r in stored] == [1, 2]

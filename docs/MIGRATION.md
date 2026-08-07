@@ -360,6 +360,24 @@ an entry point is for.
     exist. Development moved onto Postgres in the same step, which is what
     `docker-compose.yml` is for.
 
-11. **Next.** Audio. This is the one that re-opens the model protocol for
+11. ~~Put the tests on the database we deploy on.~~ **Done.** Six test files
+    each built their own in-memory SQLite engine; only migrations and settings
+    used Postgres. `tests/conftest.py` now owns one throwaway database per run,
+    truncated between tests, and SQLite is gone entirely — `aiosqlite` with it.
+
+    It was not a tidying exercise. SQLite ignores `DateTime(timezone=True)` and
+    returns naive datetimes, so `_tz_column()` — which every model uses,
+    including `ApiKey.revoked_at` — round-tripped differently under test than in
+    production, and any comparison against an aware `datetime.now(timezone.utc)`
+    raises `TypeError` on exactly one of them. There is now a test for it, and it
+    was verified by running the same assertion against SQLite and watching it
+    fail.
+
+    Two things fell out. `create_tables` and `lifespan_running` had no callers
+    left and were deleted. And the shared engine had to move to `NullPool`: an
+    HTTP test drives two event loops, and psycopg refuses a connection used from
+    both — which `StaticPool` over in-memory SQLite had been absorbing.
+
+12. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

@@ -7,7 +7,6 @@ dependencies = [
     "fastapi",
     "granian",
     "sqlmodel",
-    "aiosqlite",
     "procrastinate",
     "psycopg[binary,pool]",
     "alembic",

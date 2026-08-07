@@ -16,29 +16,25 @@ protocol exists to prevent.
 import pytest
 from bacteria.session.protocol import SessionRepository
 from bacteria.session.store import SessionStore, TranscriptItem, UnknownSessionError
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.chat.repository import SqlSessionRepository
 
 
 @pytest.fixture(params=["in_memory", "sql"], name="repo")
-async def _repo(request):
+async def _repo(request, engine):
+    """One parameter per implementation, so each behaviour is asserted of both.
+
+    The `engine` fixture is requested even for the in-memory case. That costs a
+    truncation the in-memory store does not need, and buys a guarantee worth
+    more: the two parameters differ only in which store is yielded, so a
+    failure on one and not the other is a real divergence rather than a
+    difference in how the fixture was set up.
+    """
     if request.param == "in_memory":
         yield SessionStore()
         return
 
-    # StaticPool keeps every checkout pointed at the same in-memory database;
-    # the default pool would hand out a fresh, empty one.
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(SQLModel.metadata.create_all)
     async with AsyncSession(engine) as db:
         yield SqlSessionRepository(db)
 

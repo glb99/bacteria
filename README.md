@@ -25,11 +25,12 @@ Needs Python 3.13+, [uv](https://docs.astral.sh/uv/), and
 just db-up && just install && just migrate && just test
 ```
 
-`just db-up` starts Postgres in Docker and waits until it accepts queries.
-Development runs on the same database production does — SQLite was the default
-for a while and hid two things: it has no `SKIP LOCKED`, which the job queue
-needs, and its DDL differs enough that a migration could pass here and fail in
-production.
+`just db-up` starts Postgres in Docker and waits until it accepts queries. It is
+required — the tests skip without it, and there is no SQLite fallback anywhere.
+SQLite was the default for a while and hid three things: it has no `SKIP LOCKED`,
+which the job queue needs; its DDL differs enough that a migration could pass
+here and fail in production; and it ignores `DateTime(timezone=True)`, so every
+timestamp came back naive under test and aware in production.
 
 Issue yourself a credential — an operator command, not an endpoint:
 

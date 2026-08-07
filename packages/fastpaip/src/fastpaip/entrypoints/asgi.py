@@ -37,10 +37,10 @@ async def lifespan(_app: FastAPI):
     """Hold the job queue open for the life of the process.
 
     Procrastinate needs its connection pool open before anything can enqueue,
-    and it is a context manager rather than a one-shot setup -- so this cannot
-    use ``lifespan_running``, which only runs a coroutine at startup. Without
-    it, every deferral fails with ``AppNotOpen`` at request time rather than at
-    boot, which is the wrong end to find out.
+    and it has to stay open for the life of the process rather than being set up
+    once at boot -- which is why this is a context manager wrapping the yield.
+    Without it, every deferral fails with ``AppNotOpen`` at request time rather
+    than at boot, which is the wrong end to find out.
 
     Opening it here rather than per request means one pool for the process.
     """

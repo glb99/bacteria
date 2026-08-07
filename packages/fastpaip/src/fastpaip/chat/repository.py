@@ -52,9 +52,18 @@ from fastpaip.chat.models import ChatMemoryEntry, ChatSession, ChatTranscriptIte
 def _as_utc(value: datetime) -> datetime:
     """Reattach UTC to a datetime a backend handed back without one.
 
-    SQLite stores no timezone, so a value written as aware comes back naive and
-    would then be compared as local time. Assuming UTC is correct because that
-    is the only thing ever written.
+    A no-op against Postgres, which returns what ``DateTime(timezone=True)``
+    promises. It was written for SQLite, which ignores that flag and returns
+    naive values that would then be compared as local time.
+
+    Kept rather than deleted along with the SQLite support, because this is the
+    boundary where stored rows become the plain dataclasses the agent sees, and
+    an aware datetime is part of what that hand-off promises.
+
+    Worth knowing how the difference was found. Only `chat/` ever had this
+    helper — `ingestion/` did not, so its timestamps genuinely were naive under
+    test and aware in production. A workaround present in one feature and absent
+    in another is what an untestable backend difference looks like from inside.
     """
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 

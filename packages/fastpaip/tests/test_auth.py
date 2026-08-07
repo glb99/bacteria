@@ -6,9 +6,7 @@ rather than successes.
 """
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel, select
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.auth import keys
@@ -17,14 +15,7 @@ from fastpaip.auth.service import issue_key, revoke_key
 
 
 @pytest.fixture(name="db")
-async def _db():
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(SQLModel.metadata.create_all)
+async def _db(engine):
     async with AsyncSession(engine) as session:
         yield session
 

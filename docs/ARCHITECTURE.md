@@ -27,7 +27,7 @@ sequenceDiagram
     participant Context as bacteria/context
     participant Model as bacteria/model
     participant Repo as chat/repository
-    participant DB as PostgreSQL / SQLite
+    participant DB as PostgreSQL
     participant Provider as Anthropic / Gemini
 
     Client->>Route: POST /chat/sessions/{id}/turns<br/>Bearer fp_key_secret
@@ -127,7 +127,7 @@ sequenceDiagram
     participant Chain as core/handlers
     participant Steps as ingestion/pipeline
     participant Repo as ingestion/repository
-    participant DB as PostgreSQL / SQLite
+    participant DB as PostgreSQL
 
     Client->>Route: POST /ingestion/batches<br/>{source, records[]}
     Route->>Auth: resolve CurrentPrincipal
@@ -174,7 +174,7 @@ sequenceDiagram
     participant CLI as entrypoints/cli
     participant Keys as auth/keys
     participant Repo as auth/repository
-    participant DB as PostgreSQL / SQLite
+    participant DB as PostgreSQL
 
     note over Operator,DB: alembic upgrade head has already run —<br/>nothing here creates a schema
     Operator->>CLI: fastpaip-admin issue-key acme-corp

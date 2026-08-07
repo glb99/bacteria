@@ -35,9 +35,10 @@ _cov *args:
     # The application only. The agent's suite is excluded on purpose --
     # see the note on `source` in pyproject.toml.
     just _cov run -m pytest packages/fastpaip/tests
-    # Ensure the ASGI entrypoint is importable. Entrypoints are omitted from the
-    # report, so this proves it loads without counting toward a number.
-    just _cov run -m fastpaip.entrypoints.asgi
+    # The entrypoint import check used to live here as `run -m
+    # fastpaip.entrypoints.asgi`, which quietly stopped being one when asgi.py
+    # grew a __main__ block: -m runs the module, so it started a server and hung.
+    # It is tests/test_entrypoints.py now.
     just _cov combine
     just _cov report
     just _cov html

@@ -9,16 +9,13 @@ about whether anything is denied.
 import pytest
 from bacteria.model.protocol import ModelResponse
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.auth.service import issue_key, revoke_key
 from fastpaip.auth import keys
 from fastpaip.chat import service
-from fastpaip.core.db import create_tables, session_scope
-from fastpaip.views import create_app, lifespan_running
+from fastpaip.core.db import session_scope
+from fastpaip.views import create_app
 
 
 class FakeModelClient:
@@ -26,20 +23,8 @@ class FakeModelClient:
         return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
 
 
-@pytest.fixture(name="engine")
-def _engine():
-    return create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-
 @pytest.fixture(name="client")
-def _client(engine, monkeypatch):
-    async def _create_tables():
-        await create_tables(engine)
-
+def _client(engine, monkeypatch, backend_options):
     async def _test_session():
         async with AsyncSession(engine) as session:
             yield session
@@ -47,9 +32,11 @@ def _client(engine, monkeypatch):
     monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
     monkeypatch.setenv("FASTPAIP_MODEL_PROVIDER", "fake")
 
-    app = create_app(lifespan=lifespan_running(_create_tables))
+    # No lifespan: conftest builds the schema once per run, which is the same
+    # position a deployment is in after `alembic upgrade head`.
+    app = create_app()
     app.dependency_overrides[session_scope] = _test_session
-    with TestClient(app) as client:
+    with TestClient(app, backend_options=backend_options) as client:
         yield client
 
 

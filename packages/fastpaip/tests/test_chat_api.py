@@ -9,15 +9,12 @@ mocked the repository would be asserting its own wiring.
 import pytest
 from bacteria.model.protocol import ModelResponse
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
-from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from fastpaip.auth.service import issue_key
 from fastpaip.chat import service
-from fastpaip.core.db import create_tables, session_scope
-from fastpaip.views import create_app, lifespan_running
+from fastpaip.core.db import session_scope
+from fastpaip.views import create_app
 
 
 class FakeModelClient:
@@ -35,31 +32,15 @@ class FailingModelClient:
         raise RuntimeError("model backend unavailable")
 
 
-@pytest.fixture(name="engine")
-def _engine():
-    return create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-
 @pytest.fixture(name="token")
-async def _token(engine, client):
-    """An API key for the principal these tests act as.
-
-    Depends on `client` so the schema exists before a key is written: the tables
-    are built in the app's lifespan, which runs when TestClient starts.
-    """
+async def _token(engine):
+    """An API key for the principal these tests act as."""
     async with AsyncSession(engine) as session:
         return await issue_key(session, principal_id="tester", label="tests")
 
 
 @pytest.fixture(name="client")
-def _client(engine, monkeypatch):
-    async def _create_tables():
-        await create_tables(engine)
-
+def _client(engine, monkeypatch, backend_options):
     async def _test_session():
         async with AsyncSession(engine) as session:
             yield session
@@ -67,11 +48,11 @@ def _client(engine, monkeypatch):
     monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
     monkeypatch.setenv("FASTPAIP_MODEL_PROVIDER", "fake")
 
-    # Tables are built in the app's own lifespan, so they are created on the
-    # loop TestClient runs -- the same one the requests will use.
-    app = create_app(lifespan=lifespan_running(_create_tables))
+    # No lifespan: conftest builds the schema once per run, which is the same
+    # position a deployment is in after `alembic upgrade head`.
+    app = create_app()
     app.dependency_overrides[session_scope] = _test_session
-    with TestClient(app) as client:
+    with TestClient(app, backend_options=backend_options) as client:
         yield client
 
 

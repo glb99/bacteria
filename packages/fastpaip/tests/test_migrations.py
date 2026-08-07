@@ -1,7 +1,7 @@
 """The migrations and the models must describe the same schema.
 
-Two things build a database here. Deployments replay Alembic migrations; tests
-call `create_tables`, which goes straight from the models. Nothing forces those
+Two things build a database here. Deployments replay Alembic migrations; the
+test suite goes straight from the models, in `conftest.py`. Nothing forces those
 to agree, and when they disagree the symptom is the worst kind: every test
 passes, because tests use the models — and production is missing a column.
 

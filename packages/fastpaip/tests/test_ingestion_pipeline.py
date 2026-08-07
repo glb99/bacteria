@@ -188,3 +188,43 @@ async def test_a_zero_external_id_is_still_valid():
 
     assert batch.rejected == []
     assert batch.accepted[0]["external_id"] == "0"
+
+
+async def test_a_rejection_carries_its_position_in_the_submission():
+    """Two identical bad records must be distinguishable.
+
+    Without an index a caller correlates rejections by payload equality, and
+    identical records collapse into one indistinguishable pair — so "which of
+    the ones I sent failed" has no answer. Every comparable API (Elasticsearch
+    bulk, BigQuery insertAll, SQS partial batch response) reports position or
+    id for exactly this reason.
+    """
+    batch = await run(
+        [
+            {"external_id": "1", "name": "fine"},
+            {"name": "identical"},
+            {"external_id": "2", "name": "also fine"},
+            {"name": "identical"},
+        ]
+    )
+
+    assert [r.index for r in batch.rejected] == [1, 3]
+    assert batch.rejected[0].payload == batch.rejected[1].payload
+
+
+async def test_the_index_counts_every_submitted_record_not_only_the_rejected():
+    """Positions refer to what the caller sent, not to the rejection list.
+
+    An index counted over rejections alone would be a second numbering the
+    caller has no way to reconstruct, and would point at the wrong record.
+    """
+    batch = await run(
+        [
+            {"name": "bad"},
+            {"external_id": "1", "name": "good"},
+            {"external_id": "2", "name": "good"},
+            {"name": "bad"},
+        ]
+    )
+
+    assert [r.index for r in batch.rejected] == [0, 3]

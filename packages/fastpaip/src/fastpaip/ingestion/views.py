@@ -27,6 +27,7 @@ class Submission(BaseModel):
 
 
 class RejectionOut(BaseModel):
+    index: int
     payload: dict[str, Any]
     reason: str
 
@@ -51,9 +52,10 @@ async def submit_batch(
     shape for a batch small enough to wait for; anything larger belongs on
     ``/batches:defer``, which answers immediately and reports nothing.
 
-    Rejections are returned in full rather than counted. A caller that sent 50
-    records and is told 42 were accepted has no way to find the eight, and the
-    reason is the only part that lets them fix it.
+    Rejections are returned in full rather than counted, each carrying its
+    ``index`` in the submitted array. A caller that sent 50 records and is told
+    42 were accepted has no way to find the eight; the index is what makes them
+    identifiable, and the reason is what makes them fixable.
 
     Requires an authenticated caller. Note what is *not* here: a batch is not
     owned by the principal that submitted it, so any authenticated caller
@@ -72,7 +74,10 @@ async def submit_batch(
     return BatchResult(
         batch_id=batch.batch_id,
         accepted=len(batch.accepted),
-        rejected=[RejectionOut(payload=r.payload, reason=r.reason) for r in batch.rejected],
+        rejected=[
+            RejectionOut(index=r.index, payload=r.payload, reason=r.reason)
+            for r in batch.rejected
+        ],
     )
 
 

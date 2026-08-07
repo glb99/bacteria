@@ -93,6 +93,7 @@ async def test_rejections_are_returned_in_full_not_counted(client, token):
     assert len(body["rejected"]) == 1
     assert "external_id" in body["rejected"][0]["reason"]
     assert body["rejected"][0]["payload"] == {"name": "nameless"}
+    assert body["rejected"][0]["index"] == 1
 
 
 async def test_rejected_records_are_persisted_alongside_the_batch(client, token, db_engine):
@@ -177,3 +178,27 @@ async def test_an_empty_batch_is_refused(client, token):
     )
 
     assert response.status_code == 422
+
+
+async def test_a_stored_rejection_keeps_its_position(client, token, db_engine):
+    """The index outlives the response, so the record stays identifiable.
+
+    A caller that lost the response, or a deferred job nobody watched, still
+    needs to know which of the submitted records failed.
+    """
+    client.post(
+        "/ingestion/batches",
+        headers=auth(token),
+        json={
+            "source": "crm",
+            "records": [
+                {"external_id": "1", "name": "Ada"},
+                {"name": "nameless"},
+                {"name": "nameless"},
+            ],
+        },
+    )
+
+    async with AsyncSession(db_engine) as db:
+        stored = (await db.exec(select(RejectedRecord).order_by(RejectedRecord.id))).all()
+        assert [r.source_index for r in stored] == [1, 2]

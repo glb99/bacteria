@@ -26,8 +26,22 @@ REQUIRED_FIELDS = ("external_id", "name")
 
 @dataclass(frozen=True)
 class Rejection:
-    """One record that will not be stored, and why."""
+    """One record that will not be stored, why, and where it was.
 
+    Attributes:
+        index: Position in the submitted array, zero-based. The payload alone
+            is not enough to identify which record failed: a caller who sent
+            500 and got 8 rejections would have to match by equality, and two
+            identical records would be indistinguishable. Every comparable API
+            correlates by position or id for this reason — Elasticsearch's bulk
+            response, BigQuery's ``insertErrors``, SQS's ``batchItemFailures``.
+        payload: The record exactly as it arrived, before normalization. Kept
+            alongside the index rather than instead of it, because it is what
+            makes a log line readable without the original request to hand.
+        reason: What was wrong, in terms the caller can act on.
+    """
+
+    index: int
     payload: dict[str, Any]
     reason: str
 
@@ -84,11 +98,15 @@ def _validate(batch: Batch) -> Batch:
     property most easily lost by a `continue` in the wrong place.
     """
     seen: set[str] = set()
-    for record in batch.raw:
+    for index, record in enumerate(batch.raw):
         missing = [f for f in REQUIRED_FIELDS if _is_blank(record.get(f))]
         if missing:
             batch.rejected.append(
-                Rejection(payload=record, reason=f"missing required field(s): {', '.join(missing)}")
+                Rejection(
+                    index=index,
+                    payload=record,
+                    reason=f"missing required field(s): {', '.join(missing)}",
+                )
             )
             continue
 
@@ -99,7 +117,11 @@ def _validate(batch: Batch) -> Batch:
             # between "update" and "reject" is a policy question, and the
             # honest answer today is that neither has been chosen.
             batch.rejected.append(
-                Rejection(payload=record, reason=f"duplicate external_id in batch: {external_id}")
+                Rejection(
+                    index=index,
+                    payload=record,
+                    reason=f"duplicate external_id in batch: {external_id}",
+                )
             )
             continue
 

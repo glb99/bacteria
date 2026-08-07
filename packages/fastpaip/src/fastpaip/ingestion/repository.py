@@ -59,7 +59,10 @@ class IngestionRepository:
         for rejection in batch.rejected:
             self._db.add(
                 RejectedRecord(
-                    batch_id=batch_id, reason=rejection.reason, payload=rejection.payload
+                    batch_id=batch_id,
+                    source_index=rejection.index,
+                    reason=rejection.reason,
+                    payload=rejection.payload,
                 )
             )
 

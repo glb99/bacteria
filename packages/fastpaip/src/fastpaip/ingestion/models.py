@@ -44,11 +44,18 @@ class IngestedRecord(SQLModel, table=True):
 
 
 class RejectedRecord(SQLModel, table=True):
-    """One record that did not pass, kept alongside the reason it did not."""
+    """One record that did not pass, kept alongside the reason it did not.
+
+    ``source_index`` is its position in the submission, so a caller comparing
+    what they sent against what was stored can identify it without matching on
+    payload equality. Named for what it is rather than ``index``, which is a
+    loaded word next to a database table.
+    """
 
     __tablename__ = "rejected_record"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     batch_id: int = Field(foreign_key="ingestion_batch.id", index=True)
+    source_index: int
     reason: str
     payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))

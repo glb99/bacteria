@@ -97,15 +97,18 @@ POST /ingestion/batches
 ```json
 201
 {"batch_id": 1, "accepted": 1,
- "rejected": [{"payload": {"name": "no id"},
+ "rejected": [{"index": 1,
+               "payload": {"name": "no id"},
                "reason": "missing required field(s): external_id"}]}
 ```
 
 A record needs an `external_id` and a `name`; every other key is stored exactly
 as it arrived and never inspected, so this fits contacts, products, devices, or
 documents equally and knows about none of them. Nothing is dropped silently —
-every record becomes either a row or a stored rejection carrying the reason and
-the payload as it was sent.
+every record becomes either a row or a stored rejection carrying its position in
+the submission, the reason, and the payload as it was sent. The index is what
+makes two identical bad records distinguishable — the same reason Elasticsearch's
+bulk API and SQS's partial batch response report position or id.
 
 ---
 

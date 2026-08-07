@@ -111,6 +111,20 @@ def _validate(batch: Batch) -> Batch:
 def _normalize(batch: Batch) -> Batch:
     """Clean accepted records into the shape that gets stored.
 
+    Only the two required fields are touched, and that limit is deliberate.
+    Every other key is passed through exactly as it arrived, because this
+    pipeline does not know what a record represents and should not act as
+    though it does.
+
+    An earlier version also lowercased ``email``. It was removed: it was the one
+    domain assumption in a module built to have none, and it was inherited from
+    a leftover ``UserCreate`` model rather than chosen. It was also worse than
+    doing nothing — a caller whose field is ``contact_email`` or ``work_email``
+    got no normalization at all, so the behaviour was inconsistent rather than
+    merely absent, and no rule could be stated about which fields were cleaned.
+    If per-field rules are wanted later, they belong in an argument to
+    :func:`build_pipeline`, supplied by whoever knows the domain.
+
     Runs after validation, never before: normalizing first would mean a
     rejection quotes a record the caller never sent, which makes the reason
     harder to act on than no reason at all.
@@ -120,7 +134,6 @@ def _normalize(batch: Batch) -> Batch:
             **record,
             "external_id": str(record["external_id"]).strip(),
             "name": str(record["name"]).strip(),
-            **({"email": str(record["email"]).strip().lower()} if record.get("email") else {}),
         }
         for record in batch.accepted
     ]

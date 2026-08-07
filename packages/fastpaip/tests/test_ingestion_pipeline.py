@@ -70,24 +70,52 @@ async def test_a_rejection_quotes_the_record_as_it_arrived():
     assert batch.rejected[0].payload["name"] == "  Ada  "
 
 
-async def test_accepted_records_are_normalized():
-    batch = await run([{"external_id": " 1 ", "name": " Ada ", "email": " ADA@Example.COM "}])
+async def test_the_two_required_fields_are_normalized():
+    batch = await run([{"external_id": " 1 ", "name": " Ada "}])
 
     stored = batch.accepted[0]
     assert stored["external_id"] == "1"
     assert stored["name"] == "Ada"
-    assert stored["email"] == "ada@example.com"
 
 
-async def test_a_record_without_an_email_stays_without_one():
-    """Normalization must not invent fields.
+async def test_every_other_field_is_passed_through_untouched():
+    """The pipeline does not know what a record represents, and must not act as if.
 
-    Adding an empty string would turn "not provided" into "provided as blank",
-    which are different facts and are stored as different rows.
+    Guards against a domain assumption creeping back in. `email` used to be
+    lowercased here — inherited from a leftover model rather than chosen — which
+    made the behaviour inconsistent rather than absent: a caller whose field was
+    `contact_email` got nothing, and no rule could be stated about which fields
+    were cleaned.
+    """
+    batch = await run(
+        [
+            {
+                "external_id": "1",
+                "name": "Ada",
+                "email": " ADA@Example.COM ",
+                "contact_email": " OTHER@x.io ",
+                "seats": 12,
+                "tags": ["vip"],
+            }
+        ]
+    )
+
+    stored = batch.accepted[0]
+    assert stored["email"] == " ADA@Example.COM "
+    assert stored["contact_email"] == " OTHER@x.io "
+    assert stored["seats"] == 12
+    assert stored["tags"] == ["vip"]
+
+
+async def test_normalization_does_not_invent_fields():
+    """A record keeps exactly the keys it arrived with.
+
+    Adding an absent field as an empty string would turn "not provided" into
+    "provided as blank", which are different facts stored as different rows.
     """
     batch = await run([{"external_id": "1", "name": "Ada"}])
 
-    assert "email" not in batch.accepted[0]
+    assert set(batch.accepted[0]) == {"external_id", "name"}
 
 
 async def test_persist_still_runs_when_every_record_was_rejected():

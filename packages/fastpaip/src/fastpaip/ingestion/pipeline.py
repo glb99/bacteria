@@ -54,6 +54,28 @@ class Batch:
     batch_id: int | None = None
 
 
+def _is_blank(value: Any) -> bool:
+    """Whether a required field is effectively absent.
+
+    ``None`` is checked before stringifying, and that is the whole reason this
+    is a function. ``str(None)`` is ``"None"`` — five non-blank characters — so
+    a JSON ``null`` id used to pass validation and be stored under the literal
+    id ``"None"``, where two of them would then collide with each other and
+    with any record genuinely named that.
+
+    Not ``not value``: ``0`` is a perfectly good external id, and a falsy check
+    would reject it. Only absent, null, and whitespace count as blank.
+
+    Everything else is coerced, and that stays deliberately loose: an integer id
+    becomes its digits, which is what a caller means. The cost is that nonsense
+    types are coerced too — ``False`` becomes the id ``"False"`` — so this
+    validates presence rather than type. Restricting to str and int would catch
+    that, and would also reject a UUID object or anything else with a sensible
+    ``__str__``, which is why it has not been done.
+    """
+    return value is None or not str(value).strip()
+
+
 def _validate(batch: Batch) -> Batch:
     """Partition raw records into accepted and rejected.
 
@@ -63,7 +85,7 @@ def _validate(batch: Batch) -> Batch:
     """
     seen: set[str] = set()
     for record in batch.raw:
-        missing = [f for f in REQUIRED_FIELDS if not str(record.get(f, "")).strip()]
+        missing = [f for f in REQUIRED_FIELDS if _is_blank(record.get(f))]
         if missing:
             batch.rejected.append(
                 Rejection(payload=record, reason=f"missing required field(s): {', '.join(missing)}")

@@ -135,3 +135,28 @@ async def test_rejections_survive_a_failing_persist_step():
 
     assert len(batch.rejected) == 1
     assert len(batch.accepted) == 1
+
+
+async def test_a_null_required_field_is_rejected_not_stringified():
+    """JSON null must be absent, not the four-character word.
+
+    `str(None)` is "None", which is non-blank, so a null id passed validation
+    and was stored under the literal id "None" -- where every other null-id
+    record would collide with it, and so would anything genuinely called that.
+    """
+    batch = await run([{"external_id": None, "name": "null id"}])
+
+    assert batch.accepted == []
+    assert "external_id" in batch.rejected[0].reason
+
+
+async def test_a_zero_external_id_is_still_valid():
+    """0 is a real identifier, and a falsy check would throw it away.
+
+    The obvious fix for null -- `record.get(f) or ""` -- rejects this, which is
+    why the check tests for None explicitly rather than for truthiness.
+    """
+    batch = await run([{"external_id": 0, "name": "zero"}])
+
+    assert batch.rejected == []
+    assert batch.accepted[0]["external_id"] == "0"

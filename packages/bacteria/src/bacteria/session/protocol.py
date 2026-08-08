@@ -9,14 +9,27 @@ is. The dependency runs outward — bacteria declares the shape, whoever hosts i
 implements the shape — which is what keeps the agent vendorable into a project
 whose persistence looks nothing like the one imagined here.
 
-**Five methods, and deliberately not CRUD.** There is no ``update``. A generic
+**Eight methods, and deliberately not CRUD.** There is no ``update``. A generic
 create/read/update/delete interface would fit this class in shape and destroy
 the property it exists to have: exactly one deterministic, non-model code path
 writes turn state, and that path is ``commit``. An ``update`` method is a second
-write path by definition. ``remember`` and ``forget`` are separate again,
-because a memory is a decision with its own lifecycle rather than a byproduct of
-a turn — routing it through ``commit`` would make "keep this permanently" and
-"stash this for the current turn" the same call.
+write path by definition.
+
+The memory methods are separate from ``commit`` and from each other because a
+memory is a decision with its own lifecycle rather than a byproduct of a turn.
+Routing it through ``commit`` would make "keep this permanently" and "stash this
+for the current turn" the same call, and collapsing the four into one would
+erase the distinction ADR 0017 exists to draw:
+
+- ``remember`` / ``forget`` — the owner's writes, active immediately.
+- ``propose`` / ``activate`` / ``reject`` — everything else. A proposal reaches
+  no model until a human activates it, so a tool the model called cannot write
+  its own future instructions.
+
+Five of these are what a *runtime* needs; ``activate`` and ``reject`` are what a
+review surface needs. They are declared together because they are one lifecycle
+and a store that implemented half of it would be a store where proposals could
+be created and never resolved.
 
 **What an implementation must guarantee**, beyond having the methods — none of
 which a type checker can verify, all of which callers depend on:
@@ -81,11 +94,25 @@ class SessionRepository(Protocol):
         ...
 
     async def remember(
-        self, session_id: str, key: str, value: Any, reason: str
+        self, session_id: str, key: str, value: Any, reason: str, source: str = "owner"
     ) -> SessionState:
-        """Record a fact worth re-surfacing later. The only write path for memory."""
+        """Write an active memory directly. For the session's owner only."""
         ...
 
     async def forget(self, session_id: str, key: str) -> SessionState:
-        """Remove a memory."""
+        """Remove an active memory."""
+        ...
+
+    async def propose(
+        self, session_id: str, key: str, value: Any, reason: str, source: str
+    ) -> SessionState:
+        """Suggest a memory. Reaches no model until activated."""
+        ...
+
+    async def activate(self, session_id: str, source: str, key: str) -> SessionState:
+        """Promote a proposal into active memory."""
+        ...
+
+    async def reject(self, session_id: str, source: str, key: str) -> SessionState:
+        """Discard a proposal."""
         ...

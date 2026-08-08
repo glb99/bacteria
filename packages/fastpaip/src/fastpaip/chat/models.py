@@ -77,17 +77,52 @@ class ChatTranscriptItem(SQLModel, table=True):
 
 
 class ChatMemoryEntry(SQLModel, table=True):
-    """One deliberately preserved fact, keyed within its session.
+    """One active fact — something the model is told on every later turn.
 
     ``value`` is wrapped in a JSON object rather than stored bare, because a
     memory's value may be any JSON type — including ``null``, a string, or a
     number — and a bare JSON column cannot distinguish "stored null" from "no
     row" on every backend.
+
+    ``source`` records who suggested it and survives activation, so a memory
+    that came from a background extractor can still be distinguished from one
+    the owner wrote. It is deliberately *not* part of the primary key: at most
+    one active fact may claim a key, whatever proposed it, because the model
+    would otherwise be handed two answers and told nothing about which is
+    current.
     """
 
     __tablename__ = "chat_memory_entry"
 
     session_id: str = Field(foreign_key="chat_session.session_id", primary_key=True)
+    key: str = Field(primary_key=True)
+    source: str
+    value: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    reason: str
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
+
+
+class ChatMemoryProposal(SQLModel, table=True):
+    """One suggested fact, which no model can see until a human activates it.
+
+    A separate table rather than a ``status`` column on the one above, and the
+    reason is the primary key. Proposals are keyed by ``(source, key)`` so two
+    proposers may both suggest ``tone`` without either silently overwriting the
+    other; active memories are keyed by ``key`` alone. Those are different
+    uniqueness rules, and one table would have to express the stricter one as a
+    partial unique index — a constraint that holds only for some rows, which is
+    exactly the kind of rule that is easy to write and easy to drop later
+    without noticing.
+
+    Two tables let each primary key state its own rule, and make "reaches the
+    model" a question of which table a row is in rather than of a column
+    someone must remember to filter on. See ADR 0017.
+    """
+
+    __tablename__ = "chat_memory_proposal"
+
+    session_id: str = Field(foreign_key="chat_session.session_id", primary_key=True)
+    source: str = Field(primary_key=True)
     key: str = Field(primary_key=True)
     value: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     reason: str

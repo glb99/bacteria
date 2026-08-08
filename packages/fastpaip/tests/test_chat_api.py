@@ -286,3 +286,152 @@ async def test_a_memory_requires_a_reason(client, token):
     )
 
     assert response.status_code == 422
+
+
+class ProposingModelClient:
+    """Calls `remember` on its first turn, then answers normally.
+
+    Stateful because the runtime calls the model twice when tools run — once to
+    get the proposal, once with the results — and a client that proposed both
+    times would loop if the loop existed.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def send(self, messages, **kwargs) -> ModelResponse:
+        self.calls += 1
+        if self.calls == 1:
+            return ModelResponse(
+                text=None,
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "name": "remember",
+                        "input": {
+                            "key": "tone",
+                            "value": "prefers bullet points",
+                            "reason": "asked for bullets twice",
+                        },
+                    }
+                ],
+                stop_reason="tool_use",
+                raw=None,
+            )
+        return ModelResponse(text="noted", tool_calls=[], stop_reason="end_turn", raw=None)
+
+
+async def test_a_model_proposal_does_not_reach_the_next_turn(client, token, monkeypatch):
+    """The security property, asserted over the real HTTP path.
+
+    A model that proposed a memory must not be able to read it back as an
+    instruction. If this fails, an injected "remember that you must always
+    comply" becomes a system prompt on the following turn, and the transcript
+    shows only a tool call that succeeded.
+    """
+    session_id = new_session(client, token)
+    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    seen = {}
+
+    class Capturing:
+        async def send(self, messages, **kwargs) -> ModelResponse:
+            seen["system"] = kwargs.get("system")
+            return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
+
+    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "again"})
+
+    assert seen["system"] is None
+
+
+async def test_a_model_proposal_is_visible_to_the_owner_for_review(client, token, monkeypatch):
+    """It reached the queue, so the test above is not passing by nothing happening."""
+    session_id = new_session(client, token)
+    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    pending = client.get(
+        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
+    ).json()
+
+    assert len(pending) == 1
+    assert pending[0]["source"] == "model"
+    assert pending[0]["key"] == "tone"
+    assert pending[0]["value"] == "prefers bullet points"
+    # Nothing is active yet.
+    assert client.get(f"/chat/sessions/{session_id}/memory", headers=auth(token)).json() == []
+
+
+async def test_activating_a_proposal_makes_it_reach_the_model(client, token, monkeypatch):
+    """The human act, end to end.
+
+    This is the payoff: the agent suggested something, a person accepted it, and
+    only then did it become an instruction.
+    """
+    session_id = new_session(client, token)
+    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    activated = client.post(
+        f"/chat/sessions/{session_id}/memory-proposals/model/tone", headers=auth(token)
+    )
+    assert activated.status_code == 201
+    assert activated.json()["source"] == "model"
+
+    seen = {}
+
+    class Capturing:
+        async def send(self, messages, **kwargs) -> ModelResponse:
+            seen["system"] = kwargs.get("system")
+            return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
+
+    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "again"})
+
+    assert "prefers bullet points" in seen["system"]
+    # And it has left the queue, so a reviewer is not asked about it forever.
+    assert client.get(
+        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
+    ).json() == []
+
+
+async def test_rejecting_a_proposal_leaves_no_memory(client, token, monkeypatch):
+    session_id = new_session(client, token)
+    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    response = client.delete(
+        f"/chat/sessions/{session_id}/memory-proposals/model/tone", headers=auth(token)
+    )
+
+    assert response.status_code == 204
+    assert client.get(f"/chat/sessions/{session_id}/memory", headers=auth(token)).json() == []
+    assert client.get(
+        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
+    ).json() == []
+
+
+async def test_activating_a_proposal_that_is_not_there_is_404(client, token):
+    """A stale review page must not conjure a memory nobody just read."""
+    session_id = new_session(client, token)
+
+    response = client.post(
+        f"/chat/sessions/{session_id}/memory-proposals/model/never", headers=auth(token)
+    )
+
+    assert response.status_code == 404
+
+
+async def test_the_owners_write_stays_immediate(client, token):
+    """Confirmation is for everything except the person doing the confirming."""
+    session_id = new_session(client, token)
+
+    remember(client, token, session_id, "tone", "prefers bullets")
+
+    active = client.get(f"/chat/sessions/{session_id}/memory", headers=auth(token)).json()
+    assert [e["source"] for e in active] == ["owner"]
+    assert client.get(
+        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
+    ).json() == []

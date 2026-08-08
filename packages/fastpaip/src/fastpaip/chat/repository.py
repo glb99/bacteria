@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from bacteria.session.store import (
+    OWNER,
     MemoryEntry,
     Session,
     SessionState,
@@ -46,7 +47,12 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from fastpaip.chat.models import ChatMemoryEntry, ChatSession, ChatTranscriptItem
+from fastpaip.chat.models import (
+    ChatMemoryEntry,
+    ChatMemoryProposal,
+    ChatSession,
+    ChatTranscriptItem,
+)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -110,6 +116,9 @@ class SqlSessionRepository:
         memories = (await self._db.exec(
             select(ChatMemoryEntry).where(ChatMemoryEntry.session_id == session_id)
         )).all()
+        proposals = (await self._db.exec(
+            select(ChatMemoryProposal).where(ChatMemoryProposal.session_id == session_id)
+        )).all()
 
         # Plain dataclasses, never the ORM rows themselves. See the module
         # docstring: this is the detached-read guarantee, not a formality.
@@ -132,9 +141,23 @@ class SqlSessionRepository:
                 entry.key: MemoryEntry(
                     value=entry.value["value"],
                     reason=entry.reason,
+                    source=entry.source,
                     created_at=_as_utc(entry.created_at),
                 )
                 for entry in memories
+            },
+            # Keyed by (source, key), matching the table's own primary key.
+            # Which collection a row lands in is decided by which table it came
+            # from -- there is no status column to filter on and therefore none
+            # to forget to filter on.
+            proposals={
+                (entry.source, entry.key): MemoryEntry(
+                    value=entry.value["value"],
+                    reason=entry.reason,
+                    source=entry.source,
+                    created_at=_as_utc(entry.created_at),
+                )
+                for entry in proposals
             },
         )
 
@@ -190,12 +213,13 @@ class SqlSessionRepository:
         return await self.get_state(session_id)
 
     async def remember(
-        self, session_id: str, key: str, value: Any, reason: str
+        self, session_id: str, key: str, value: Any, reason: str, source: str = OWNER
     ) -> SessionState:
         await self._require(session_id)
 
         existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:
+            existing.source = source
             # Overwrite by key: updating a memory is a write, not an append.
             existing.value = {"value": value}
             existing.reason = reason
@@ -213,7 +237,11 @@ class SqlSessionRepository:
         else:
             self._db.add(
                 ChatMemoryEntry(
-                    session_id=session_id, key=key, value={"value": value}, reason=reason
+                    session_id=session_id,
+                    key=key,
+                    value={"value": value},
+                    reason=reason,
+                    source=source,
                 )
             )
 
@@ -228,6 +256,89 @@ class SqlSessionRepository:
             await self._db.delete(existing)
             await self._db.commit()
         # Absent key is a no-op: the caller wanted it gone, and it is.
+        return await self.get_state(session_id)
+
+    async def propose(
+        self, session_id: str, key: str, value: Any, reason: str, source: str
+    ) -> SessionState:
+        """Write a suggestion into the proposals table. Reaches no model."""
+        await self._require(session_id)
+
+        existing = await self._db.get(ChatMemoryProposal, (session_id, source, key))
+        if existing is not None:
+            # Replaces this source's own earlier suggestion for the key, which
+            # is what makes a retried job idempotent rather than accumulative.
+            # A *different* source proposing the same key is a different row.
+            existing.value = {"value": value}
+            existing.reason = reason
+            existing.created_at = datetime.now(timezone.utc)
+            self._db.add(existing)
+        else:
+            self._db.add(
+                ChatMemoryProposal(
+                    session_id=session_id,
+                    source=source,
+                    key=key,
+                    value={"value": value},
+                    reason=reason,
+                )
+            )
+
+        await self._db.commit()
+        return await self.get_state(session_id)
+
+    async def activate(self, session_id: str, source: str, key: str) -> SessionState:
+        """Move a proposal into active memory, in one transaction.
+
+        Both writes commit together or neither does. A partial application here
+        is the one outcome with no honest reading: a proposal deleted without
+        the memory appearing loses a suggestion nobody can recover, and a memory
+        written without the proposal cleared leaves a reviewer approving the
+        same thing forever.
+
+        Raises:
+            KeyError: No such proposal. Matches the in-memory store rather than
+                silently creating a memory from nothing, which would let a stale
+                review page conjure a fact nobody just read.
+        """
+        await self._require(session_id)
+
+        proposal = await self._db.get(ChatMemoryProposal, (session_id, source, key))
+        if proposal is None:
+            raise KeyError((source, key))
+
+        existing = await self._db.get(ChatMemoryEntry, (session_id, key))
+        if existing is not None:
+            # Activation is where competing proposals collapse onto one key --
+            # the reviewer chose this one, so it replaces whatever held it.
+            existing.value = proposal.value
+            existing.reason = proposal.reason
+            existing.source = proposal.source
+            existing.created_at = datetime.now(timezone.utc)
+            self._db.add(existing)
+        else:
+            self._db.add(
+                ChatMemoryEntry(
+                    session_id=session_id,
+                    key=key,
+                    value=proposal.value,
+                    reason=proposal.reason,
+                    source=proposal.source,
+                )
+            )
+        await self._db.delete(proposal)
+
+        await self._db.commit()
+        return await self.get_state(session_id)
+
+    async def reject(self, session_id: str, source: str, key: str) -> SessionState:
+        """Discard a proposal. A no-op if it is not there, matching ``forget``."""
+        await self._require(session_id)
+
+        existing = await self._db.get(ChatMemoryProposal, (session_id, source, key))
+        if existing is not None:
+            await self._db.delete(existing)
+            await self._db.commit()
         return await self.get_state(session_id)
 
     async def _require(self, session_id: str, *, lock: bool = False) -> ChatSession:

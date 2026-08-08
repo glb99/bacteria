@@ -421,6 +421,30 @@ an entry point is for.
     that actually collide, and this was checked against a database deliberately
     seeded with bad rows rather than only against an empty one.
 
-14. **Next.** Audio. This is the one that re-opens the model protocol for
+14. ~~Let the agent suggest its own memories.~~ **Done**, as ADR 0017:
+    proposing a memory and activating one are different acts, and only the
+    second is a human's. The model gets a `remember` tool that can *only*
+    propose; proposals live in their own table, reach no model, and become
+    memory when the owner accepts one.
+
+    That split is what makes the tool registrable at all. Memory is injected
+    into the system prompt of every later turn, so a model able to write it
+    directly could write its own future instructions — an injected message
+    would become an instruction outliving the message that carried it. Stopping
+    it at a queue a human reads is what removes that, and it also removes the
+    approval blocker: a tool whose only effect is "record a suggestion" needs no
+    gate, because the human is downstream rather than upstream.
+
+    Proposals are keyed by `(source, key)` so two proposers — the tool and, in
+    future, a background extractor — can both suggest `tone` without either
+    silently overwriting the other. Collapsing onto one key happens at
+    activation, where a person can judge it. Same rule the ingestion pipeline
+    applies to duplicate records, and for the same reason.
+
+    The ADR was amended before acceptance: it first proposed a `status` field,
+    which cannot work because active memory and proposals have different keys.
+    Two tables, each with a primary key stating its own rule, replaced it.
+
+15. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

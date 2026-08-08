@@ -211,3 +211,32 @@ async def test_the_owner_still_has_access(client, issue):
         "hi",
         "ok",
     ]
+
+
+async def test_proposal_routes_require_authentication(client):
+    """A route added later without the dependency is the failure mode here."""
+    assert client.get("/chat/sessions/x/memory-proposals").status_code == 401
+    assert client.post("/chat/sessions/x/memory-proposals/model/k").status_code == 401
+    assert client.delete("/chat/sessions/x/memory-proposals/model/k").status_code == 401
+
+
+async def test_one_principal_cannot_review_anothers_proposals(client, issue):
+    """Activation is the act the whole design trusts, so it must be the owner's.
+
+    An intruder able to activate does not merely read a suggestion — they choose
+    what the owner's model is instructed with on every later turn, which is
+    exactly the capability the proposal queue exists to withhold from the model
+    itself.
+    """
+    owner, intruder = await issue("acme"), await issue("rival")
+    session_id = client.post("/chat/sessions", headers=auth(owner)).json()["session_id"]
+
+    listed = client.get(f"/chat/sessions/{session_id}/memory-proposals", headers=auth(intruder))
+    activated = client.post(
+        f"/chat/sessions/{session_id}/memory-proposals/model/tone", headers=auth(intruder)
+    )
+    rejected = client.delete(
+        f"/chat/sessions/{session_id}/memory-proposals/model/tone", headers=auth(intruder)
+    )
+
+    assert listed.status_code == activated.status_code == rejected.status_code == 404

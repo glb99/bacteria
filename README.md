@@ -82,6 +82,9 @@ which half of a guess was right.
 | `GET` | `/chat/sessions/{id}/memory` | What this session is told to remember, with the reason each was kept. |
 | `PUT` | `/chat/sessions/{id}/memory/{key}` | `{"value", "reason"}`. Preserved into the system prompt of every later turn. Overwrites by key. |
 | `DELETE` | `/chat/sessions/{id}/memory/{key}` | `204`, whether or not it was there. |
+| `GET` | `/chat/sessions/{id}/memory-proposals` | Suggested memories awaiting a decision. These reach no model. |
+| `POST` | `/chat/sessions/{id}/memory-proposals/{source}/{key}` | Accept a suggestion, making it active. `404` if there is no such proposal. |
+| `DELETE` | `/chat/sessions/{id}/memory-proposals/{source}/{key}` | Discard a suggestion. `204`. |
 | `POST` | `/ingestion/batches` | `{"source", "records": [...]}` → what happened to every record. Runs inline; capped at 500 records. |
 | `POST` | `/ingestion/batches:defer` | Same body → `202 {"job_id"}`. Hands it to a worker and answers immediately. |
 
@@ -231,7 +234,7 @@ rather than only here:
 | Key scopes and expiry | Every key grants identity and therefore everything; there is no read-only key to hand a script. |
 | Tenancy for ingested records | Submitting requires authentication, but a batch is not owned by its submitter. Urgent the moment a read route exists. |
 | Cross-batch duplicates | A repeated `external_id` in a later batch is stored twice. Needs someone to choose between "update" and "reject". |
-| Memory the model can write | Deliberate, not unfinished. Memory feeds the system prompt on every later turn, so a model that could write it could write its own future instructions — one injected message would outlive the message carrying it. See bacteria's ADR 0016. |
+| A nudge to review proposals | The model can suggest memories and a human must accept them, but nothing surfaces how many are waiting. A queue nobody reads looks exactly like an agent with no memory. |
 | Memory that follows a user | Memory is keyed by session, so a new conversation starts with none. Cross-session memory would change `SessionRepository`, which is a boundary change with its own record. |
 | Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
 

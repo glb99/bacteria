@@ -137,18 +137,39 @@ class TranscriptItem:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+OWNER = "owner"
+"""The source of a memory written by the person who owns the session.
+
+Their writes are active immediately, because the human confirmation every other
+source has to wait for *is* them ([ADR 0017](../../docs/adr/0017-memory-is-proposed-and-confirmed.md)).
+"""
+
+
 @dataclass(frozen=True)
 class MemoryEntry:
-    """One deliberately preserved fact.
+    """One preserved fact, or one proposal that it should become preserved.
 
     ``reason`` is required, not optional. A memory with no recorded reason
     cannot be reviewed later — there is no way to judge whether it is still
     worth keeping, so it is kept forever by default. Requiring provenance at
     write time is what makes expiry a decision someone can actually make.
+
+    ``source`` says who proposed it — :data:`OWNER`, a model, or a named job.
+    It survives activation rather than being discarded once the entry is live,
+    because "the extractor has been noisy" is a question someone will ask and
+    an activated memory that forgot where it came from cannot answer it.
+
+    There is deliberately no ``status`` field. Whether an entry is proposed or
+    active is expressed by *which collection it is in* on
+    :class:`SessionState`, not by an attribute that could disagree with its
+    container. ADR 0017 as drafted named a status field; making the two
+    collections key differently is what forced the change, and the redundancy
+    it removes is the kind this package treats as a defect.
     """
 
     value: Any
     reason: str
+    source: str = OWNER
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -158,12 +179,26 @@ class SessionState:
 
     Mutable, unlike the items inside it, because ``commit`` mutates it in
     place. Callers never receive this object — only deep copies of it.
+
+    ``memory`` and ``proposals`` are separate collections with *different keys*,
+    and that difference is the whole mechanism of ADR 0017:
+
+    - ``memory`` is keyed by ``key`` alone. At most one active fact may claim a
+      key, which is what keeps the model's view unambiguous.
+    - ``proposals`` is keyed by ``(source, key)``. Two proposers may both
+      suggest ``tone`` and both survive, because collapsing them is a judgement
+      only a human can make — the same rule the ingestion pipeline applies to
+      duplicate records, and for the same reason.
+
+    Only ``memory`` reaches a model. A proposal is inert until something
+    activates it.
     """
 
     session: Session
     transcript: list[TranscriptItem] = field(default_factory=list)
     working_state: dict[str, Any] = field(default_factory=dict)
     memory: dict[str, MemoryEntry] = field(default_factory=dict)
+    proposals: dict[tuple[str, str], MemoryEntry] = field(default_factory=dict)
 
 
 class UnknownSessionError(KeyError):
@@ -257,7 +292,9 @@ class SessionStore:
         state.working_state.update(working_state_updates or {})
         return copy.deepcopy(state)
 
-    async def remember(self, session_id: str, key: str, value: Any, reason: str) -> SessionState:
+    async def remember(
+        self, session_id: str, key: str, value: Any, reason: str, source: str = OWNER
+    ) -> SessionState:
         """Record a fact worth re-surfacing later. The only write path for memory.
 
         Separate from :meth:`commit` on purpose. Routing memory through
@@ -265,10 +302,20 @@ class SessionStore:
         "stash this for the current turn" the same call, and the difference
         between them is the entire reason memory exists as a distinct concern.
 
+        Writes an *active* memory directly, with no confirmation step, and that
+        is only correct for the session's owner. Confirmation exists to put a
+        human between a suggestion and the model's instructions; the owner is
+        that human, so requiring them to confirm their own write would be
+        ceremony. Everything else proposes — see :meth:`propose`.
+
         Args:
             key: Overwrites any existing entry. Updating a memory is a write,
                 not an append — the transcript is where history lives.
             reason: Why this is worth keeping. Required; see :class:`MemoryEntry`.
+            source: Who is writing. Defaults to :data:`OWNER`, and a caller that
+                is not the owner should be calling ``propose`` instead. Kept as
+                an argument rather than hardcoded so an activated proposal can
+                retain the source that suggested it.
 
         Raises:
             UnknownSessionError: No such session.
@@ -276,7 +323,76 @@ class SessionStore:
         if session_id not in self._sessions:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
-        state.memory[key] = MemoryEntry(value=value, reason=reason)
+        state.memory[key] = MemoryEntry(value=value, reason=reason, source=source)
+        return copy.deepcopy(state)
+
+    async def propose(
+        self, session_id: str, key: str, value: Any, reason: str, source: str
+    ) -> SessionState:
+        """Suggest a memory without making one. Reaches no model until activated.
+
+        This is the write path for anything that is not the session's owner —
+        a tool the model called, a job that read the transcript. The proposal
+        sits in ``proposals`` and is invisible to
+        :func:`~bacteria.context.assembly.assemble_context`, so an injected
+        instruction stops at a queue a human reads instead of becoming an
+        instruction the model follows. That is the whole point of ADR 0017 and
+        the reason this is not simply ``remember`` with a flag.
+
+        Keyed by ``(source, key)``, so two proposers may both suggest ``tone``
+        and neither silently overwrites the other. Re-proposing the *same*
+        source and key does overwrite, which is what makes a retried job safe:
+        it replaces its own previous suggestion rather than accumulating copies.
+
+        Raises:
+            UnknownSessionError: No such session.
+        """
+        if session_id not in self._sessions:
+            raise UnknownSessionError(session_id)
+        state = self._sessions[session_id]
+        state.proposals[(source, key)] = MemoryEntry(value=value, reason=reason, source=source)
+        return copy.deepcopy(state)
+
+    async def activate(self, session_id: str, source: str, key: str) -> SessionState:
+        """Promote a proposal into active memory. The human act.
+
+        Collapsing happens here and only here: the proposal was keyed by
+        ``(source, key)`` and the resulting memory is keyed by ``key``, so
+        activating one of two competing suggestions resolves the conflict by
+        replacing whatever held that key. The person activating is the only
+        actor able to judge that, which is why nothing upstream tries.
+
+        The activated entry keeps its ``source``. A memory that forgot it was
+        suggested by a job could not later be distrusted as one.
+
+        Raises:
+            UnknownSessionError: No such session.
+            KeyError: No such proposal. Distinct from activating an already
+                active memory, which is not something this method can be asked
+                to do — proposals and memories are different collections.
+        """
+        if session_id not in self._sessions:
+            raise UnknownSessionError(session_id)
+        state = self._sessions[session_id]
+        entry = state.proposals.pop((source, key))
+        state.memory[key] = entry
+        return copy.deepcopy(state)
+
+    async def reject(self, session_id: str, source: str, key: str) -> SessionState:
+        """Discard a proposal without it ever becoming a memory.
+
+        A no-op on an absent proposal, matching :meth:`forget`: the caller
+        wanted it gone, and it is. Rejection leaves no record here — if "this
+        was suggested and refused" needs to be answerable, that belongs in the
+        transcript, which is where history lives.
+
+        Raises:
+            UnknownSessionError: No such session.
+        """
+        if session_id not in self._sessions:
+            raise UnknownSessionError(session_id)
+        state = self._sessions[session_id]
+        state.proposals.pop((source, key), None)
         return copy.deepcopy(state)
 
     async def forget(self, session_id: str, key: str) -> SessionState:

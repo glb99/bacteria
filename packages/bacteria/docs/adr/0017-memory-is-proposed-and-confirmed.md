@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-08-08
+Accepted — 2026-08-08
 
 Supersedes the part of [ADR 0016](0016-memory-is-written-by-the-owner-not-the-model.md)
 that gives the model no way to write memory. The rest of 0016 — the owner's
@@ -54,11 +54,24 @@ that look far more alarming.
 Split the operation in two. **Proposing a memory is not writing one, and
 activation is a human act.**
 
-`MemoryEntry` gains two fields:
+`MemoryEntry` gains one field, and `SessionState` gains one collection:
 
-- `status` — `proposed` or `active`. `assemble_context` surfaces only `active`
-  entries, so a proposal reaches no model.
-- `source` — who proposed it: the owner, the model, or a named job.
+- `source` — who proposed it: the owner, the model, or a named job. It survives
+  activation, so an active memory can still be attributed.
+- `SessionState.proposals`, separate from `SessionState.memory`. Only `memory`
+  is read by `assemble_context`, so a proposal reaches no model.
+
+**Amended during implementation, before acceptance.** This record first proposed
+a `status` field on `MemoryEntry` rather than a second collection. That does not
+work: the two have *different keys*. Active memory is keyed by `key` alone, so
+the model is never handed two answers for one fact; proposals are keyed by
+`(source, key)`, so two proposers do not overwrite each other. One collection
+cannot hold both rules, and expressing the stricter one as a filter over a
+status column makes "reaches the model" depend on every reader remembering to
+filter. Separating them puts the distinction in the type, and in the database
+in two tables whose primary keys each state their own rule. It also removes a
+field that could disagree with its container, which this codebase treats as a
+defect rather than redundancy.
 
 Anything may propose. The owner's own writes arrive `active`, because the owner
 *is* the human act this record protects. Two proposers are expected:
@@ -113,11 +126,13 @@ nothing activates, and the feature looks broken while behaving exactly as
 designed. Nothing here surfaces a pending count or nags, and the first
 deployment that ignores the queue will conclude the agent has no memory.
 
-**The protocol's implicit contract widens.** Every `SessionRepository`
-implementation must now round-trip two more fields, and the in-memory store must
-carry them to stay honest. The conformance suite catches divergence, which is
-the reason to trust this, but the surface a second implementer must satisfy is
-larger than it was.
+**The protocol grows from five methods to eight.** `propose`, `activate` and
+`reject` join it, and every `SessionRepository` implementation must round-trip
+a second collection. ADR 0015 argued for a narrow interface and this widens it
+by more than half. The defence is that these are one lifecycle rather than three
+conveniences — a store implementing `propose` without `activate` would let
+suggestions be created and never resolved — but the surface a second implementer
+must satisfy is now substantially larger.
 
 **The approval gate becomes decorative for this tool.** Allowing by default is
 correct while the tool can only propose, and it will look like protection to

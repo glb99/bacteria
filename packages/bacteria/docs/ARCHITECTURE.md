@@ -173,18 +173,33 @@ This layer cannot execute anything. It imports no tool module.
 
 ### `session` — the authoritative record
 
-The single source of truth. Three kinds of state, kept apart because their
-lifecycles differ:
+The single source of truth. Three kinds of state — not three storage choices,
+but the three classical kinds of memory, which is why they cannot be merged:
 
-| | Lifetime | Written by |
-|---|---|---|
-| `transcript` | Append-only, permanent | `commit` |
-| `working_state` | Current turn; assume nothing survives | `commit` |
-| `memory` | Deliberate, until deliberately removed | `remember` / `forget` |
+| | Kind | Answers | Lifetime | Written by |
+|---|---|---|---|---|
+| `transcript` | Episodic | What happened | Append-only, permanent | `commit` |
+| `working_state` | Working | What is held right now | Current turn; assume nothing survives | `commit` |
+| `memory` | Semantic | What is true | Deliberate, until deliberately removed | `remember` / `forget` |
+
+The distinctions that look like taste follow from the kinds. Memory reaches the
+model through the system prompt and never through the messages, because a fact
+is not an utterance and would otherwise acquire a position in the conversation
+it does not have. `remember` overwrites where `commit` appends, because updating
+a fact replaces it — the old value is not history, it is wrong — while
+correcting an event means appending a correction, since the event still
+happened. And `MemoryEntry` requires a `reason` where `TranscriptItem` does not:
+an event carries its own justification by sitting among the things that led to
+it, and a decontextualized fact carries none.
 
 Everything arrives as a proposal and becomes real only when this layer applies
 it. `get_state` returns a deep copy, which is what turns "only this layer
 writes" from a convention into a property of the code.
+
+Semantic memory here is semantic by *role* only. Every entry is surfaced,
+subject to a recency bound in `context/assembly.py`, with no relevance ranking
+and no query — the mechanism is a keyed profile store. Relevance belongs to
+`context`, not here: this layer owns what is true, not what is worth saying now.
 
 ### `tools` — capability, permission, action
 

@@ -4,15 +4,39 @@ This module is the system's single source of truth. When the same fact exists
 in more than one place — a runtime local, a returned copy, a future cache —
 this is the copy that wins, and every other copy is derived.
 
-State is deliberately split three ways rather than kept as one blob, because
-the three have genuinely different lifecycles and merging them loses that:
+State is deliberately split three ways rather than kept as one blob. These are
+not three storage choices — they are the three classical kinds of memory, and
+they answer different questions:
 
-- **transcript** — the durable record of what happened, append-only.
-- **working_state** — scratch data for the current turn. Overwritable, and
-  nothing should assume it survives.
-- **memory** — facts deliberately preserved and deliberately re-surfaced later.
-  A memory is a decision, not a byproduct, which is why it has its own write
-  path and its own removal path instead of sharing ``commit``'s.
+- **transcript** — *what happened.* Episodic: events in time, append-only,
+  ordered.
+- **working_state** — *what is being held right now.* Working: scratch for the
+  current turn, overwritable, and nothing should assume it survives.
+- **memory** — *what is true.* Semantic: facts, keyed, decontextualized from the
+  moment they were learned. A memory is a decision, not a byproduct, which is
+  why it has its own write path and its own removal path rather than sharing
+  ``commit``'s.
+
+Naming them earns its space, because the split otherwise reads as taste and its
+consequences look arbitrary. They follow from the kinds:
+
+- Memory is surfaced through the system prompt and never appended to the
+  messages, because a fact is not an utterance. In the message list it would
+  acquire a position in the conversation that it does not have.
+- ``remember`` overwrites where ``commit`` appends. Updating a fact *replaces*
+  it — the previous value is not history, it is wrong. Correcting an event means
+  appending a correction, because the event still happened. Which is also why
+  ``forget`` exists and there is no un-append.
+- :class:`MemoryEntry` requires a ``reason`` and :class:`TranscriptItem` does
+  not. An event carries its own justification: it sits at a position, among the
+  things that led to it. A decontextualized fact carries none, and without the
+  reason nobody can review whether "prefers concise answers" still holds.
+
+What is deliberately absent is retrieval. Every memory is surfaced, subject only
+to a recency bound in :mod:`bacteria.context.assembly` — there is no relevance
+ranking and no query — so this is semantic memory by role and a keyed profile
+store by mechanism. Relevance is that module's question, not this one's; this
+module owns what is true, not what is worth saying now.
 
 Invariant: nothing mutates authoritative state except :meth:`SessionStore.commit`,
 :meth:`SessionStore.remember`, and :meth:`SessionStore.forget`. This is enforced

@@ -66,7 +66,40 @@ Runtime.run_turn                                    runtime/runtime.py
        the only write. Reached on both the success and failure paths.
 ```
 
-Two things to notice about the shape.
+The same turn as control flow, which is where the branching and the failure path
+are visible:
+
+```mermaid
+flowchart TD
+    start([run_turn]) --> read["Read session state<br/>get_state — a detached copy"]
+    read --> ctx["Assemble context<br/>last 20 messages, memory in system"]
+    ctx --> call1["Model call<br/>step-tracked: at most once"]
+    call1 --> ask{"Tool calls proposed,<br/>and a registry supplied?"}
+    ask -- no --> commit
+    ask -- yes --> exec["Approve, then execute<br/>one at a time, in proposal order"]
+    exec --> call2["Model call after tools<br/>further proposals are ignored"]
+    call2 --> commit["commit — new transcript items<br/>the only write"]
+    commit --> done([RunResult])
+
+    call1 -. raises .-> fail
+    exec -. raises .-> fail
+    call2 -. raises .-> fail
+    fail["Append run_error,<br/>commit, then re-raise"] -.-> raised([Exception])
+```
+
+**There is no loop.** Every other box has one way out, and `call2` returns
+whatever it returns — if the model proposes more tools there, nothing acts on
+them. That is [ADR 0011](adr/0011-single-round-tool-loop.md), and it is the
+shape's biggest departure from the usual agent runtime, which loops until the
+model stops asking.
+
+**`evidence` is not a store.** It is a local list that accumulates
+`TranscriptItem`s as the turn progresses — the user message first, then one per
+tool call, then the assistant reply — and it becomes the transcript when the
+store applies it. Accumulating rather than assembling at the end is what makes
+the dashed path above possible.
+
+Two more things to notice about the shape.
 
 **The runtime touches everything and implements nothing.** Every arrow leaves
 the runtime and comes back. When that stops being true — when prompt formatting

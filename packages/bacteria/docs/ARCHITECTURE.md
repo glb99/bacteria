@@ -285,9 +285,27 @@ untrusted content flowing back from a tool into the model's context.
 
 No external evidence sources exist, so there is nothing to retrieve. When one
 does, it attaches as an added section — and must arrive as *candidate evidence*
-rather than authority. Also missing here: summarization (needed once
-conversations outgrow the window) and token-aware budgeting (the window counts
-messages, so twenty long ones cost far more than twenty short ones).
+rather than authority.
+
+Separately, and easily confused with it: there is no relevance ranking over the
+session's *own* memory. Entries are chosen by recency, so the twentieth most
+recent fact is invisible on the turn it finally matters. Ranking against the
+incoming message is what would make memory semantic by mechanism rather than
+only by role, and nothing structural blocks it — `assemble_context` already
+receives the query.
+
+It is unbuilt because of a tension, not a dependency. Ranking makes a memory's
+absence silent and query-dependent: the same turn phrased differently surfaces a
+different set, and a fact the owner deliberately preserved can vanish with
+nothing reporting it. That is the failure [ADR
+0010](adr/0010-bounded-context-window.md) rejected when it declined
+summarization, and accepting it for memory while rejecting it for messages would
+be inconsistent — a memory was kept on purpose, so losing one silently is worse
+than losing an old message. Recency is blunter and fails predictably.
+
+Also missing here: summarization (needed once conversations outgrow the window)
+and token-aware budgeting (the window counts messages, so twenty long ones cost
+far more than twenty short ones).
 
 ### Identity and policy — `tools/approval.py`
 

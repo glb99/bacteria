@@ -33,12 +33,34 @@ recent first, so it is describable the same way — "the twenty most recent
 memories" is something a user can be told.
 
 Not built:
-    Retrieval. There is no external evidence source — no documents, no search,
-    no database — so there is nothing to retrieve. When one exists, it plugs in
-    here as an additional section, and it must arrive as *candidate evidence*
-    rather than authority: assembled context is a claim about what is relevant,
-    and a retrieved passage carries no more weight than the retriever's
-    confidence in it.
+    Retrieval over external evidence. There is no external source — no
+    documents, no search, no vector store — so there is nothing to retrieve.
+    When one exists, it plugs in here as an *additional section*, and it must
+    arrive as candidate evidence rather than authority: assembled context is a
+    claim about what is relevant, and a retrieved passage carries no more weight
+    than the retriever's confidence in it.
+
+    Relevance ranking over memory. Distinct from the above, and easy to conflate
+    with it: this one adds no section, it replaces how :func:`_format_memory`
+    chooses. Memory is selected by recency today, so a session's twentieth most
+    recent fact is invisible on the turn it finally matters. Ranking the entries
+    against the incoming message instead is what would make this semantic memory
+    by mechanism and not only by role — see the note in
+    :mod:`bacteria.session.store`. Nothing structural is in the way: this
+    function already receives ``user_text``, which is the query, and uses it
+    only to append the new message.
+
+    The reason it is not built is a tension rather than a missing dependency.
+    Ranking makes a memory's absence *silent and query-dependent* — the same
+    turn, phrased differently, surfaces a different set, and a fact the owner
+    deliberately preserved can vanish with nothing reporting it. That is the
+    failure `ADR 0010` rejected when it declined summarization, and rejecting it
+    for messages while accepting it for memory would be inconsistent: a memory
+    was kept on purpose, so losing one silently is worse than losing an old
+    message. Recency is blunter and fails predictably, which is the same trade
+    the message window makes. Whoever builds this has to answer what happens to
+    a preserved fact that did not score well, and "it was not relevant" is not
+    an answer the owner who wrote it can check.
 
     Summarization and compaction. Would replace the window with
     summary-of-old-turns plus recent turns. Needed once conversations

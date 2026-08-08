@@ -17,14 +17,14 @@ is not a conversion nicety; it is that invariant.
 *Commit appends.* Transcript items are inserted with an increasing ``seq``;
 working state is merged key by key. Neither replaces what is there.
 
-Not built:
-    Concurrency control. ``commit`` reads the current maximum ``seq`` and writes
-    the next one, and two concurrent commits to the same session can therefore
-    both read the same maximum. The agent's store documents the same gap and the
-    same fix — a version column checked before applying — and it becomes real
-    here first, since two HTTP requests for one session are ordinary where two
-    CLI turns were not.
+*Commits to one session are serialized.* ``commit`` takes a row lock on the
+session before computing the next ``seq``, and a unique constraint on
+``(session_id, seq)`` catches anything that gets past it. This was a live bug,
+not a precaution: five concurrent commits all claimed position 0, and two-item
+commits interleaved so that a turn's question and its answer were pulled apart
+by other turns.
 
+Not built:
     Pagination. ``get_state`` loads the entire transcript, which is bounded only
     by how long a conversation runs. The agent's context assembly windows what
     it sends to a model, so this is a memory and latency cost rather than a
@@ -144,7 +144,22 @@ class SqlSessionRepository:
         new_transcript_items: Optional[list[TranscriptItem]] = None,
         working_state_updates: Optional[dict[str, Any]] = None,
     ) -> SessionState:
-        row = await self._require(session_id)
+        # Locks the session row, and everything below depends on it. `seq` is
+        # computed from the current maximum, so two commits that both read
+        # before either writes claim the same position -- and the column that
+        # exists to order the transcript stops ordering it, silently, because
+        # the result still reads back cleanly.
+        #
+        # Reproduced before it was fixed: five concurrent commits all took
+        # position 0, and three two-item commits interleaved into
+        # ['x-a', 'y-a', 'z-a', 'x-b', 'y-b', 'z-b'] -- a turn's question and
+        # its answer pulled apart by other turns.
+        #
+        # The lock is on the session row rather than the item table because
+        # ordering is per session: two different conversations have no reason to
+        # wait for each other. It is released when this transaction ends, which
+        # is the `commit()` below.
+        row = await self._require(session_id, lock=True)
 
         next_seq = (
             await self._db.exec(
@@ -215,15 +230,29 @@ class SqlSessionRepository:
         # Absent key is a no-op: the caller wanted it gone, and it is.
         return await self.get_state(session_id)
 
-    async def _require(self, session_id: str) -> ChatSession:
+    async def _require(self, session_id: str, *, lock: bool = False) -> ChatSession:
         """Load the session row or raise the agent's own error type.
 
         Raising ``UnknownSessionError`` rather than returning ``None`` keeps this
         implementation indistinguishable from the in-memory one at the point
         callers handle it — a runtime that caught one and not the other would
         behave differently depending on which store it was given.
+
+        Args:
+            lock: Take a row lock (``SELECT ... FOR UPDATE``) held until the
+                transaction ends. Only :meth:`commit` needs it, and only because
+                it computes the next ``seq`` from what it reads. Reads do not
+                take it: a lock on ``get_state`` would serialize every request
+                for a session behind every other, to protect nothing.
         """
-        row = await self._db.get(ChatSession, session_id)
+        if lock:
+            row = (
+                await self._db.exec(
+                    select(ChatSession).where(ChatSession.session_id == session_id).with_for_update()
+                )
+            ).one_or_none()
+        else:
+            row = await self._db.get(ChatSession, session_id)
         if row is None:
             raise UnknownSessionError(session_id)
         return row

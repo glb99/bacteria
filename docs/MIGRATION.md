@@ -401,6 +401,26 @@ an entry point is for.
     Still session-scoped. A new conversation starts with no memory, and making
     it follow a user would change `SessionRepository`.
 
-13. **Next.** Audio. This is the one that re-opens the model protocol for
+13. ~~Serialize commits to one session.~~ **Done**, and it was a live bug
+    rather than a precaution. `commit` derived the next `seq` from the current
+    maximum without a lock, so overlapping requests claimed the same position:
+    five concurrent commits all took 0, and two-item commits interleaved into
+    `['x-a', 'y-a', 'z-a', 'x-b', 'y-b', 'z-b']` — a turn's question and its
+    answer pulled apart by other turns. The transcript is what every other
+    guarantee treats as authoritative, and its ordering column was meaningless
+    whenever requests overlapped.
+
+    Fixed with a row lock on the session for the duration of the write, plus a
+    unique constraint on `(session_id, seq)` so a regression fails loudly. The
+    lock is per session, so two conversations never wait on each other.
+
+    The migration repairs before it constrains. Autogenerate emitted only
+    `create_unique_constraint`, which fails outright on any database that has
+    served overlapping traffic — every database this bug could have reached.
+    Existing duplicates are renumbered by `(seq, id)`, touching only sessions
+    that actually collide, and this was checked against a database deliberately
+    seeded with bad rows rather than only against an empty one.
+
+14. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

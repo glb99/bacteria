@@ -16,7 +16,7 @@ agent gained a new kind of event.
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, UniqueConstraint
 from sqlmodel import JSON, Field, SQLModel
 
 
@@ -55,9 +55,18 @@ class ChatTranscriptItem(SQLModel, table=True):
     ``timestamp``. Autoincrement ordering is an implementation detail that a
     different backend may not preserve, and two items committed in the same turn
     can share a timestamp to the microsecond.
+
+    Unique per session, and that constraint is doing real work rather than
+    documenting an assumption. ``commit`` computes the next ``seq`` from the
+    current maximum, so before it took a row lock two overlapping commits both
+    claimed the same position — and nothing objected, because a duplicate
+    ``seq`` still reads back as a perfectly ordinary transcript. The lock is the
+    fix; this is what makes a future regression fail loudly instead of quietly
+    reordering someone's conversation.
     """
 
     __tablename__ = "chat_transcript_item"
+    __table_args__ = (UniqueConstraint("session_id", "seq", name="uq_transcript_session_seq"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str = Field(foreign_key="chat_session.session_id", index=True)

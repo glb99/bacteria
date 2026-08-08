@@ -208,8 +208,8 @@ The seam is already right: `SessionStore`'s four public methods are the complete
 operation set a backing store needs. Persistence is a second implementation of
 this class plus a way to select one — not a change to any caller. What it drags
 in: serialization for `TranscriptItem` and `MemoryEntry`, and a concurrency
-story, because a shared store means `commit` is no longer the only writer and
-needs a staleness check. That check belongs inside `commit`, which is part of
+story, because a shared store means `commit` is no longer the only writer.
+Whatever that story is belongs inside `commit`, which is part of
 why it stays the single write path while it is still a thin one.
 
 ### Durable execution — `runtime/runtime.py`

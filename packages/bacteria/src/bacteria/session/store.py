@@ -40,11 +40,18 @@ Not built:
     :class:`TranscriptItem` and :class:`MemoryEntry`, and the concurrency
     control below.
 
-    Concurrency control. ``commit`` assumes it is the only writer. With more
-    than one, it would need a staleness check — a version or ETag on
-    ``SessionState``, compared before applying and rejected on mismatch. That
-    check belongs inside ``commit``, which is why it stays the only write path
-    even though it is currently a thin one.
+    Concurrency control. ``commit`` assumes it is the only writer, which holds
+    for this implementation — a dict mutated between awaits, in one process —
+    and stops holding the moment a store is shared. That check belongs inside
+    ``commit``, which is why it stays the only write path even though it is
+    currently a thin one.
+
+    Worth knowing what a real host had to do, since the shape here suggested
+    something else: the application backing this with Postgres did not add a
+    version column. It takes a row lock on the session for the duration of the
+    write, because its ``seq`` is derived from what it reads, and a staleness
+    check would have rejected the second concurrent turn rather than ordering
+    it. A store whose positions are assigned by the database may need neither.
 
     Session routing. A caller must already know its ``session_id``; nothing
     here infers which session an incoming event belongs to. That decision needs

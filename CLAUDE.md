@@ -136,9 +136,24 @@ Discuss before implementing when a change touches a boundary above, adds a
 dependency, or commits to infrastructure. Small internal changes do not need
 that ceremony.
 
-## Two copies of the agent
+## The other bacteria repository
 
-`packages/bacteria` came in via `git subtree` and is the working copy.
-A separate `~/Projects/bacteria` repository exists and is **behind** — it lacks
-`session/protocol.py`, ADR 0015, and the current README. Decide which is
-canonical before editing the other; right now this one is.
+`packages/bacteria` came in via `git subtree` and is the working copy. Every
+change to the agent belongs here.
+
+`~/Projects/bacteria` is where it started — the study project it was built in,
+working through an article series. It is frozen at `f58e89b`, 2026-08-06, which
+is **before the async refactor**: its code is synchronous throughout and has no
+`session/protocol.py`. Never copy code from it in this direction.
+
+It is not merely stale, though, and that is the part worth knowing. It holds
+`docs/SYSTEM_DESIGN.md` and `docs/sequence.mmd`, which **exist nowhere else** —
+the part-by-part design record that the ADRs replaced. So the two diverged in
+kind and not only in commits: this copy has `docs/adr/` and no `SYSTEM_DESIGN.md`,
+that one has the reverse.
+
+Which means "sync them" is the wrong instinct in both directions. Code flows
+neither way; that repository is a frozen origin. If anything in
+`SYSTEM_DESIGN.md` still earns its place, move that content deliberately into an
+ADR or `ARCHITECTURE.md` — do not reintroduce the article-part framing, which
+was retired on purpose.

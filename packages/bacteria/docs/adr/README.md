@@ -27,7 +27,8 @@ together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | [0013](0013-test-load-bearing-invariants-only.md) | Test load-bearing invariants only | Accepted |
 | [0014](0014-async-at-the-io-boundaries.md) | Make the I/O boundaries async; keep the pure layers synchronous | Accepted |
 | [0015](0015-session-store-behind-a-protocol.md) | Put the session store behind a protocol the host implements | Accepted |
-| [0016](0016-memory-is-written-by-the-owner-not-the-model.md) | Memory is written by the session's owner, not by the model, and is bounded | Accepted |
+| [0016](0016-memory-is-written-by-the-owner-not-the-model.md) | Memory is written by the session's owner, not by the model, and is bounded | Accepted; the "no tool" part superseded by 0017 |
+| [0017](0017-memory-is-proposed-and-confirmed.md) | Separate proposing a memory from activating one | Proposed |
 
 ## Writing a new one
 

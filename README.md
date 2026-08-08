@@ -79,6 +79,9 @@ which half of a guess was right.
 | `POST` | `/chat/sessions` | Open a conversation. Takes no body — the owner is the authenticated caller and cannot be named by the client. |
 | `POST` | `/chat/sessions/{id}/turns` | `{"text": "..."}` → `{"run_id", "reply"}`. Runs one agent turn. |
 | `GET` | `/chat/sessions/{id}/transcript` | Everything that happened in the conversation, in order. |
+| `GET` | `/chat/sessions/{id}/memory` | What this session is told to remember, with the reason each was kept. |
+| `PUT` | `/chat/sessions/{id}/memory/{key}` | `{"value", "reason"}`. Preserved into the system prompt of every later turn. Overwrites by key. |
+| `DELETE` | `/chat/sessions/{id}/memory/{key}` | `204`, whether or not it was there. |
 | `POST` | `/ingestion/batches` | `{"source", "records": [...]}` → what happened to every record. Runs inline; capped at 500 records. |
 | `POST` | `/ingestion/batches:defer` | Same body → `202 {"job_id"}`. Hands it to a worker and answers immediately. |
 
@@ -228,6 +231,8 @@ rather than only here:
 | Key scopes and expiry | Every key grants identity and therefore everything; there is no read-only key to hand a script. |
 | Tenancy for ingested records | Submitting requires authentication, but a batch is not owned by its submitter. Urgent the moment a read route exists. |
 | Cross-batch duplicates | A repeated `external_id` in a later batch is stored twice. Needs someone to choose between "update" and "reject". |
+| Memory the model can write | Deliberate, not unfinished. Memory feeds the system prompt on every later turn, so a model that could write it could write its own future instructions — one injected message would outlive the message carrying it. See bacteria's ADR 0016. |
+| Memory that follows a user | Memory is keyed by session, so a new conversation starts with none. Cross-session memory would change `SessionRepository`, which is a boundary change with its own record. |
 | Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
 
 What is planned, in what order, and why, is in

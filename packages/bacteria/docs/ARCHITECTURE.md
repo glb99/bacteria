@@ -109,7 +109,9 @@ re-reads the store.
 Turns session state into the bounded slice the model sees for one request.
 Currently a hard recent-message window; memory is surfaced through the system
 prompt rather than appended to the messages, so a preserved fact never
-masquerades as something the user just said.
+masquerades as something the user just said. Both are bounded, and both treat a
+limit of 0 as 0 — `list[-0:]` is the whole list, so the strictest bound used to
+be the loosest.
 
 Assembling context is a policy decision — what is relevant, what fits, what is
 worth its cost — which is why it is a layer and not a formatting step.
@@ -194,8 +196,13 @@ The authoritative list lives in the code, next to where each would be filled:
 
 ### Persistence — `session/store.py`
 
-Sessions live in a process-local dict. Nothing survives exit, so there is no
-cross-session memory and no resume.
+Sessions live in a process-local dict. Nothing survives exit, so on its own this
+package has no resume and no memory beyond the process.
+
+Note what a durable store does *not* buy: memory is keyed by session, so a host
+that persists it still starts every new session with none. Memory that follows a
+user across sessions would re-key `remember` and change `SessionRepository` —
+a boundary change, deliberately not made ([ADR 0016](adr/0016-memory-is-written-by-the-owner-not-the-model.md)).
 
 The seam is already right: `SessionStore`'s four public methods are the complete
 operation set a backing store needs. Persistence is a second implementation of

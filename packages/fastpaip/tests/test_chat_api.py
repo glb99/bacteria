@@ -165,3 +165,124 @@ def test_an_unknown_provider_is_rejected_rather_than_defaulted():
     """A typo must not quietly bill a different vendor."""
     with pytest.raises(ValueError):
         service.build_model_client("clyde")
+
+
+def remember(client, token, session_id, key, value, reason="because"):
+    return client.put(
+        f"/chat/sessions/{session_id}/memory/{key}",
+        headers=auth(token),
+        json={"value": value, "reason": reason},
+    )
+
+
+async def test_a_written_memory_reaches_the_model_as_a_system_prompt(client, token, monkeypatch):
+    """The whole point of the feature, and the thing that never happened before.
+
+    Memory had a complete read path -- assembled into the system prompt on every
+    turn -- and nothing that could write one, so this branch had never executed
+    outside a unit test. Asserting on what the client actually received is what
+    distinguishes "a row was stored" from "the model was told".
+    """
+    session_id = new_session(client, token)
+    seen = {}
+
+    class Capturing:
+        async def send(self, messages, **kwargs):
+            seen["system"] = kwargs.get("system")
+            return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
+
+    remember(client, token, session_id, "tone", "prefers concise answers")
+    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    assert seen["system"] is not None
+    assert "prefers concise answers" in seen["system"]
+    assert "because" in seen["system"]
+
+
+async def test_a_memory_survives_into_a_later_turn(client, token):
+    """Memory is durable, not per-request.
+
+    Each request builds a new repository against the database, so this passing
+    means the entry came back from storage rather than from anything held in
+    the process.
+    """
+    session_id = new_session(client, token)
+    remember(client, token, session_id, "tone", "concise")
+
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "one"})
+    listed = client.get(f"/chat/sessions/{session_id}/memory", headers=auth(token)).json()
+
+    assert [e["key"] for e in listed] == ["tone"]
+    assert listed[0]["reason"] == "because"
+
+
+async def test_writing_the_same_key_twice_overwrites_rather_than_appends(client, token):
+    """A memory is a value at a key, not an event.
+
+    Appending would make the same preference stated twice count twice toward
+    the model's bounded view of memory, crowding out other entries.
+    """
+    session_id = new_session(client, token)
+    remember(client, token, session_id, "tone", "concise")
+    remember(client, token, session_id, "tone", "verbose", reason="changed their mind")
+
+    listed = client.get(f"/chat/sessions/{session_id}/memory", headers=auth(token)).json()
+
+    assert len(listed) == 1
+    assert listed[0]["value"] == "verbose"
+    assert listed[0]["reason"] == "changed their mind"
+
+
+async def test_a_forgotten_memory_stops_reaching_the_model(client, token, monkeypatch):
+    """Removal has to affect the prompt, not just the listing.
+
+    A delete that emptied the table but left the assembled context unchanged
+    would be the worst version of this: the operator believes the fact is gone
+    and the model keeps acting on it.
+    """
+    session_id = new_session(client, token)
+    remember(client, token, session_id, "tone", "prefers concise answers")
+    seen = {}
+
+    class Capturing:
+        async def send(self, messages, **kwargs):
+            seen["system"] = kwargs.get("system")
+            return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
+
+    response = client.delete(
+        f"/chat/sessions/{session_id}/memory/tone", headers=auth(token)
+    )
+    assert response.status_code == 204
+
+    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    assert seen["system"] is None
+
+
+async def test_deleting_an_absent_memory_is_not_an_error(client, token):
+    """204 rather than 404, so keys cannot be probed one at a time."""
+    session_id = new_session(client, token)
+
+    response = client.delete(f"/chat/sessions/{session_id}/memory/never-set", headers=auth(token))
+
+    assert response.status_code == 204
+
+
+async def test_a_memory_requires_a_reason(client, token):
+    """Provenance is mandatory, because it is what makes review possible.
+
+    A memory with no recorded justification is kept forever by default -- there
+    is no basis on which anyone could decide to remove it.
+    """
+    session_id = new_session(client, token)
+
+    response = client.put(
+        f"/chat/sessions/{session_id}/memory/tone",
+        headers=auth(token),
+        json={"value": "concise", "reason": ""},
+    )
+
+    assert response.status_code == 422

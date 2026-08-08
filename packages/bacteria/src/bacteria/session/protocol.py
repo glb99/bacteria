@@ -32,13 +32,17 @@ which a type checker can verify, all of which callers depend on:
   :class:`~bacteria.session.store.UnknownSessionError` rather than creating a
   session, because an id that does not resolve usually means a caller lost one.
 
+A conformance suite for the guarantees above exists, but *in the host* — the
+application implementing this protocol runs the same behaviours against both its
+own store and the in-memory one. That is the right place for it while there is
+one host; the guarantees are this package's, though, so a second host would have
+to write its own rather than inherit one.
+
 Not built:
-    A conformance test suite. The guarantees above are prose, and the only
-    implementation that has been checked against them is the in-memory one, by
-    its own tests. A second implementation can satisfy every signature here and
-    violate all four. What belongs here is a set of tests parameterized over an
-    implementation, which any store must pass — the shape that would have caught
-    a store returning live state instead of a copy.
+    A conformance suite shipped from here — a set of tests parameterized over an
+    implementation, exported so any host can run them against its own store
+    without rewriting them. What exists today verifies this protocol only as
+    long as that one host keeps doing it.
 """
 
 from __future__ import annotations

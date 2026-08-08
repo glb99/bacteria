@@ -142,6 +142,30 @@ async def test_remembering_the_same_key_overwrites_rather_than_appends(repo):
     assert memory["pref"].reason == "changed"
 
 
+async def test_overwriting_a_memory_refreshes_its_timestamp(repo):
+    """Rewriting a memory makes it recent again, in every implementation.
+
+    Assembly shows the model the most recent entries by ``created_at``, so a
+    store that preserved the original timestamp would let a memory the owner
+    just rewrote age out of the model's view and stay invisible — while a store
+    that refreshed it behaved correctly. The runtime's behaviour would then
+    depend on which store it was handed, which is the whole failure this suite
+    exists to prevent.
+
+    Found by writing the same key twice against a live server and noticing the
+    timestamp had not moved; the in-memory store had been refreshing it all
+    along, because ``remember`` builds a whole new entry.
+    """
+    session = await repo.create_session(user_id="u1")
+    await repo.remember(session.session_id, key="pref", value="concise", reason="first")
+    first = (await repo.get_state(session.session_id)).memory["pref"].created_at
+
+    await repo.remember(session.session_id, key="pref", value="verbose", reason="changed")
+    second = (await repo.get_state(session.session_id)).memory["pref"].created_at
+
+    assert second > first
+
+
 async def test_forget_removes_and_forgetting_an_absent_key_is_a_no_op(repo):
     session = await repo.create_session(user_id="u1")
     await repo.remember(session.session_id, key="pref", value="concise", reason="r")

@@ -6,7 +6,10 @@ establishes who, :func:`~fastpaip.chat.access.load_owned_session` establishes
 whether.
 """
 
-from fastapi import APIRouter
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from fastpaip.auth.dependencies import CurrentPrincipal
@@ -35,6 +38,27 @@ class TurnResult(BaseModel):
 class TranscriptEntry(BaseModel):
     kind: str
     payload: dict
+
+
+class MemoryWrite(BaseModel):
+    """A fact to preserve, and why.
+
+    ``reason`` is required here because it is required by the agent's own
+    :class:`~bacteria.session.store.MemoryEntry`, and for the same purpose: a
+    memory whose justification was never recorded cannot be reviewed later, so
+    it is kept forever by default. Making the caller supply one is what turns
+    "should this still be here?" into an answerable question.
+    """
+
+    value: Any
+    reason: str = Field(min_length=1)
+
+
+class MemoryEntryOut(BaseModel):
+    key: str
+    value: Any
+    reason: str
+    created_at: datetime
 
 
 @router.post("/sessions", response_model=SessionCreated, status_code=201)
@@ -87,3 +111,82 @@ async def read_transcript(
 ) -> list[TranscriptEntry]:
     state = await load_owned_session(SqlSessionRepository(db), principal, session_id)
     return [TranscriptEntry(kind=i.kind, payload=i.payload) for i in state.transcript]
+
+
+@router.get("/sessions/{session_id}/memory", response_model=list[MemoryEntryOut])
+async def read_memory(
+    session_id: str, principal: CurrentPrincipal, db: DbSession
+) -> list[MemoryEntryOut]:
+    """List what this session has been told to remember, and why.
+
+    The review surface. Memory requires a ``reason`` precisely so that someone
+    can later judge whether an entry still earns its place, and until this route
+    existed there was nowhere to make that judgement — the reason was written
+    into the model's prompt and shown to no human.
+
+    Ordered oldest first, matching the order the agent renders them in.
+    """
+    state = await load_owned_session(SqlSessionRepository(db), principal, session_id)
+    entries = sorted(state.memory.items(), key=lambda item: item[1].created_at)
+    return [
+        MemoryEntryOut(
+            key=key, value=entry.value, reason=entry.reason, created_at=entry.created_at
+        )
+        for key, entry in entries
+    ]
+
+
+@router.put("/sessions/{session_id}/memory/{key}", response_model=MemoryEntryOut)
+async def write_memory(
+    session_id: str,
+    key: str,
+    body: MemoryWrite,
+    principal: CurrentPrincipal,
+    db: DbSession,
+) -> MemoryEntryOut:
+    """Preserve a fact for every later turn in this session.
+
+    ``PUT``, not ``POST``: writing the same key twice is one memory, not two.
+    That is the agent store's own rule — ``remember`` overwrites by key, because
+    updating a memory is a write rather than an append, and the transcript is
+    where history lives.
+
+    The caller writing this is the session's owner. **The model cannot reach
+    this route, and that is a security boundary rather than an unfinished
+    feature.** Memory is injected into the system prompt on every subsequent
+    turn, so a model able to write it could write its own future instructions:
+    one injected user message would become an instruction outliving the message
+    that carried it. See bacteria's ADR 0016.
+
+    Only the most recent entries reach the model — see ``DEFAULT_MEMORY_LIMIT``
+    in the agent's context assembly. Writing an unbounded number here does not
+    mean the model sees them all.
+    """
+    repository = SqlSessionRepository(db)
+    await load_owned_session(repository, principal, session_id)
+
+    state = await repository.remember(
+        session_id, key=key, value=body.value, reason=body.reason
+    )
+    entry = state.memory[key]
+    return MemoryEntryOut(
+        key=key, value=entry.value, reason=entry.reason, created_at=entry.created_at
+    )
+
+
+@router.delete("/sessions/{session_id}/memory/{key}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_memory(
+    session_id: str, key: str, principal: CurrentPrincipal, db: DbSession
+) -> None:
+    """Remove a memory.
+
+    204 whether or not the key was there. Deleting an absent memory is not an
+    error — the caller wanted it gone, and it is — and answering 404 would leak
+    which keys exist to someone probing them one at a time.
+
+    Without this route every memory is permanent by default, which is how a
+    preference outlives the situation that produced it.
+    """
+    repository = SqlSessionRepository(db)
+    await load_owned_session(repository, principal, session_id)
+    await repository.forget(session_id, key=key)

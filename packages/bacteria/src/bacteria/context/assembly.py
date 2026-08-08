@@ -26,6 +26,12 @@ into the message list it would be indistinguishable from something the user
 actually said, and the model would treat a preference the system chose to
 preserve as a statement someone made this turn.
 
+Memory is bounded too, and by the same reasoning as the message window. It was
+briefly not: every entry was rendered, so the one channel the window did not
+watch was the one that could overflow it. The bound is on the read side, most
+recent first, so it is describable the same way — "the twenty most recent
+memories" is something a user can be told.
+
 Not built:
     Retrieval. There is no external evidence source — no documents, no search,
     no database — so there is nothing to retrieve. When one exists, it plugs in
@@ -55,6 +61,19 @@ DEFAULT_WINDOW = 20
 """Messages kept from history. Small enough to stay cheap, large enough that a
 normal back-and-forth does not lose its own thread mid-conversation."""
 
+DEFAULT_MEMORY_LIMIT = 20
+"""Memory entries surfaced in the system prompt, most recent first.
+
+Matches the message window rather than being tuned separately, because the two
+compete for the same budget and one number is easier to reason about than two.
+
+Dropping a memory is a worse loss than dropping an old message — it was kept
+deliberately, where the message merely happened — which argues for a higher
+limit, not for no limit. Unbounded was the previous behaviour and is the one
+outcome that is certainly wrong: memory would grow until it displaced the
+conversation entirely, and nothing would report it.
+"""
+
 
 @dataclass
 class AssembledContext:
@@ -75,6 +94,7 @@ def assemble_context(
     state: SessionState,
     user_text: str,
     window_size: int = DEFAULT_WINDOW,
+    memory_limit: int = DEFAULT_MEMORY_LIMIT,
 ) -> AssembledContext:
     """Build the working set for one turn.
 
@@ -90,27 +110,45 @@ def assemble_context(
         user_text: The new message, always included regardless of ``window_size``
             — dropping the thing being responded to would be incoherent.
         window_size: How many prior messages to keep.
+        memory_limit: How many memory entries to surface, most recent first.
 
     Returns:
         The assembled context. Total message count is at most
         ``window_size + 1``.
     """
-    recent = [item for item in state.transcript if item.kind == "message"][-window_size:]
+    history = [item for item in state.transcript if item.kind == "message"]
+    # Not `history[-window_size:]`: a window of 0 makes that the whole list,
+    # which turns "show the model nothing from history" into "show it
+    # everything" — the exact failure this module exists to prevent, produced by
+    # asking for the strictest possible bound.
+    recent = history[-window_size:] if window_size > 0 else []
     messages = [
         {"role": item.payload["role"], "content": item.payload["text"]} for item in recent
     ]
     messages.append({"role": "user", "content": user_text})
 
-    system = _format_memory(state) if state.memory else None
+    # `or None` so that a limit of 0 yields no system prompt rather than an
+    # empty one, which some providers reject outright.
+    system = _format_memory(state, memory_limit) or None if state.memory else None
     return AssembledContext(messages=messages, system=system)
 
 
-def _format_memory(state: SessionState) -> str:
-    """Render memory entries as a system prompt.
+def _format_memory(state: SessionState, limit: int) -> str:
+    """Render the most recent memory entries as a system prompt.
 
     Each line carries its ``reason`` alongside its value. That is provenance
     for the model as much as for us: a fact plus why it was kept is something
     the model can weigh, where a bare assertion can only be obeyed.
+
+    Sorted ascending and trimmed from the front, rather than sorted descending
+    and reversed. The two differ on ties: Python's sort is stable, so ascending
+    keeps entries that share a timestamp in insertion order, where reversing a
+    descending sort would flip them. Several memories written in one request do
+    share a timestamp, so this is the ordinary case, not a corner one — and an
+    order that changes between turns is an unnecessary difference in the prompt.
     """
-    lines = [f"- {entry.value} (reason: {entry.reason})" for entry in state.memory.values()]
+    if limit <= 0:
+        return ""
+    oldest_first = sorted(state.memory.values(), key=lambda entry: entry.created_at)
+    lines = [f"- {e.value} (reason: {e.reason})" for e in oldest_first[-limit:]]
     return "Known context about this user/session:\n" + "\n".join(lines)

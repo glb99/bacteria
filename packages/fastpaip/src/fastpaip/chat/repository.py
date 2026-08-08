@@ -184,6 +184,16 @@ class SqlSessionRepository:
             # Overwrite by key: updating a memory is a write, not an append.
             existing.value = {"value": value}
             existing.reason = reason
+            # `created_at` is refreshed, not preserved, and the two are not
+            # interchangeable. The agent's in-memory store builds a whole new
+            # MemoryEntry here, so its timestamp moves; leaving this one alone
+            # made the two implementations disagree about the same call.
+            #
+            # Refreshing is also the behaviour the bound needs. Assembly shows
+            # the model the most recent entries by this field, so a preserved
+            # timestamp would let a memory the owner just rewrote age out and
+            # stay invisible -- the one outcome nobody could explain.
+            existing.created_at = datetime.now(timezone.utc)
             self._db.add(existing)
         else:
             self._db.add(

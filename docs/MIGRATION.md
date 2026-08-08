@@ -378,6 +378,29 @@ an entry point is for.
     HTTP test drives two event loops, and psycopg refuses a connection used from
     both — which `StaticPool` over in-memory SQLite had been absorbing.
 
-12. **Next.** Audio. This is the one that re-opens the model protocol for
+12. ~~Give memory a way in.~~ **Done.** Memory was the most carefully
+    specified subsystem here and the only one with no producer: `remember` and
+    `forget` had no caller outside the tests, so `state.memory` was empty on
+    every real turn and the system prompt was always absent. The read path ran
+    on every turn and had never once found anything.
+
+    The owner writes it, over HTTP (`GET`/`PUT`/`DELETE` on a session's memory),
+    reusing `chat/access.py` unchanged. The model deliberately cannot — memory
+    is injected into the system prompt of every later turn, so a model able to
+    write it could write its own future instructions, and one injected user
+    message would outlive the message that carried it. That is recorded as
+    bacteria's ADR 0016 rather than left as an absence, because the intuition
+    runs the other way and `remember` looks like a harmless first tool.
+
+    Bounded in the same change, since opening the entrance without a bound
+    ships the latent bug: `_format_memory` rendered every entry, so memory was
+    the one channel into the context window that nothing watched. Also fixed a
+    zero-inversion in both bounds — `list[-0:]` is the whole list, so asking for
+    the strictest bound returned everything.
+
+    Still session-scoped. A new conversation starts with no memory, and making
+    it follow a user would change `SessionRepository`.
+
+13. **Next.** Audio. This is the one that re-opens the model protocol for
    `send_stream`, which is a boundary change in bacteria and gets its own ADR
    before any code.

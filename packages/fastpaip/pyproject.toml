@@ -18,6 +18,13 @@ fastpaip-admin = "fastpaip.entrypoints.cli:main"
 fastpaip-serve = "fastpaip.entrypoints.asgi:main"
 fastpaip-worker = "fastpaip.entrypoints.queue_worker:main"
 
+[tool.fastapi]
+# Lets `fastapi deploy` (run from packages/fastpaip, the Application Directory
+# set in the FastAPI Cloud dashboard) find the ASGI app without a --path flag.
+# The `app` object itself lives in entrypoints/asgi.py alongside `main`, which
+# only Windows dev needs -- see that module's docstring.
+entrypoint = "fastpaip.entrypoints.asgi:app"
+
 [tool.uv.sources]
 # Resolved from packages/bacteria rather than an index. The agent is developed
 # alongside this application, not consumed as a release.

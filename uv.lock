@@ -602,7 +602,7 @@ source = { editable = "packages/fastpaip" }
 dependencies = [
     { name = "alembic" },
     { name = "bacteria" },
-    { name = "fastapi" },
+    { name = "fastapi", extra = ["standard"] },
     { name = "granian" },
     { name = "procrastinate" },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -614,7 +614,7 @@ dependencies = [
 requires-dist = [
     { name = "alembic" },
     { name = "bacteria", editable = "packages/bacteria" },
-    { name = "fastapi" },
+    { name = "fastapi", extras = ["standard"] },
     { name = "granian" },
     { name = "procrastinate" },
     { name = "psycopg", extras = ["binary", "pool"] },

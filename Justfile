@@ -15,7 +15,8 @@ test *args:
     just test-agent {{ args }}
     just test-app {{ args }}
 
-# Run the agent's tests alone — proves bacteria stands without the application
+# Run the agent's tests alone. Note this shares the workspace venv, so it does
+# not prove independence by itself -- test_package_boundaries.py does, statically.
 [group('qa')]
 test-agent *args:
     uv run --package bacteria {{ ARGS_TEST }} -m pytest packages/bacteria/tests {{ args }}

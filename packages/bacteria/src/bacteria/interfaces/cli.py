@@ -43,9 +43,10 @@ from bacteria.model.client import ModelClient
 from bacteria.model.gemini_client import GeminiClient
 from bacteria.model.protocol import SendsMessages
 from bacteria.runtime.runtime import Runtime
+from bacteria.session.protocol import SessionRepository
 from bacteria.session.store import SessionStore
 from bacteria.tools.approval import cli_approve
-from bacteria.tools.notes import build_add_note_tool
+from bacteria.tools.memory import build_remember_tool
 from bacteria.tools.registry import ToolRegistry
 
 PROVIDERS: dict[str, Callable[[], SendsMessages]] = {
@@ -92,15 +93,25 @@ def build_model_client(provider: str | None = None) -> SendsMessages:
     return client_cls()
 
 
-def build_tool_registry() -> ToolRegistry:
+def build_tool_registry(session_store: SessionRepository, session_id: str) -> ToolRegistry:
     """Declare what this deployment can do.
 
     The complete capability surface, in one readable list. A tool that is not
     registered here does not exist as far as the model is concerned, which is
     the property that makes this function worth having separately.
+
+    Takes the store and the session because ``remember`` proposes *into* one
+    conversation, so it cannot be built before there is a conversation to build
+    it for. That is also why the model supplies the fact and never the session:
+    the binding happens here, out of its reach.
+
+    ``add_note`` is no longer registered. :mod:`bacteria.tools.notes` is kept as
+    the worked example a new tool should be modelled on, and keeping it out of
+    the registry is the demonstration of what "registered" means — the module
+    exists, its tests pass, and the model cannot call it.
     """
     registry = ToolRegistry()
-    registry.register(build_add_note_tool())
+    registry.register(build_remember_tool(session_store, session_id))
     return registry
 
 
@@ -115,9 +126,11 @@ async def _run() -> None:
 
     session_store = SessionStore()
     runtime = Runtime(model_client=build_model_client(), session_store=session_store)
-    tool_registry = build_tool_registry()
 
+    # The session is created before the registry, not after: `remember` is bound
+    # to a conversation, so there has to be one first.
     session = await session_store.create_session(user_id="local-cli")
+    tool_registry = build_tool_registry(session_store, session.session_id)
     print(f"session: {session.session_id}  (empty line or Ctrl+C to quit)")
 
     while True:

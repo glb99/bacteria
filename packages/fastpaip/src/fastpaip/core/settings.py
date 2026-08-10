@@ -71,7 +71,19 @@ class Settings(BaseSettings):
         env_prefix=ENV_PREFIX,
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="forbid",
+        # ``ignore``, not ``forbid``, and this is not a weakening of the guard.
+        # The guard is :meth:`_reject_unknown_prefixed_variables` below, written
+        # by hand precisely because ``forbid`` never caught an unknown
+        # environment variable to begin with.
+        #
+        # What ``forbid`` did catch was every *unrelated* key in the ``.env``
+        # file, which is shared. The agent's composition root reads that file
+        # for ``GEMINI_API_KEY`` and ``ANTHROPIC_API_KEY`` — unprefixed by
+        # necessity, because provider SDKs read those exact names. So adding the
+        # key needed to run ``uv run bacteria`` made this class refuse to
+        # construct, and every route, task and test that touches settings failed
+        # at once. Worse, the validation error printed the key.
+        extra="ignore",
     )
 
     database_url: str = "postgresql+psycopg://fastpaip:fastpaip@localhost:5432/fastpaip"

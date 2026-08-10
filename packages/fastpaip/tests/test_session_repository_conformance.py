@@ -196,3 +196,124 @@ async def test_session_identity_is_independent_of_user_identity(repo):
 
     assert a.session_id != b.session_id
     assert a.user_id == b.user_id == "u1"
+
+
+async def test_a_proposal_is_kept_apart_from_active_memory(repo):
+    """Proposing must not be a way of remembering.
+
+    The security argument of ADR 0017 is exactly this line: a proposal reaches
+    no model. An implementation that filed suggestions into `memory` would
+    satisfy every signature and hand an injected instruction straight to the
+    next turn.
+    """
+    session = await repo.create_session(user_id="u1")
+
+    await repo.propose(session.session_id, key="tone", value="v", reason="r", source="model")
+
+    state = await repo.get_state(session.session_id)
+    assert state.memory == {}
+    assert state.proposals[("model", "tone")].value == "v"
+
+
+async def test_two_sources_may_propose_the_same_key(repo):
+    """Proposals are keyed by (source, key), so neither proposer silently wins.
+
+    Last-write-wins would make the survivor depend on when a background job
+    happened to run — a timing-dependent, silent outcome, which is the failure
+    this project has already had to fix once in transcript ordering.
+    """
+    session = await repo.create_session(user_id="u1")
+
+    await repo.propose(session.session_id, key="tone", value="a", reason="r", source="model")
+    await repo.propose(session.session_id, key="tone", value="b", reason="r", source="job")
+
+    proposals = (await repo.get_state(session.session_id)).proposals
+    assert proposals[("model", "tone")].value == "a"
+    assert proposals[("job", "tone")].value == "b"
+
+
+async def test_re_proposing_the_same_source_and_key_replaces(repo):
+    """What makes a retried background job safe rather than accumulative."""
+    session = await repo.create_session(user_id="u1")
+
+    await repo.propose(session.session_id, key="tone", value="first", reason="r", source="job")
+    await repo.propose(session.session_id, key="tone", value="second", reason="r", source="job")
+
+    proposals = (await repo.get_state(session.session_id)).proposals
+    assert len(proposals) == 1
+    assert proposals[("job", "tone")].value == "second"
+
+
+async def test_activation_moves_a_proposal_and_keeps_its_source(repo):
+    """Provenance survives activation, and the proposal stops being pending.
+
+    A memory that forgot it came from a job cannot later be distrusted as one,
+    and a proposal left in the queue after acceptance asks the reviewer the
+    same question forever.
+    """
+    session = await repo.create_session(user_id="u1")
+    await repo.propose(session.session_id, key="tone", value="v", reason="r", source="job")
+
+    await repo.activate(session.session_id, source="job", key="tone")
+
+    state = await repo.get_state(session.session_id)
+    assert state.memory["tone"].source == "job"
+    assert state.proposals == {}
+
+
+async def test_activation_refreshes_the_timestamp(repo):
+    """An accepted memory is recent, whenever it was suggested.
+
+    Assembly shows the model the most recent entries by `created_at`, so
+    carrying the proposal's timestamp across would let a suggestion made weeks
+    ago be accepted today and immediately be at risk of ageing out — invisible,
+    and impossible to explain.
+
+    Written because the two implementations disagreed here: the in-memory store
+    moved the entry object across, keeping its timestamp, while the SQL store
+    set a new one. Both satisfied the protocol.
+    """
+    session = await repo.create_session(user_id="u1")
+    await repo.propose(session.session_id, key="tone", value="v", reason="r", source="job")
+    proposed_at = (await repo.get_state(session.session_id)).proposals[("job", "tone")].created_at
+
+    await repo.activate(session.session_id, source="job", key="tone")
+
+    assert (await repo.get_state(session.session_id)).memory["tone"].created_at > proposed_at
+
+
+async def test_activation_replaces_whatever_held_the_key(repo):
+    """Active memory is keyed by `key` alone, so competing suggestions collapse.
+
+    Two proposals may coexist; two active memories for one key cannot, or the
+    model is handed both and told nothing about which is current.
+    """
+    session = await repo.create_session(user_id="u1")
+    await repo.remember(session.session_id, key="tone", value="old", reason="r")
+    await repo.propose(session.session_id, key="tone", value="new", reason="r", source="job")
+
+    await repo.activate(session.session_id, source="job", key="tone")
+
+    memory = (await repo.get_state(session.session_id)).memory
+    assert len(memory) == 1
+    assert memory["tone"].value == "new"
+
+
+async def test_activating_a_proposal_that_does_not_exist_raises(repo):
+    """A stale review page must not conjure a memory nobody just read."""
+    session = await repo.create_session(user_id="u1")
+
+    with pytest.raises(KeyError):
+        await repo.activate(session.session_id, source="job", key="never-proposed")
+
+
+async def test_rejecting_removes_a_proposal_and_is_a_no_op_when_absent(repo):
+    session = await repo.create_session(user_id="u1")
+    await repo.propose(session.session_id, key="tone", value="v", reason="r", source="job")
+
+    await repo.reject(session.session_id, source="job", key="tone")
+    await repo.reject(session.session_id, source="job", key="never-proposed")
+
+    state = await repo.get_state(session.session_id)
+    assert state.proposals == {}
+    assert state.memory == {}

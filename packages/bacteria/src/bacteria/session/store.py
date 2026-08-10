@@ -374,8 +374,16 @@ class SessionStore:
         if session_id not in self._sessions:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
-        entry = state.proposals.pop((source, key))
-        state.memory[key] = entry
+        proposal = state.proposals.pop((source, key))
+        # Rebuilt rather than moved, so ``created_at`` becomes the moment of
+        # activation. The field drives which memories reach the model — assembly
+        # keeps the most recent — and the fact was asserted *now*, by whoever
+        # accepted it. Carrying the proposal's timestamp over would let a
+        # suggestion made weeks ago be activated today and immediately be at
+        # risk of ageing out, which nobody could explain.
+        state.memory[key] = MemoryEntry(
+            value=proposal.value, reason=proposal.reason, source=proposal.source
+        )
         return copy.deepcopy(state)
 
     async def reject(self, session_id: str, source: str, key: str) -> SessionState:

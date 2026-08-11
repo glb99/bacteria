@@ -230,6 +230,7 @@ the source with `grep -rn "Invariant:" src/`.
 | A retry re-sends an identical request | What makes retrying provably side-effect free | `test_serving_failure_is_retried_with_identical_request_then_succeeds` |
 | A step runs at most once per run | Guards a side effect being repeated by control flow looping back | `test_step_cannot_silently_run_twice` |
 | A failed run still commits evidence | Otherwise the runs worth investigating are the ones with no record | `test_a_failed_model_call_still_leaves_the_user_message_as_evidence` |
+| Every item a run commits carries its `run_id` | `run_id` is optional, so a producer that forgets it writes valid, unattributable evidence | `test_every_item_a_run_commits_carries_that_run_id`, `test_a_failed_run_is_separable_from_the_retry_that_followed_it` |
 | Tool calls are executed only via `execution` | Concentrates every side effect in one auditable place | `test_runtime_executes_tool_calls_via_the_execution_module_not_the_model_client` |
 | Opaque provider state survives a round trip | Some providers reject a follow-up call without it | `test_thought_signature_is_captured_and_echoed_back_on_the_next_turn` |
 | A synchronous handler never runs on the event loop thread | One blocking tool would stall every concurrent turn in the process | `test_a_synchronous_handler_does_not_run_on_the_event_loop_thread` |
@@ -324,12 +325,30 @@ Exactly one round per turn: model, tools, model, done. Lifting it means looping
 until the model stops asking, which needs a round cap, a cost budget, and a
 policy for partial failure mid-loop.
 
+### Observability beyond the transcript
+
+A run is now identifiable — every item it commits carries its `run_id` ([ADR
+0018](adr/0018-transcript-items-carry-their-run-id.md)) — but not
+*reconstructable*. The transcript records what was said and which tools ran; it
+records nothing about how the run was configured. Missing: which model and
+provider answered, the assembled context actually sent, which memories were
+included, which tools were exposed, whether approval was asked for, and how long
+any of it took. A `run_id` groups that evidence without explaining it.
+
+Trace and audit are also still one record. That was defensible while this was a
+single developer's local agent; it is weaker now that the agent runs inside a
+host with principals and API keys, where the two audiences genuinely differ —
+debugging wants broad access, audit wants tight control. Splitting them is a
+host decision, since the host is what knows who acted.
+
+Nothing here has a retention or redaction rule. Tool inputs and user text are
+recorded verbatim, which was cheap when state died with the process and is a
+standing liability now that a host persists it.
+
 ### Evaluation and feedback
 
 No behavioral eval suite, no release gate, no online monitoring. The test suite
-covers architecture, not agent quality. Also unsplit: trace and audit are one
-record here, which is right for one developer and wrong the moment those two
-audiences differ — debugging wants broad access, audit wants tight control.
+covers architecture, not agent quality.
 
 ---
 

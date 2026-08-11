@@ -135,8 +135,10 @@ class RunResult:
     """The outcome of one completed turn.
 
     Attributes:
-        run_id: Identifies this run. Ephemeral — generated per turn, never
-            stored, and not usable to look anything up after the fact.
+        run_id: Identifies this run. Generated per turn and stamped onto every
+            transcript item the turn commits, so it selects the evidence this
+            result was produced from — including on the failure path, where the
+            exception carries no result but the evidence is committed anyway.
         response: The final model response, after any tool round.
         committed_state: Session state as of the commit. A snapshot, not a live
             view; re-read from the store for anything current.
@@ -207,7 +209,16 @@ class Runtime:
         # Accumulated as the turn progresses rather than assembled at the end,
         # so that a failure part-way still has something to commit. Everything
         # appended here is a proposal until the store applies it.
-        evidence = [TranscriptItem(kind="message", payload={"role": "user", "text": user_text})]
+        #
+        # Every item carries `run_id`. That is what separates an abandoned
+        # attempt from the retry that followed it: both land in the same
+        # session, in order, and without it the two read as one conversation
+        # that stuttered.
+        evidence = [
+            TranscriptItem(
+                kind="message", payload={"role": "user", "text": user_text}, run_id=run_id
+            )
+        ]
 
         try:
             response: ModelResponse = await step_tracker.run_once(
@@ -236,10 +247,16 @@ class Runtime:
                 )
 
             evidence.append(
-                TranscriptItem(kind="message", payload={"role": "assistant", "text": response.text})
+                TranscriptItem(
+                    kind="message",
+                    payload={"role": "assistant", "text": response.text},
+                    run_id=run_id,
+                )
             )
         except Exception as exc:
-            evidence.append(TranscriptItem(kind="run_error", payload={"error": str(exc)}))
+            evidence.append(
+                TranscriptItem(kind="run_error", payload={"error": str(exc)}, run_id=run_id)
+            )
             # Deliberately not shielded from cancellation. If the surrounding
             # task is being cancelled this commit may not complete, and that is
             # the honest outcome: a shielded write would let a cancelled turn
@@ -303,6 +320,7 @@ class Runtime:
                             "status": "failed",
                             "error": str(exc),
                         },
+                        run_id=run_id,
                     )
                 )
                 raise
@@ -317,6 +335,7 @@ class Runtime:
                         "status": "executed",
                         "output": result.output,
                     },
+                    run_id=run_id,
                 )
             )
         return results

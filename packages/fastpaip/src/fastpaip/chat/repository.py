@@ -133,6 +133,7 @@ class SqlSessionRepository:
                     kind=item.kind,
                     payload=dict(item.payload),
                     timestamp=_as_utc(item.timestamp),
+                    run_id=item.run_id,
                 )
                 for item in items
             ],
@@ -199,6 +200,7 @@ class SqlSessionRepository:
                     kind=item.kind,
                     payload=item.payload,
                     timestamp=item.timestamp,
+                    run_id=item.run_id,
                 )
             )
 

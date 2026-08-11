@@ -271,6 +271,59 @@ async def test_a_failed_model_call_still_leaves_the_user_message_as_evidence():
     assert any(item.kind == "run_error" for item in transcript)
 
 
+async def test_every_item_a_run_commits_carries_that_run_id():
+    """No item a turn writes may be left unattributed.
+
+    `TranscriptItem.run_id` is optional, so a construction site that forgets it
+    produces a perfectly valid item that simply belongs to no run — no type
+    error, no failed write, nothing to notice until someone needs the evidence.
+    This is the check that makes forgetting loud. It drives a turn through the
+    tool path deliberately, because that is where the items are built somewhere
+    other than `run_turn` itself.
+    """
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+    runtime = Runtime(model_client=FakeToolCallingClient(), session_store=store)
+
+    result = await runtime.run_turn(
+        session.session_id, "what time is it?", tool_registry=make_get_time_registry()
+    )
+
+    transcript = (await store.get_state(session.session_id)).transcript
+    assert {item.kind for item in transcript} == {"message", "tool_call"}
+    assert [item.run_id for item in transcript] == [result.run_id] * len(transcript)
+
+
+async def test_a_failed_run_is_separable_from_the_retry_that_followed_it(make_fake_model_client):
+    """Two attempts at one message are two runs, not one stuttering conversation.
+
+    This is what the id is for. A failed turn commits its evidence and re-raises
+    (ADR 0012), the caller retries, and both attempts land in the same session
+    in order. Without `run_id` the abandoned attempt can only be guessed at from
+    a `run_error` sitting next to a repeated question — and that guess gets
+    harder as soon as a retry also fails.
+    """
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+
+    failing = Runtime(model_client=FakeFailingClient(), session_store=store)
+    with pytest.raises(RuntimeError):
+        await failing.run_turn(session.session_id, "hello")
+
+    succeeding = Runtime(model_client=make_fake_model_client(), session_store=store)
+    retry = await succeeding.run_turn(session.session_id, "hello")
+
+    transcript = (await store.get_state(session.session_id)).transcript
+    runs = {item.run_id for item in transcript}
+    assert len(runs) == 2
+    assert None not in runs
+
+    abandoned = next(run for run in runs if run != retry.run_id)
+    failed_items = [item for item in transcript if item.run_id == abandoned]
+    assert [item.kind for item in failed_items] == ["message", "run_error"]
+    assert all(item.kind == "message" for item in transcript if item.run_id == retry.run_id)
+
+
 async def test_runtime_honors_an_approving_callback():
     store = SessionStore()
     session = await store.create_session(user_id="u1")

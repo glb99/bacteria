@@ -130,11 +130,26 @@ class TranscriptItem:
 
     Frozen because the transcript is append-only: correcting history means
     appending a correction, not editing what was already recorded.
+
+    Attributes:
+        run_id: Which run wrote this, or ``None``. A field rather than a
+            ``payload`` key because ``payload`` differs per ``kind`` and this
+            does not, and because "everything from run X" should be an index
+            scan rather than a reach into JSON.
+
+            Optional because not every write is a run — a working-state-only
+            commit is not one, and rows written before the field existed have
+            no run to name. Neither gets a fabricated id. What that costs is
+            that a producer forgetting to set it fails silently, so the
+            runtime's obligation to stamp every item it commits is asserted by
+            a test rather than by this type. See
+            [ADR 0018](../../docs/adr/0018-transcript-items-carry-their-run-id.md).
     """
 
     kind: TranscriptItemKind
     payload: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    run_id: str | None = None
 
 
 OWNER = "owner"

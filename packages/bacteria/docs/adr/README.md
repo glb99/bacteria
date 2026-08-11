@@ -29,6 +29,7 @@ together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | [0015](0015-session-store-behind-a-protocol.md) | Put the session store behind a protocol the host implements | Accepted |
 | [0016](0016-memory-is-written-by-the-owner-not-the-model.md) | Memory is written by the session's owner, not by the model, and is bounded | Accepted; the "no tool" part superseded by 0017 |
 | [0017](0017-memory-is-proposed-and-confirmed.md) | Separate proposing a memory from activating one | Accepted |
+| [0018](0018-transcript-items-carry-their-run-id.md) | Stamp every transcript item with the id of the run that wrote it | Accepted |
 
 ## Writing a new one
 

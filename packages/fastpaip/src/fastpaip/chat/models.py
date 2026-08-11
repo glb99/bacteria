@@ -63,6 +63,12 @@ class ChatTranscriptItem(SQLModel, table=True):
     ``seq`` still reads back as a perfectly ordinary transcript. The lock is the
     fix; this is what makes a future regression fail loudly instead of quietly
     reordering someone's conversation.
+
+    ``run_id`` groups the items one turn wrote. Indexed because the question it
+    answers — "show me everything that run produced" — is the one asked when a
+    caller reports a bad turn and quotes the id the API gave them. Nullable, and
+    permanently so: rows predating the column named no run, and no backfill can
+    invent one. See bacteria's ADR 0018.
     """
 
     __tablename__ = "chat_transcript_item"
@@ -71,6 +77,7 @@ class ChatTranscriptItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str = Field(foreign_key="chat_session.session_id", index=True)
     seq: int = Field(index=True)
+    run_id: Optional[str] = Field(default=None, index=True)
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     timestamp: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())

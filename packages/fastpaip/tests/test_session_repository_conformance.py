@@ -39,8 +39,34 @@ async def _repo(request, engine):
         yield SqlSessionRepository(db)
 
 
-def item(text: str) -> TranscriptItem:
-    return TranscriptItem(kind="message", payload={"role": "user", "text": text})
+def item(text: str, run_id: str | None = None) -> TranscriptItem:
+    return TranscriptItem(kind="message", payload={"role": "user", "text": text}, run_id=run_id)
+
+
+async def test_run_id_survives_storage_and_groups_one_run(repo):
+    """The field that makes a run reconstructable has to come back out.
+
+    An in-memory store returns the object it was handed, so it round-trips a
+    new field for free and proves nothing. A SQL store rebuilds the item column
+    by column, and a `run_id` written but never mapped back — or mapped back but
+    never written — reads as `None` on a transcript that otherwise looks
+    entirely correct. That is the shape of this failure: not an error, just
+    evidence that quietly stops being attributable.
+
+    An item with no run is asserted alongside, because the column is nullable on
+    purpose (bacteria's ADR 0018) and "belongs to no run" has to survive storage
+    too, rather than being flattened into some default.
+    """
+    session = await repo.create_session(user_id="u1")
+
+    await repo.commit(
+        session.session_id,
+        new_transcript_items=[item("ask", run_id="run-a"), item("answer", run_id="run-a")],
+    )
+    await repo.commit(session.session_id, new_transcript_items=[item("orphan")])
+
+    transcript = (await repo.get_state(session.session_id)).transcript
+    assert [i.run_id for i in transcript] == ["run-a", "run-a", None]
 
 
 async def test_satisfies_the_protocol(repo):

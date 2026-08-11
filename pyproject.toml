@@ -20,6 +20,36 @@ dev = [
     "fastapi[standard]",
 ]
 
+[tool.ruff]
+# This section exists because its absence was a bug. With no configuration,
+# `ruff check` enabled 413 rules chosen by whichever version `uvx` happened to
+# resolve — so the gate's meaning changed when the tool released rather than
+# when the code did, and `just check-all` was red without anyone having written
+# anything wrong. A gate nobody can turn green is a gate nobody consults.
+line-length = 100
+# The workspace floor, not the application's. `bacteria` supports 3.11 and is
+# meant to be vendorable into projects that do too; linting it as 3.13 would let
+# a 3.13-only idiom through and break that promise silently.
+target-version = "py311"
+
+[tool.ruff.lint]
+# Chosen, not inherited. Each family is here because it catches something:
+#   E/F  — the core. F821 in this set found a `self` reference inside a
+#          @staticmethod that every test missed, because the only path reaching
+#          it was one the fakes never took.
+#   I    — import order, so a diff never contains an unrelated reshuffle.
+#   B    — bugbear, which is mostly real-defect rules rather than taste.
+#   SIM  — a small number of genuine simplifications.
+#   RUF  — including RUF100, which finds `noqa` comments suppressing rules that
+#          no longer fire; a stale suppression hides the next real one.
+#
+# `UP` is deliberately absent. Its 47 findings here were almost entirely the
+# alembic template's `Union[str, None]` and SQLModel's idiomatic `Optional[...]`
+# in table definitions — a large diff across generated and framework-shaped
+# code, catching nothing. Style rules that fight the frameworks in use cost more
+# attention than they return.
+select = ["E4", "E7", "E9", "F", "I", "B", "SIM", "RUF"]
+
 [tool.coverage.run]
 branch = true
 parallel = true

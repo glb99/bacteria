@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
 import pytest
-
 from bacteria.model.client import ModelClient
 from bacteria.model.errors import AssetError, ContractError, CredentialsError, ServingError
 
@@ -29,7 +28,9 @@ def make_client(**overrides) -> ModelClient:
 def fake_response(text="hello", tool_calls=None, stop_reason="end_turn", model="claude-sonnet-4-5"):
     content = [SimpleNamespace(type="text", text=text)] if text is not None else []
     for tc in tool_calls or []:
-        content.append(SimpleNamespace(type="tool_use", id=tc["id"], name=tc["name"], input=tc["input"]))
+        content.append(
+            SimpleNamespace(type="tool_use", id=tc["id"], name=tc["name"], input=tc["input"])
+        )
     # `model` is on the real Message and is what a run records, so the fake
     # carries it too — a fake missing a field the code reads tests a shape the
     # provider does not return.
@@ -162,6 +163,8 @@ async def test_tool_calls_are_surfaced_as_proposals_not_executed():
 
     result = await client.send(messages=[{"role": "user", "content": "hi"}])
 
-    assert result.tool_calls == [{"id": "t1", "name": "delete_file", "input": {"path": "/etc/passwd"}}]
+    assert result.tool_calls == [
+        {"id": "t1", "name": "delete_file", "input": {"path": "/etc/passwd"}}
+    ]
     # No filesystem module is imported or touched anywhere in this module —
     # structurally, the client has no way to execute what it reports.

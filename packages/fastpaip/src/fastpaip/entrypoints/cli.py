@@ -15,10 +15,11 @@ will eventually be pointed at the wrong one and build it there. Run
 
 import argparse
 
-from fastpaip.auth.service import issue_key, revoke_key
-from fastpaip.core.db import get_engine
-from fastpaip.core import platform
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+from fastpaip.auth.service import issue_key, revoke_key
+from fastpaip.core import platform
+from fastpaip.core.db import get_engine
 
 
 async def _issue(principal_id: str, label: str) -> int:

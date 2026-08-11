@@ -1,9 +1,8 @@
 """Tests for the one place the environment is read."""
 
 import pytest
-from pydantic import ValidationError
-
 from fastpaip.core.settings import Settings
+from pydantic import ValidationError
 
 
 def test_settings_read_the_prefixed_environment(monkeypatch):

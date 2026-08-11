@@ -176,14 +176,21 @@ def build_pipeline(persist) -> Handler[Batch]:
             why it is a step with a ``can_handle`` rather than an ``if`` at the
             end of this function.
     """
+    # The three suppressions below are one cause: the type variable on
+    # `FunctionalProcessor` is inferred from these lambdas rather than pinned by
+    # `StepHandler`, so a checker sees an unspecialized parameter where a
+    # concrete `Batch` is required. Annotating the lambdas does not fix it and
+    # obscures what the steps do. Genuinely a gap in the generic plumbing rather
+    # than in the wiring — the same three objects are exercised end to end by
+    # the pipeline tests.
     validate = StepHandler(
-        FunctionalProcessor(can_handle=lambda batch: bool(batch.raw), process=_validate)
+        FunctionalProcessor(can_handle=lambda batch: bool(batch.raw), process=_validate)  # ty: ignore[invalid-argument-type]
     )
     normalize = StepHandler(
-        FunctionalProcessor(can_handle=lambda batch: bool(batch.accepted), process=_normalize)
+        FunctionalProcessor(can_handle=lambda batch: bool(batch.accepted), process=_normalize)  # ty: ignore[invalid-argument-type]
     )
     persist_step = StepHandler(
-        FunctionalProcessor(
+        FunctionalProcessor(  # ty: ignore[invalid-argument-type]
             # Rejections count as something to store, not just acceptances. A
             # batch where nothing passed validation is exactly the one whose
             # evidence matters most, and gating this on `accepted` alone threw

@@ -49,7 +49,11 @@ from bacteria.tools.approval import cli_approve
 from bacteria.tools.memory import build_remember_tool
 from bacteria.tools.registry import ToolRegistry
 
-PROVIDERS: dict[str, Callable[[], SendsMessages]] = {
+# The annotation is the contract this table exists to state; a checker reading
+# the literal infers the two concrete classes and calls the wider declared type
+# a mismatch. Widening to `dict[str, Any]` to satisfy it would delete the only
+# thing here worth checking.
+PROVIDERS: dict[str, Callable[[], SendsMessages]] = {  # ty: ignore[invalid-assignment]
     "anthropic": ModelClient,
     "gemini": GeminiClient,
 }

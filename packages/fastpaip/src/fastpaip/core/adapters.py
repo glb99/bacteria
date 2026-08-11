@@ -6,7 +6,8 @@ the object-oriented structure of the handlers, following the Adapter design patt
 """
 
 from dataclasses import dataclass
-from typing import Callable, Any, Generic
+from typing import Any, Callable, Generic
+
 from .protocols import DataType
 
 

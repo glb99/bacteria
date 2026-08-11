@@ -3,7 +3,6 @@
 import threading
 
 import pytest
-
 from bacteria.tools.execution import ToolExecutionError, execute_tool_call
 from bacteria.tools.registry import ToolDefinition, ToolRegistry
 
@@ -50,7 +49,9 @@ async def test_rejected_approval_prevents_the_handler_from_running():
 async def test_approved_call_runs_the_handler_and_returns_its_output():
     registry = make_registry()
 
-    result = await execute_tool_call({"id": "t1", "name": "echo", "input": {"text": "hi"}}, registry)
+    result = await execute_tool_call(
+        {"id": "t1", "name": "echo", "input": {"text": "hi"}}, registry
+    )
 
     assert result.tool_call_id == "t1"
     assert result.output == "hi"

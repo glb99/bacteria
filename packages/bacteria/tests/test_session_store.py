@@ -5,7 +5,6 @@ would cause a real bug — not every method, and not every branch.
 """
 
 import pytest
-
 from bacteria.session.protocol import SessionRepository
 from bacteria.session.store import SessionStore, TranscriptItem, UnknownSessionError
 

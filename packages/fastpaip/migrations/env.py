@@ -23,11 +23,6 @@ filter to compare like with like.
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-from sqlmodel import SQLModel
-
-from fastpaip.core.db import include_name
-from fastpaip.core.settings import get_settings
 
 # Imported for the side effect of registering tables on SQLModel.metadata.
 # Without every model module imported here, autogenerate sees a table it does
@@ -35,7 +30,11 @@ from fastpaip.core.settings import get_settings
 from fastpaip import models as _root_models  # noqa: F401
 from fastpaip.auth import models as _auth_models  # noqa: F401
 from fastpaip.chat import models as _chat_models  # noqa: F401
+from fastpaip.core.db import include_name
+from fastpaip.core.settings import get_settings
 from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
+from sqlalchemy import engine_from_config, pool
+from sqlmodel import SQLModel
 
 config = context.config
 

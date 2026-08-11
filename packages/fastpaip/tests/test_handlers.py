@@ -93,6 +93,7 @@ async def test_a_coroutine_step_is_awaited_not_returned_unrun():
     pipeline reports success while that step never executed and every later step
     operated on the wrong data.
     """
+
     async def process(doc: Doc) -> Doc:
         doc.seen.append("async")
         return doc
@@ -110,6 +111,7 @@ async def test_a_coroutine_can_handle_is_awaited():
     An un-awaited coroutine is truthy, so a declining async gate would run every
     step it meant to skip.
     """
+
     async def declines(_doc: Doc) -> bool:
         return False
 

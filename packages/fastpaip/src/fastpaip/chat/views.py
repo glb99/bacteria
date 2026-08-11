@@ -185,9 +185,7 @@ async def write_memory(
     repository = SqlSessionRepository(db)
     await load_owned_session(repository, principal, session_id)
 
-    state = await repository.remember(
-        session_id, key=key, value=body.value, reason=body.reason
-    )
+    state = await repository.remember(session_id, key=key, value=body.value, reason=body.reason)
     entry = state.memory[key]
     return MemoryEntryOut(
         key=key,

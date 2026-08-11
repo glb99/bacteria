@@ -50,9 +50,11 @@ async def call_either(fn: Callable[..., "_T | Awaitable[_T]"], *args: Any) -> _T
     already run a synchronous callable on the event loop by the time it could
     tell — the check has to happen before the call, not after it.
     """
+    # Same unnarrowable union as bacteria's `_call_either`: the branch proves
+    # `fn` returns an awaitable and the signature says it may not.
     if inspect.iscoroutinefunction(fn):
         return await fn(*args)  # type: ignore[misc]
-    return await anyio.to_thread.run_sync(fn, *args)  # type: ignore[arg-type]
+    return await anyio.to_thread.run_sync(fn, *args)  # ty: ignore[invalid-return-type] # type: ignore[arg-type]
 
 
 class Handler(Generic[DataType], ABC):

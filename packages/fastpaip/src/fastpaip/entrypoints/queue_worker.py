@@ -16,15 +16,17 @@ unresponsive — which is precisely what happens while ingestion runs inline.
 import argparse
 import logging
 
-from fastpaip.core.jobs import register_tasks
 from fastpaip.core import platform
+from fastpaip.core.jobs import register_tasks
 from fastpaip.core.settings import get_settings
 
 
 async def _run(queues: list[str] | None, concurrency: int) -> None:
     app = register_tasks()
     async with app.open_async():
-        await app.run_worker_async(queues=queues, concurrency=concurrency)
+        # `queues=None` is procrastinate's documented "listen to every queue",
+        # which its own annotation (`Iterable[str]`) does not admit.
+        await app.run_worker_async(queues=queues, concurrency=concurrency)  # ty: ignore[invalid-argument-type]
 
 
 def main() -> int:

@@ -1,7 +1,6 @@
 """Invariant tests for the capability surface: what the model gets told about."""
 
 import pytest
-
 from bacteria.tools.registry import ToolDefinition, ToolRegistry, UnknownToolError
 
 

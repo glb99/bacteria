@@ -8,11 +8,10 @@ Create Date: 2026-08-07 13:46:11.419832
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-import sqlmodel
 from alembic import op
 
-revision: str = '8157b61436d6'
-down_revision: Union[str, None] = '0001_procrastinate'
+revision: str = "8157b61436d6"
+down_revision: Union[str, None] = "0001_procrastinate"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

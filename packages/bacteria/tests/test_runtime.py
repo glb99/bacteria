@@ -5,7 +5,6 @@ they assert that a turn *delegates* correctly, not that any one layer works.
 """
 
 import pytest
-
 from bacteria.model.protocol import ModelResponse
 from bacteria.runtime.runtime import Runtime, StepAlreadyExecutedError, StepTracker
 from bacteria.session.store import SessionStore
@@ -19,6 +18,7 @@ async def test_step_cannot_silently_run_twice():
     Guards the expensive bug class here: control flow looping back over a step
     whose side effect already landed.
     """
+
     async def step() -> str:
         return "done"
 
@@ -59,7 +59,9 @@ async def test_runtime_commits_via_the_store_not_by_direct_write(make_fake_model
     # itself, and this test is about the conversation reaching the store.
     messages = [i for i in result.committed_state.transcript if i.kind == "message"]
     assert len(messages) == 2
-    assert (await store.get_state(session.session_id)).transcript == result.committed_state.transcript
+    assert (
+        await store.get_state(session.session_id)
+    ).transcript == result.committed_state.transcript
 
 
 async def test_runtime_calls_model_client_exactly_once_per_turn(make_fake_model_client):
@@ -388,13 +390,14 @@ async def test_a_run_that_fails_before_the_model_answers_still_describes_itself(
 
 
 async def test_a_refused_tool_call_is_distinguishable_from_one_that_broke():
-    """"The boundary held" and "the tool crashed" must not look the same.
+    """ "The boundary held" and "the tool crashed" must not look the same.
 
     Both stop the run with a `ToolExecutionError` and both record `status:
     failed`, so control flow genuinely cannot tell them apart — but they are
     opposite facts about the system. Recovering the difference by matching on
     the error message would make stored evidence depend on error wording.
     """
+
     async def run_and_capture(registry, approve):
         store = SessionStore()
         session = await store.create_session(user_id="u1")

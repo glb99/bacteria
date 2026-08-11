@@ -8,13 +8,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from fastpaip.auth.service import issue_key
 from fastpaip.core.db import session_scope
 from fastpaip.ingestion.models import IngestedRecord, IngestionBatch, RejectedRecord
 from fastpaip.views import create_app
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 def auth(token: str) -> dict[str, str]:

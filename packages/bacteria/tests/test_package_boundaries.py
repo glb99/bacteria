@@ -122,19 +122,13 @@ def test_the_tests_import_only_what_this_package_declares():
     new host runs first to check the agent still works.
     """
     allowed = (
-        set(sys.stdlib_module_names)
-        | {"bacteria"}
-        | _declared("dependencies")
-        | _declared("dev")
+        set(sys.stdlib_module_names) | {"bacteria"} | _declared("dependencies") | _declared("dev")
     )
 
     offenders = {
-        root: sorted(files)
-        for root, files in _imported_roots(TESTS).items()
-        if root not in allowed
+        root: sorted(files) for root, files in _imported_roots(TESTS).items() if root not in allowed
     }
 
     assert offenders == {}, (
-        "bacteria/tests imports modules the package does not declare.\n"
-        f"{offenders}"
+        f"bacteria/tests imports modules the package does not declare.\n{offenders}"
     )

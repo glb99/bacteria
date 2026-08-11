@@ -141,7 +141,7 @@ class GeminiClient:
                 return self._to_model_response(response)
             except ModelLayerError:
                 raise
-            except Exception as exc:  # noqa: BLE001 — classified immediately below
+            except Exception as exc:
                 classified = self._classify(exc)
                 if not isinstance(classified, ServingError):
                     raise classified from exc
@@ -288,9 +288,17 @@ class GeminiClient:
             raw=response,
             # `model_version`, which is what served the request — a pinned alias
             # can resolve to a specific build, and that build is what a run
-            # needs recorded. Falls back to the configured name, since this
-            # field is optional on the response type.
-            model=response.model_version or self.model,
+            # needs recorded.
+            #
+            # No fallback to the configured name. It is optional on the response
+            # type, so this can be None, and that is the honest answer: the
+            # provider did not say. Substituting what we asked for would record
+            # an intention as though it were an observation, which is the exact
+            # conflation ADR 0019 rejected when it put `model` on the response
+            # instead of on the client. A run that completed with no model named
+            # is distinguishable from one that failed before answering, because
+            # `run_meta` carries `outcome` alongside this.
+            model=response.model_version,
         )
 
     @staticmethod

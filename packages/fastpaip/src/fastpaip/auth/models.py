@@ -34,9 +34,7 @@ class ApiKey(SQLModel, table=True):
     principal_id: str = Field(index=True)
     label: str
     created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
-    revoked_at: Optional[datetime] = Field(
-        default=None, sa_column=_tz_column(nullable=True)
-    )
+    revoked_at: Optional[datetime] = Field(default=None, sa_column=_tz_column(nullable=True))
 
     @property
     def is_active(self) -> bool:

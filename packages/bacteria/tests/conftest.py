@@ -35,7 +35,6 @@ are documentation as much as verification, so keep them that way.
 """
 
 import pytest
-
 from bacteria.model.protocol import ModelResponse
 
 

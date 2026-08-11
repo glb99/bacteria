@@ -11,13 +11,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from google.genai import errors as genai_errors
-
 from bacteria.model.errors import AssetError, ContractError, CredentialsError, ServingError
 from bacteria.model.gemini_client import GeminiClient
 from bacteria.model.protocol import SendsMessages
 from bacteria.runtime.runtime import Runtime
 from bacteria.session.store import SessionStore
+from google.genai import errors as genai_errors
 
 
 def make_client(**overrides) -> GeminiClient:
@@ -40,8 +39,8 @@ def fake_response(
     call part.
 
     ``model_version`` is what the real response reports and what a run records.
-    It is optional on the response type, so the client falls back to the
-    configured name — pass ``None`` to exercise that.
+    It is optional on the response type; pass ``None`` for the case where the
+    provider does not say.
     """
     parts = [
         SimpleNamespace(
@@ -154,6 +153,33 @@ async def test_tool_calls_are_surfaced_as_proposals_with_synthetic_ids():
     # issue one, and the internal format needs it to correlate the result.
 
 
+async def test_the_serving_model_is_reported_and_is_none_when_unstated():
+    """What answered, or an honest null — never the name we asked for.
+
+    ADR 0019 puts `model` on the response precisely so a run records an
+    observation rather than an intention, so substituting the configured name
+    when the provider stays quiet would defeat the field. `model_version` is
+    optional on the response type, making the quiet case real rather than
+    hypothetical.
+
+    Written because the first implementation did substitute it, reaching for
+    `self.model` inside a `@staticmethod` — a `NameError` on any response
+    without a version, invisible to every test here because the fake always
+    supplied one.
+    """
+    client = make_client()
+
+    client._client.aio.models.generate_content.return_value = fake_response(
+        model_version="gemini-3.5-flash-002"
+    )
+    named = await client.send(messages=[{"role": "user", "content": "hi"}])
+    assert named.model == "gemini-3.5-flash-002"
+
+    client._client.aio.models.generate_content.return_value = fake_response(model_version=None)
+    unstated = await client.send(messages=[{"role": "user", "content": "hi"}])
+    assert unstated.model is None
+
+
 async def test_text_messages_translate_user_and_assistant_roles():
     client = make_client()
     client._client.aio.models.generate_content.return_value = fake_response(text="ok")
@@ -191,9 +217,7 @@ async def test_tool_use_and_tool_result_blocks_translate_to_function_call_and_re
         },
         {
             "role": "user",
-            "content": [
-                {"type": "tool_result", "tool_use_id": "call_0", "content": "10:00"}
-            ],
+            "content": [{"type": "tool_result", "tool_use_id": "call_0", "content": "10:00"}],
         },
     ]
 
@@ -224,12 +248,19 @@ async def test_thought_signature_is_captured_and_echoed_back_on_the_next_turn():
     client = make_client()
     client._client.aio.models.generate_content.return_value = fake_response(
         text=None,
-        function_calls=[{"id": "call_0", "name": "get_time", "input": {}, "signature": b"opaque-sig"}],
+        function_calls=[
+            {"id": "call_0", "name": "get_time", "input": {}, "signature": b"opaque-sig"}
+        ],
     )
 
     result = await client.send(messages=[{"role": "user", "content": "what time is it?"}])
     assert result.tool_calls == [
-        {"id": "call_0", "name": "get_time", "input": {}, "provider_data": {"thought_signature": b"opaque-sig"}}
+        {
+            "id": "call_0",
+            "name": "get_time",
+            "input": {},
+            "provider_data": {"thought_signature": b"opaque-sig"},
+        }
     ]
 
     # Simulate Runtime re-sending that same tool_use block on the follow-up call

@@ -13,11 +13,10 @@ one to notice.
 import asyncio
 
 from bacteria.session.store import TranscriptItem
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from fastpaip.chat.models import ChatTranscriptItem
 from fastpaip.chat.repository import SqlSessionRepository
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 def message(text: str) -> TranscriptItem:

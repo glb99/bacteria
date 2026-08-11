@@ -24,22 +24,22 @@ import sqlalchemy as sa
 import sqlmodel
 from alembic import op
 
-revision: str = 'c4a7b2e91d38'
-down_revision: Union[str, None] = '5bebf5a064b6'
+revision: str = "c4a7b2e91d38"
+down_revision: Union[str, None] = "5bebf5a064b6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
     op.add_column(
-        'chat_transcript_item',
-        sa.Column('run_id', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+        "chat_transcript_item",
+        sa.Column("run_id", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     )
     op.create_index(
-        op.f('ix_chat_transcript_item_run_id'), 'chat_transcript_item', ['run_id'], unique=False
+        op.f("ix_chat_transcript_item_run_id"), "chat_transcript_item", ["run_id"], unique=False
     )
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_chat_transcript_item_run_id'), table_name='chat_transcript_item')
-    op.drop_column('chat_transcript_item', 'run_id')
+    op.drop_index(op.f("ix_chat_transcript_item_run_id"), table_name="chat_transcript_item")
+    op.drop_column("chat_transcript_item", "run_id")

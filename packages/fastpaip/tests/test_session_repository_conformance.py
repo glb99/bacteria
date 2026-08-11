@@ -16,9 +16,8 @@ protocol exists to prevent.
 import pytest
 from bacteria.session.protocol import SessionRepository
 from bacteria.session.store import SessionStore, TranscriptItem, UnknownSessionError
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from fastpaip.chat.repository import SqlSessionRepository
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 @pytest.fixture(params=["in_memory", "sql"], name="repo")
@@ -101,8 +100,12 @@ async def test_commit_appends_transcript_and_merges_working_state(repo):
     """
     session = await repo.create_session(user_id="u1")
 
-    await repo.commit(session.session_id, new_transcript_items=[item("first")], working_state_updates={"a": 1})
-    await repo.commit(session.session_id, new_transcript_items=[item("second")], working_state_updates={"b": 2})
+    await repo.commit(
+        session.session_id, new_transcript_items=[item("first")], working_state_updates={"a": 1}
+    )
+    await repo.commit(
+        session.session_id, new_transcript_items=[item("second")], working_state_updates={"b": 2}
+    )
 
     state = await repo.get_state(session.session_id)
     assert [i.payload["text"] for i in state.transcript] == ["first", "second"]

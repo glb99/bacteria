@@ -61,7 +61,11 @@ def include_name(name: str | None, type_: str, parent_names: dict) -> bool:
     into Alembic's context at import and cannot be imported by anything else,
     including the test that needs the same filter to compare like with like.
     """
-    if type_ == "table" and name is not None and name.startswith("procrastinate"):
+    # Suppressed rather than rewritten as the negated one-liner ruff suggests:
+    # this reads as a rule ("hide procrastinate's tables"), where
+    # `return not (a and b and c)` reads as a puzzle. RUF100 will flag the
+    # suppression below if the rule ever stops firing.
+    if type_ == "table" and name is not None and name.startswith("procrastinate"):  # noqa: SIM103
         return False
     return True
 

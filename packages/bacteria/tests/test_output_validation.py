@@ -1,9 +1,8 @@
 """Invariant tests for output validation: shape is enforced, truth is not claimed."""
 
 import pytest
-from pydantic import BaseModel
-
 from bacteria.model.output import OutputValidationError, validate_output
+from pydantic import BaseModel
 
 
 class RefundArgs(BaseModel):

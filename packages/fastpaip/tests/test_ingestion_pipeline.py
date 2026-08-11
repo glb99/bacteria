@@ -5,6 +5,8 @@ possible: what the steps decide is separable from where the results go, and
 these tests exercise the first without the second.
 """
 
+import contextlib
+
 from fastpaip.ingestion.pipeline import Batch, build_pipeline
 
 
@@ -150,16 +152,15 @@ async def test_rejections_survive_a_failing_persist_step():
     exception can still see which records were rejected and why, rather than
     losing the whole diagnosis with the run.
     """
+
     async def boom(_batch):
         raise RuntimeError("database gone")
 
     batch = Batch(source="test", raw=[{"external_id": "1", "name": "A"}, {"name": "bad"}])
     pipeline = build_pipeline(persist=boom)
 
-    try:
+    with contextlib.suppress(RuntimeError):
         await pipeline.handle(batch)
-    except RuntimeError:
-        pass
 
     assert len(batch.rejected) == 1
     assert len(batch.accepted) == 1

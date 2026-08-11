@@ -90,10 +90,15 @@ async def test_memory_is_surfaced_via_system_not_mixed_into_transcript_messages(
     """
     store = SessionStore()
     session = await store.create_session(user_id="u1")
-    await store.commit(session.session_id, new_transcript_items=[
-        TranscriptItem(kind="message", payload={"role": "user", "text": "hello"})
-    ])
-    await store.remember(session.session_id, key="tone", value="prefers concise answers", reason="user asked once")
+    await store.commit(
+        session.session_id,
+        new_transcript_items=[
+            TranscriptItem(kind="message", payload={"role": "user", "text": "hello"})
+        ],
+    )
+    await store.remember(
+        session.session_id, key="tone", value="prefers concise answers", reason="user asked once"
+    )
     state = await store.get_state(session.session_id)
 
     context = assemble_context(state, user_text="next")

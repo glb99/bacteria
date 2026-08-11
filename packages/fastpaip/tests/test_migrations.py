@@ -23,8 +23,6 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine, inspect, text
-from sqlmodel import SQLModel
 
 # Imported for the side effect of registering every table on SQLModel.metadata,
 # which is the thing being compared against.
@@ -34,6 +32,8 @@ from fastpaip.chat import models as _chat_models  # noqa: F401
 from fastpaip.core.db import include_name
 from fastpaip.core.settings import get_settings
 from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
+from sqlalchemy import create_engine, inspect, text
+from sqlmodel import SQLModel
 
 ALEMBIC_INI = pathlib.Path(__file__).parent.parent / "alembic.ini"
 

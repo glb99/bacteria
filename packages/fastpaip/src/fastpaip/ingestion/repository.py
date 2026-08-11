@@ -49,12 +49,18 @@ class IngestionRepository:
         # is IO, attempted outside an await, and fails as MissingGreenlet rather
         # than as anything that names the real problem.
         batch_id = row.id
+        if batch_id is None:
+            # `flush` is what assigns it, so this cannot happen — and it is
+            # checked rather than suppressed because the failure it would
+            # otherwise produce is silent: every child row below would take a
+            # null foreign key, and a batch's records would be orphaned from the
+            # batch with nothing raising. The type says Optional because
+            # SQLModel's autoincrement primary key is unset before insert.
+            raise RuntimeError("ingestion batch has no id after flush")
 
         for record in batch.accepted:
             self._db.add(
-                IngestedRecord(
-                    batch_id=batch_id, external_id=record["external_id"], payload=record
-                )
+                IngestedRecord(batch_id=batch_id, external_id=record["external_id"], payload=record)
             )
         for rejection in batch.rejected:
             self._db.add(

@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 
 from fastpaip.auth.dependencies import CurrentPrincipal
 from fastpaip.core.dependencies import DbSession
-from fastpaip.ingestion.tasks import ingest_batch
 from fastpaip.ingestion.service import ingest
+from fastpaip.ingestion.tasks import ingest_batch
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
@@ -43,9 +43,7 @@ class BatchQueued(BaseModel):
 
 
 @router.post("/batches", response_model=BatchResult, status_code=201)
-async def submit_batch(
-    body: Submission, principal: CurrentPrincipal, db: DbSession
-) -> BatchResult:
+async def submit_batch(body: Submission, principal: CurrentPrincipal, db: DbSession) -> BatchResult:
     """Ingest a batch now, and report exactly what happened to every record.
 
     Runs inline, so the caller waits and learns the outcome. That is the right
@@ -75,16 +73,13 @@ async def submit_batch(
         batch_id=batch.batch_id,
         accepted=len(batch.accepted),
         rejected=[
-            RejectionOut(index=r.index, payload=r.payload, reason=r.reason)
-            for r in batch.rejected
+            RejectionOut(index=r.index, payload=r.payload, reason=r.reason) for r in batch.rejected
         ],
     )
 
 
 @router.post("/batches:defer", response_model=BatchQueued, status_code=202)
-async def defer_batch(
-    body: Submission, principal: CurrentPrincipal, db: DbSession
-) -> BatchQueued:
+async def defer_batch(body: Submission, principal: CurrentPrincipal, db: DbSession) -> BatchQueued:
     """Hand the batch to a worker and answer immediately.
 
     ``202``, not ``201``: nothing has been ingested yet, and saying otherwise

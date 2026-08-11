@@ -34,7 +34,10 @@ from bacteria.session.protocol import SessionRepository
 from bacteria.tools.memory import build_remember_tool
 from bacteria.tools.registry import ToolRegistry
 
-PROVIDERS: dict[str, type[SendsMessages]] = {
+# Suppressed for the same reason as bacteria's own table: the annotation is the
+# contract, and a checker inferring the concrete classes from the literal
+# reports the wider declared type as a mismatch.
+PROVIDERS: dict[str, type[SendsMessages]] = {  # ty: ignore[invalid-assignment]
     "anthropic": ModelClient,
     "gemini": GeminiClient,
 }

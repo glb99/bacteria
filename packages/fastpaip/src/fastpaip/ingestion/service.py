@@ -27,9 +27,7 @@ from fastpaip.ingestion.pipeline import Batch, build_pipeline
 from fastpaip.ingestion.repository import IngestionRepository
 
 
-async def ingest(
-    session: AsyncSession, source: str, records: list[dict[str, Any]]
-) -> Batch:
+async def ingest(session: AsyncSession, source: str, records: list[dict[str, Any]]) -> Batch:
     """Validate, normalize, and store a batch of records."""
     pipeline = build_pipeline(persist=IngestionRepository(session).persist)
     return await pipeline.handle(Batch(source=source, raw=records))

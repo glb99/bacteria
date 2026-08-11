@@ -86,7 +86,7 @@ runtime = Runtime(model_client=ModelClient(), session_store=store)
 session = await store.create_session(user_id="whoever-you-call-this")
 result = await runtime.run_turn(session.session_id, "hello")
 
-result.response.text            # the reply
+result.response.text  # the reply
 result.committed_state.transcript  # what is now on the record
 ```
 
@@ -98,19 +98,25 @@ rather than something happened and was reported as refused:
 from bacteria.tools.registry import ToolDefinition, ToolRegistry
 
 tools = ToolRegistry()
-tools.register(ToolDefinition(
-    name="add_note",
-    description="Save a note",
-    input_schema={"type": "object", "properties": {"text": {"type": "string"}}},
-    handler=lambda payload: f"saved: {payload['text']}",   # sync or async
-))
+tools.register(
+    ToolDefinition(
+        name="add_note",
+        description="Save a note",
+        input_schema={"type": "object", "properties": {"text": {"type": "string"}}},
+        handler=lambda payload: f"saved: {payload['text']}",  # sync or async
+    )
+)
+
 
 async def approve(tool_call) -> bool:
     return tool_call["name"] == "add_note"
 
+
 result = await runtime.run_turn(
-    session.session_id, "note that the kettle is broken",
-    tool_registry=tools, approve=approve,
+    session.session_id,
+    "note that the kettle is broken",
+    tool_registry=tools,
+    approve=approve,
 )
 ```
 

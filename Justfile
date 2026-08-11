@@ -4,6 +4,14 @@ PORT := env("PORT", "8000")
 ARGS_TEST := env("_UV_RUN_ARGS_TEST", "")
 ARGS_SERVE := env("_UV_RUN_ARGS_SERVE", "")
 
+# Pinned, because `uvx ruff` resolves the newest release every time and these
+# are gates. An unpinned linter means `check-all` can turn red between two runs
+# with no commit in between -- which is how it stayed red here long enough for
+# everyone to route around it. Bump deliberately, with the diff in its own
+# commit.
+RUFF := "ruff@0.16.2"
+TY := "ty@0.0.70"
+
 
 @_:
     just --list
@@ -44,20 +52,32 @@ _cov *args:
     just _cov report
     just _cov html
 
-# Run linters
+# Check lint and formatting. Reports; changes nothing -- see `just fmt`.
 [group('qa')]
 lint:
-    uvx ruff check
-    uvx ruff format
+    uvx {{ RUFF }} check
+    uvx {{ RUFF }} format --check
+
+# Apply what `lint` reports, where it can be applied automatically
+[group('qa')]
+fmt:
+    uvx {{ RUFF }} check --fix
+    uvx {{ RUFF }} format
 
 # Check types
 [group('qa')]
 typing:
-    uvx ty check --python .venv packages/bacteria/src packages/fastpaip/src
+    uvx {{ TY }} check --python .venv packages/bacteria/src packages/fastpaip/src
 
 # Perform all checks
+#
+# `test-agent` is listed explicitly because `cov` does not cover it. Coverage
+# measures the application only, deliberately (ADR 0013) -- but "excluded from
+# the coverage report" quietly became "not run by the gate", so the agent's
+# architectural fitness functions, the tests most worth running before shipping,
+# were the ones this recipe skipped.
 [group('qa')]
-check-all: lint cov typing
+check-all: lint test-agent cov typing
 
 
 # Start Postgres and wait until it is actually accepting queries

@@ -6,12 +6,11 @@ rather than successes.
 """
 
 import pytest
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from fastpaip.auth import keys
 from fastpaip.auth.models import ApiKey
 from fastpaip.auth.service import issue_key, revoke_key
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 @pytest.fixture(name="db")

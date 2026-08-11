@@ -9,12 +9,11 @@ mocked the repository would be asserting its own wiring.
 import pytest
 from bacteria.model.protocol import ModelResponse
 from fastapi.testclient import TestClient
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from fastpaip.auth.service import issue_key
 from fastpaip.chat import service
 from fastpaip.core.db import session_scope
 from fastpaip.views import create_app
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 class FakeModelClient:
@@ -97,9 +96,7 @@ async def test_a_turn_is_recorded_in_the_transcript(client, token):
     session_id = new_session(client, token)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
-    transcript = client.get(
-        f"/chat/sessions/{session_id}/transcript", headers=auth(token)
-    ).json()
+    transcript = client.get(f"/chat/sessions/{session_id}/transcript", headers=auth(token)).json()
 
     assert [entry["kind"] for entry in transcript] == ["message", "message", "run_meta"]
     assert transcript[0]["payload"] == {"role": "user", "text": "hi"}
@@ -119,9 +116,7 @@ async def test_a_second_turn_sees_the_first(client, token):
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "first"})
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "second"})
 
-    transcript = client.get(
-        f"/chat/sessions/{session_id}/transcript", headers=auth(token)
-    ).json()
+    transcript = client.get(f"/chat/sessions/{session_id}/transcript", headers=auth(token)).json()
 
     messages = [e for e in transcript if e["kind"] == "message"]
     assert len(messages) == 4
@@ -137,9 +132,7 @@ async def test_an_unknown_session_is_404_not_a_new_conversation(client, token):
     """
     assert client.get("/chat/sessions/nope/transcript", headers=auth(token)).status_code == 404
 
-    response = client.post(
-        "/chat/sessions/nope/turns", headers=auth(token), json={"text": "hi"}
-    )
+    response = client.post("/chat/sessions/nope/turns", headers=auth(token), json={"text": "hi"})
     assert response.status_code == 404
 
 
@@ -154,12 +147,12 @@ async def test_a_failed_turn_still_leaves_evidence(client, token, monkeypatch):
     monkeypatch.setitem(service.PROVIDERS, "fake", FailingModelClient)
 
     with pytest.raises(RuntimeError):
-        client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "doomed"})
+        client.post(
+            f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "doomed"}
+        )
 
     monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
-    transcript = client.get(
-        f"/chat/sessions/{session_id}/transcript", headers=auth(token)
-    ).json()
+    transcript = client.get(f"/chat/sessions/{session_id}/transcript", headers=auth(token)).json()
 
     assert transcript[0]["payload"] == {"role": "user", "text": "doomed"}
     assert any(entry["kind"] == "run_error" for entry in transcript)
@@ -255,9 +248,7 @@ async def test_a_forgotten_memory_stops_reaching_the_model(client, token, monkey
             seen["system"] = kwargs.get("system")
             return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
 
-    response = client.delete(
-        f"/chat/sessions/{session_id}/memory/tone", headers=auth(token)
-    )
+    response = client.delete(f"/chat/sessions/{session_id}/memory/tone", headers=auth(token))
     assert response.status_code == 204
 
     monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
@@ -396,9 +387,10 @@ async def test_activating_a_proposal_makes_it_reach_the_model(client, token, mon
 
     assert "prefers bullet points" in seen["system"]
     # And it has left the queue, so a reviewer is not asked about it forever.
-    assert client.get(
-        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
-    ).json() == []
+    assert (
+        client.get(f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)).json()
+        == []
+    )
 
 
 async def test_rejecting_a_proposal_leaves_no_memory(client, token, monkeypatch):
@@ -412,9 +404,10 @@ async def test_rejecting_a_proposal_leaves_no_memory(client, token, monkeypatch)
 
     assert response.status_code == 204
     assert client.get(f"/chat/sessions/{session_id}/memory", headers=auth(token)).json() == []
-    assert client.get(
-        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
-    ).json() == []
+    assert (
+        client.get(f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)).json()
+        == []
+    )
 
 
 async def test_activating_a_proposal_that_is_not_there_is_404(client, token):
@@ -436,6 +429,7 @@ async def test_the_owners_write_stays_immediate(client, token):
 
     active = client.get(f"/chat/sessions/{session_id}/memory", headers=auth(token)).json()
     assert [e["source"] for e in active] == ["owner"]
-    assert client.get(
-        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
-    ).json() == []
+    assert (
+        client.get(f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)).json()
+        == []
+    )

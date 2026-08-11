@@ -27,10 +27,6 @@ import uuid
 
 import pytest
 import sqlalchemy
-from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
-from sqlmodel import Session, SQLModel
 
 # Imported for the side effect of registering every table on SQLModel.metadata,
 # which is what both the schema build and the truncation below iterate over.
@@ -39,7 +35,10 @@ from fastpaip.auth import models as _auth_models  # noqa: F401
 from fastpaip.chat import models as _chat_models  # noqa: F401
 from fastpaip.core.settings import get_settings
 from fastpaip.ingestion import models as _ingestion_models  # noqa: F401
-
+from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
+from sqlmodel import Session, SQLModel
 
 LOOP_FACTORY = asyncio.SelectorEventLoop if sys.platform == "win32" else None
 """The loop class the tests run on, or ``None`` to accept the default.

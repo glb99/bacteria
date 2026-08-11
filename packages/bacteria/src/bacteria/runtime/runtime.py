@@ -435,7 +435,8 @@ class Runtime:
         results. Both are required: a provider that sees results for a request
         it has no record of making rejects the exchange.
         """
-        return messages + [
+        return [
+            *messages,
             {"role": "assistant", "content": cls._assistant_content_blocks(response)},
             {
                 "role": "user",

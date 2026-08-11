@@ -21,38 +21,42 @@ import sqlalchemy as sa
 import sqlmodel
 from alembic import op
 
-revision: str = '5bebf5a064b6'
-down_revision: Union[str, None] = 'd51de3e0ed70'
+revision: str = "5bebf5a064b6"
+down_revision: Union[str, None] = "d51de3e0ed70"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table('chat_memory_proposal',
-    sa.Column('session_id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('source', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('key', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('value', sa.JSON(), nullable=True),
-    sa.Column('reason', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['session_id'], ['chat_session.session_id'], ),
-    sa.PrimaryKeyConstraint('session_id', 'source', 'key')
+    op.create_table(
+        "chat_memory_proposal",
+        sa.Column("session_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("source", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("key", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("value", sa.JSON(), nullable=True),
+        sa.Column("reason", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["session_id"],
+            ["chat_session.session_id"],
+        ),
+        sa.PrimaryKeyConstraint("session_id", "source", "key"),
     )
     op.add_column(
-        'chat_memory_entry',
+        "chat_memory_entry",
         sa.Column(
-            'source',
+            "source",
             sqlmodel.sql.sqltypes.AutoString(),
             nullable=False,
-            server_default='owner',
+            server_default="owner",
         ),
     )
     # Dropped immediately: the default existed to backfill rows written before
     # this column did, and leaving it would let an insert that forgot to say
     # where a memory came from silently claim the owner wrote it.
-    op.alter_column('chat_memory_entry', 'source', server_default=None)
+    op.alter_column("chat_memory_entry", "source", server_default=None)
 
 
 def downgrade() -> None:
-    op.drop_column('chat_memory_entry', 'source')
-    op.drop_table('chat_memory_proposal')
+    op.drop_column("chat_memory_entry", "source")
+    op.drop_table("chat_memory_proposal")

@@ -33,7 +33,7 @@ Not built:
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from bacteria.session.store import (
     OWNER,
@@ -41,6 +41,7 @@ from bacteria.session.store import (
     Session,
     SessionState,
     TranscriptItem,
+    TranscriptItemKind,
     UnknownSessionError,
 )
 from sqlalchemy import func
@@ -108,17 +109,26 @@ class SqlSessionRepository:
     async def get_state(self, session_id: str) -> SessionState:
         row = await self._require(session_id)
 
-        items = (await self._db.exec(
-            select(ChatTranscriptItem)
-            .where(ChatTranscriptItem.session_id == session_id)
-            .order_by(ChatTranscriptItem.seq)
-        )).all()
-        memories = (await self._db.exec(
-            select(ChatMemoryEntry).where(ChatMemoryEntry.session_id == session_id)
-        )).all()
-        proposals = (await self._db.exec(
-            select(ChatMemoryProposal).where(ChatMemoryProposal.session_id == session_id)
-        )).all()
+        items = (
+            await self._db.exec(
+                select(ChatTranscriptItem)
+                .where(ChatTranscriptItem.session_id == session_id)
+                # SQLModel declares `seq: int`, so a checker sees the value type
+                # where SQLAlchemy passes the column descriptor. Every ordering
+                # and filtering expression in this file has the same shape.
+                .order_by(ChatTranscriptItem.seq)  # ty: ignore[invalid-argument-type]
+            )
+        ).all()
+        memories = (
+            await self._db.exec(
+                select(ChatMemoryEntry).where(ChatMemoryEntry.session_id == session_id)
+            )
+        ).all()
+        proposals = (
+            await self._db.exec(
+                select(ChatMemoryProposal).where(ChatMemoryProposal.session_id == session_id)
+            )
+        ).all()
 
         # Plain dataclasses, never the ORM rows themselves. See the module
         # docstring: this is the detached-read guarantee, not a formality.
@@ -130,7 +140,15 @@ class SqlSessionRepository:
             ),
             transcript=[
                 TranscriptItem(
-                    kind=item.kind,
+                    # Cast, not validated. The column is `str` and the dataclass
+                    # wants a closed `Literal`, so something has to bridge them,
+                    # and rejecting an unrecognized kind would be the wrong
+                    # bridge: during a rolling deploy an old reader meets rows a
+                    # new writer produced, and raising there turns a benign
+                    # version skew into a session nobody can read. Passing it
+                    # through is harmless — every consumer selects the kinds it
+                    # knows and ignores the rest.
+                    kind=cast(TranscriptItemKind, item.kind),
                     payload=dict(item.payload),
                     timestamp=_as_utc(item.timestamp),
                     run_id=item.run_id,
@@ -361,7 +379,9 @@ class SqlSessionRepository:
         if lock:
             row = (
                 await self._db.exec(
-                    select(ChatSession).where(ChatSession.session_id == session_id).with_for_update()
+                    select(ChatSession)
+                    .where(ChatSession.session_id == session_id)
+                    .with_for_update()
                 )
             ).one_or_none()
         else:

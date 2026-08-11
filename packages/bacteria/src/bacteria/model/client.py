@@ -137,7 +137,7 @@ class ModelClient:
             except ModelLayerError:
                 # Already classified — re-raise rather than classifying twice.
                 raise
-            except Exception as exc:  # noqa: BLE001 — classified immediately below
+            except Exception as exc:
                 classified = self._classify(exc)
                 if not isinstance(classified, ServingError):
                     raise classified from exc

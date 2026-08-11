@@ -286,6 +286,11 @@ class GeminiClient:
             tool_calls=tool_calls,
             stop_reason=stop_reason,
             raw=response,
+            # `model_version`, which is what served the request — a pinned alias
+            # can resolve to a specific build, and that build is what a run
+            # needs recorded. Falls back to the configured name, since this
+            # field is optional on the response type.
+            model=response.model_version or self.model,
         )
 
     @staticmethod

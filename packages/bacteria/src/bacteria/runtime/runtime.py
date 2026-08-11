@@ -69,7 +69,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from bacteria.context.assembly import assemble_context
+from bacteria.context.assembly import AssembledContext, assemble_context
 from bacteria.model.protocol import ModelResponse, SendsMessages, ToolCall
 from bacteria.session.protocol import SessionRepository
 from bacteria.session.store import SessionState, TranscriptItem
@@ -128,6 +128,43 @@ class StepTracker:
         result = await fn()
         self._executed.add(step_id)
         return result
+
+
+def _run_meta(
+    run_id: str,
+    *,
+    model: str | None,
+    tools_exposed: list[str],
+    context: AssembledContext,
+    tool_calls_proposed: int,
+    tool_calls_dropped: int,
+    outcome: str,
+) -> TranscriptItem:
+    """Build the one item describing how a run was configured.
+
+    Written by both exit paths, so a failed run explains itself as fully as a
+    successful one — a run that failed *because* it was pointed at the wrong
+    model is precisely the run that needs to say which model it used.
+
+    Deliberately counts rather than copies. Recording the assembled messages and
+    the memories verbatim would duplicate the transcript into itself and grow
+    quadratically with the conversation, and it would put the system prompt's
+    contents in a second place with its own retention question. What a reader
+    needs to reconstruct a run is how much it was shown, not another copy.
+    """
+    return TranscriptItem(
+        kind="run_meta",
+        payload={
+            "model": model,
+            "tools_exposed": tools_exposed,
+            "messages_in_context": len(context.messages),
+            "memories_in_context": context.memories_included,
+            "tool_calls_proposed": tool_calls_proposed,
+            "tool_calls_dropped": tool_calls_dropped,
+            "outcome": outcome,
+        },
+        run_id=run_id,
+    )
 
 
 @dataclass
@@ -205,6 +242,10 @@ class Runtime:
         state = await self._session_store.get_state(session_id)
         context = assemble_context(state, user_text)
         tools = tool_registry.schemas_for_run() if tool_registry else None
+        # Names only. The schemas are the model's business; what a run needs
+        # recorded is which capabilities were on the table, since a tool that
+        # was never offered cannot explain a call that was never made.
+        tools_exposed = [schema["name"] for schema in tools or []]
 
         # Accumulated as the turn progresses rather than assembled at the end,
         # so that a failure part-way still has something to commit. Everything
@@ -220,6 +261,13 @@ class Runtime:
             )
         ]
 
+        # Accumulated for the `run_meta` record, which both exit paths write.
+        # Initialized before the try so that a run failing at the first model
+        # call still describes itself — with honest nulls rather than absence.
+        answered_by: str | None = None
+        tool_calls_proposed = 0
+        tool_calls_dropped = 0
+
         try:
             response: ModelResponse = await step_tracker.run_once(
                 f"{run_id}:model_call",
@@ -227,6 +275,8 @@ class Runtime:
                     messages=context.messages, system=context.system, tools=tools
                 ),
             )
+            answered_by = response.model
+            tool_calls_proposed = len(response.tool_calls)
 
             if response.tool_calls and tool_registry is not None:
                 results = await self._execute_tool_calls(
@@ -245,6 +295,12 @@ class Runtime:
                         tools=tools,
                     ),
                 )
+                answered_by = response.model
+                # Anything this second response asks for is discarded: one round
+                # per turn, by ADR 0011. Counted so that the discarding is
+                # visible in the record — otherwise the model asking to continue
+                # and the model being finished produce identical evidence.
+                tool_calls_dropped = len(response.tool_calls)
 
             evidence.append(
                 TranscriptItem(
@@ -253,9 +309,31 @@ class Runtime:
                     run_id=run_id,
                 )
             )
+            evidence.append(
+                _run_meta(
+                    run_id,
+                    model=answered_by,
+                    tools_exposed=tools_exposed,
+                    context=context,
+                    tool_calls_proposed=tool_calls_proposed,
+                    tool_calls_dropped=tool_calls_dropped,
+                    outcome="completed",
+                )
+            )
         except Exception as exc:
             evidence.append(
                 TranscriptItem(kind="run_error", payload={"error": str(exc)}, run_id=run_id)
+            )
+            evidence.append(
+                _run_meta(
+                    run_id,
+                    model=answered_by,
+                    tools_exposed=tools_exposed,
+                    context=context,
+                    tool_calls_proposed=tool_calls_proposed,
+                    tool_calls_dropped=tool_calls_dropped,
+                    outcome="failed",
+                )
             )
             # Deliberately not shielded from cancellation. If the surrounding
             # task is being cancelled this commit may not complete, and that is
@@ -318,6 +396,10 @@ class Runtime:
                             "name": call["name"],
                             "input": call["input"],
                             "status": "failed",
+                            # Structural, not parsed back out of `error`.
+                            # "refused" and "broke" are the same control flow
+                            # and different events: one says a boundary held.
+                            "reason": exc.reason,
                             "error": str(exc),
                         },
                         run_id=run_id,

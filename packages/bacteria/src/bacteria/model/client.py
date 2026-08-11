@@ -215,4 +215,7 @@ class ModelClient:
             tool_calls=tool_calls,
             stop_reason=response.stop_reason,
             raw=response,
+            # The API's answer, not `self.model`. They usually agree; when they
+            # do not, the response is the one telling the truth about what ran.
+            model=response.model,
         )

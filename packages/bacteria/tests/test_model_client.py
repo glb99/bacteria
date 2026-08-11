@@ -26,11 +26,14 @@ def make_client(**overrides) -> ModelClient:
     return client
 
 
-def fake_response(text="hello", tool_calls=None, stop_reason="end_turn"):
+def fake_response(text="hello", tool_calls=None, stop_reason="end_turn", model="claude-sonnet-4-5"):
     content = [SimpleNamespace(type="text", text=text)] if text is not None else []
     for tc in tool_calls or []:
         content.append(SimpleNamespace(type="tool_use", id=tc["id"], name=tc["name"], input=tc["input"]))
-    return SimpleNamespace(content=content, stop_reason=stop_reason)
+    # `model` is on the real Message and is what a run records, so the fake
+    # carries it too — a fake missing a field the code reads tests a shape the
+    # provider does not return.
+    return SimpleNamespace(content=content, stop_reason=stop_reason, model=model)
 
 
 def make_api_error(exc_cls, message="boom"):

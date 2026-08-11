@@ -87,12 +87,23 @@ class ModelResponse:
         raw: The untouched provider response. An escape hatch for debugging,
             never for control flow — reading it in the runtime would reintroduce
             the provider coupling this module exists to prevent.
+        model: Which model produced this reply, or ``None`` if the client does
+            not report one.
+
+            On the response rather than on the protocol's call surface, and that
+            placement is the decision. ADR 0005 keeps ``SendsMessages`` to a
+            single method; asking a client which model it holds would widen
+            exactly what that ADR protects. It would also answer a different
+            question — configuration is an intention, and a client that fell
+            back or routed elsewhere would still report the intention. What
+            answered is a property of the answer.
     """
 
     text: str | None
     tool_calls: list[ToolCall]
     stop_reason: str | None
     raw: Any
+    model: str | None = None
 
 
 @runtime_checkable

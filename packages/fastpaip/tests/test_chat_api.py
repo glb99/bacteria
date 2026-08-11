@@ -101,9 +101,12 @@ async def test_a_turn_is_recorded_in_the_transcript(client, token):
         f"/chat/sessions/{session_id}/transcript", headers=auth(token)
     ).json()
 
-    assert [entry["kind"] for entry in transcript] == ["message", "message"]
+    assert [entry["kind"] for entry in transcript] == ["message", "message", "run_meta"]
     assert transcript[0]["payload"] == {"role": "user", "text": "hi"}
     assert transcript[1]["payload"]["role"] == "assistant"
+    # The run describes itself over HTTP too, which is where it matters most —
+    # nobody here watched the turn happen.
+    assert transcript[2]["payload"]["outcome"] == "completed"
 
 
 async def test_a_second_turn_sees_the_first(client, token):
@@ -120,8 +123,9 @@ async def test_a_second_turn_sees_the_first(client, token):
         f"/chat/sessions/{session_id}/transcript", headers=auth(token)
     ).json()
 
-    assert len(transcript) == 4
-    assert [e["payload"].get("text") for e in transcript][::2] == ["first", "second"]
+    messages = [e for e in transcript if e["kind"] == "message"]
+    assert len(messages) == 4
+    assert [e["payload"].get("text") for e in messages][::2] == ["first", "second"]
 
 
 async def test_an_unknown_session_is_404_not_a_new_conversation(client, token):

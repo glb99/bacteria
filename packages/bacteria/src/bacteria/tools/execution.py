@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, Literal, TypeVar
 
 import anyio.to_thread
 
@@ -79,14 +79,34 @@ async def _call_either(fn: Callable[..., _T | Awaitable[_T]], *args: Any) -> _T:
     return await anyio.to_thread.run_sync(fn, *args)  # type: ignore[arg-type]
 
 
+ToolFailureReason = Literal["unknown_tool", "rejected", "handler_error"]
+"""Why a proposed call did not run.
+
+A closed set, so a new way to fail is a typed change that surfaces every reader
+rather than a new string appearing in stored evidence nobody expected.
+"""
+
+
 class ToolExecutionError(Exception):
     """A proposed tool call did not execute, for any reason.
 
     Covers unknown tool, rejected by approval, and handler raised. One type for
     all three because callers treat them identically — the run stops and the
-    attempt is recorded. The specific cause is in the message and in the
-    chained ``__cause__``.
+    attempt is recorded.
+
+    Attributes:
+        reason: Which of the three it was, as a value rather than a message
+            prefix. "The model was refused" and "the model's tool broke" are
+            the same outcome to control flow and entirely different events to
+            anyone auditing the run — the first says a boundary held, the
+            second says a boundary was never reached. Recovering that
+            distinction by matching on the message string would make the
+            transcript's meaning depend on the wording of an error.
     """
+
+    def __init__(self, message: str, reason: ToolFailureReason) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass
@@ -137,18 +157,18 @@ async def execute_tool_call(
     try:
         tool = registry.get(name)
     except UnknownToolError as exc:
-        raise ToolExecutionError(f"unknown tool: {name}") from exc
+        raise ToolExecutionError(f"unknown tool: {name}", reason="unknown_tool") from exc
 
     # Before the handler is touched, not after. A gate that reports on an
     # action already taken is not a gate. Note this stays outside the try below:
     # a gate that raises is a broken gate, and must not be reported as a failed
     # tool call — that would be indistinguishable from a refusal.
     if not await _call_either(approve, tool_call):
-        raise ToolExecutionError(f"tool call rejected: {name}")
+        raise ToolExecutionError(f"tool call rejected: {name}", reason="rejected")
 
     try:
         output = await _call_either(tool.handler, tool_call["input"])
     except Exception as exc:
-        raise ToolExecutionError(f"tool handler failed: {name}") from exc
+        raise ToolExecutionError(f"tool handler failed: {name}", reason="handler_error") from exc
 
     return ToolResult(tool_call_id=tool_call["id"], name=name, output=output)

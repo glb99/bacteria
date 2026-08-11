@@ -30,12 +30,18 @@ def make_client(**overrides) -> GeminiClient:
     return client
 
 
-def fake_response(text="hello", function_calls=None, finish_reason="STOP"):
+def fake_response(
+    text="hello", function_calls=None, finish_reason="STOP", model_version="gemini-3.5-flash"
+):
     """Build a stand-in Gemini response.
 
     Entries in ``function_calls`` may carry an optional ``"signature"`` key,
     simulating the ``thought_signature`` the real API attaches to a function
     call part.
+
+    ``model_version`` is what the real response reports and what a run records.
+    It is optional on the response type, so the client falls back to the
+    configured name — pass ``None`` to exercise that.
     """
     parts = [
         SimpleNamespace(
@@ -45,7 +51,7 @@ def fake_response(text="hello", function_calls=None, finish_reason="STOP"):
         for c in (function_calls or [])
     ]
     candidate = SimpleNamespace(finish_reason=finish_reason, content=SimpleNamespace(parts=parts))
-    return SimpleNamespace(text=text, candidates=[candidate])
+    return SimpleNamespace(text=text, candidates=[candidate], model_version=model_version)
 
 
 def make_api_error(cls, code, message="boom"):

@@ -231,6 +231,9 @@ the source with `grep -rn "Invariant:" src/`.
 | A step runs at most once per run | Guards a side effect being repeated by control flow looping back | `test_step_cannot_silently_run_twice` |
 | A failed run still commits evidence | Otherwise the runs worth investigating are the ones with no record | `test_a_failed_model_call_still_leaves_the_user_message_as_evidence` |
 | Every item a run commits carries its `run_id` | `run_id` is optional, so a producer that forgets it writes valid, unattributable evidence | `test_every_item_a_run_commits_carries_that_run_id`, `test_a_failed_run_is_separable_from_the_retry_that_followed_it` |
+| Every run records how it was configured | Two runs with identical text may have used different models, tools, and memory; without this nothing tells them apart | `test_a_run_records_how_it_was_configured`, `test_a_run_that_fails_before_the_model_answers_still_describes_itself` |
+| A refusal is distinguishable from a crash | Same control flow, opposite facts — one says a boundary held | `test_a_refused_tool_call_is_distinguishable_from_one_that_broke` |
+| Only `message` items become context | Run metadata names the model and the tools; replaying it as conversation puts the system's internals in its own prompt | `test_only_messages_become_context_not_the_runs_own_bookkeeping` |
 | Tool calls are executed only via `execution` | Concentrates every side effect in one auditable place | `test_runtime_executes_tool_calls_via_the_execution_module_not_the_model_client` |
 | Opaque provider state survives a round trip | Some providers reject a follow-up call without it | `test_thought_signature_is_captured_and_echoed_back_on_the_next_turn` |
 | A synchronous handler never runs on the event loop thread | One blocking tool would stall every concurrent turn in the process | `test_a_synchronous_handler_does_not_run_on_the_event_loop_thread` |
@@ -327,13 +330,16 @@ policy for partial failure mid-loop.
 
 ### Observability beyond the transcript
 
-A run is now identifiable — every item it commits carries its `run_id` ([ADR
-0018](adr/0018-transcript-items-carry-their-run-id.md)) — but not
-*reconstructable*. The transcript records what was said and which tools ran; it
-records nothing about how the run was configured. Missing: which model and
-provider answered, the assembled context actually sent, which memories were
-included, which tools were exposed, whether approval was asked for, and how long
-any of it took. A `run_id` groups that evidence without explaining it.
+A run is identifiable ([ADR
+0018](adr/0018-transcript-items-carry-their-run-id.md)) and describes its own
+configuration ([ADR 0019](adr/0019-a-run-records-how-it-was-configured.md)):
+which model answered, what it was offered, how much it was shown.
+
+What is still missing is anything with a cost or a version attached — latency,
+tokens, the prompt and tool-schema versions — and the approval decision on calls
+that *succeeded*. A refusal is now visible; a grant still looks identical to
+never having asked, which is the half of "audit the authority" that a gate
+allowing everything cannot supply.
 
 Trace and audit are also still one record. That was defensible while this was a
 single developer's local agent; it is weaker now that the agent runs inside a
@@ -349,6 +355,13 @@ standing liability now that a host persists it.
 
 No behavioral eval suite, no release gate, no online monitoring. The test suite
 covers architecture, not agent quality.
+
+What changed is that the deterministic half is now *writable*. A check like
+"every run used the pinned model" or "no run was offered a tool outside the
+approved set" is a query over `run_meta` rather than a property nobody kept —
+run against stored evidence, no model judge involved. Nothing runs those checks
+on a schedule or blocks anything on their result, which is the difference
+between having the evidence and having a loop.
 
 ---
 

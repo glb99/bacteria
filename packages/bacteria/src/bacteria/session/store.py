@@ -91,7 +91,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-TranscriptItemKind = Literal["message", "tool_call", "run_error"]
+TranscriptItemKind = Literal["message", "tool_call", "run_error", "run_meta"]
 """The kinds of event a transcript can hold, and the payload each carries.
 
 - ``message`` — ``{"role": "user" | "assistant", "text": str}``
@@ -102,6 +102,17 @@ TranscriptItemKind = Literal["message", "tool_call", "run_error"]
   to close.
 - ``run_error`` — ``{"error": str}``. A run that failed part-way, recorded so
   the failure leaves evidence rather than only an exception.
+- ``run_meta`` — how the run was configured, not what it said: ``{"model":
+  str | None, "tools_exposed": list[str], "messages_in_context": int,
+  "memories_in_context": int, "tool_calls_proposed": int, "outcome":
+  "completed" | "failed"}``. Exactly one per run, appended last.
+
+  This is the only item that describes the run rather than belonging to the
+  conversation, which is what makes a transcript reconstructable instead of
+  merely readable: two runs producing identical text may have been shown
+  different memories, offered different tools, or answered by different
+  models, and without this nothing distinguishes them. See
+  [ADR 0019](../../docs/adr/0019-a-run-records-how-it-was-configured.md).
 
 Kept as a closed ``Literal`` so that adding a kind is a typed change that
 surfaces every reader needing to handle it.

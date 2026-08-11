@@ -55,7 +55,10 @@ async def test_runtime_commits_via_the_store_not_by_direct_write(make_fake_model
 
     result = await runtime.run_turn(session.session_id, "hello")
 
-    assert len(result.committed_state.transcript) == 2
+    # Counted by kind rather than by length: a run also commits evidence about
+    # itself, and this test is about the conversation reaching the store.
+    messages = [i for i in result.committed_state.transcript if i.kind == "message"]
+    assert len(messages) == 2
     assert (await store.get_state(session.session_id)).transcript == result.committed_state.transcript
 
 
@@ -90,7 +93,7 @@ async def test_second_turn_sees_prior_transcript(make_fake_model_client):
     await runtime.run_turn(session.session_id, "second")
 
     state = await store.get_state(session.session_id)
-    assert len(state.transcript) == 4
+    assert len([i for i in state.transcript if i.kind == "message"]) == 4
 
 
 class FakeToolCallingClient:
@@ -108,8 +111,15 @@ class FakeToolCallingClient:
                 tool_calls=[{"id": "t1", "name": "get_time", "input": {}}],
                 stop_reason="tool_use",
                 raw=None,
+                model="fake-model-1",
             )
-        return ModelResponse(text="It's 10:00", tool_calls=[], stop_reason="end_turn", raw=None)
+        return ModelResponse(
+            text="It's 10:00",
+            tool_calls=[],
+            stop_reason="end_turn",
+            raw=None,
+            model="fake-model-1",
+        )
 
 
 async def test_runtime_executes_tool_calls_via_the_execution_module_not_the_model_client():
@@ -290,7 +300,7 @@ async def test_every_item_a_run_commits_carries_that_run_id():
     )
 
     transcript = (await store.get_state(session.session_id)).transcript
-    assert {item.kind for item in transcript} == {"message", "tool_call"}
+    assert {item.kind for item in transcript} == {"message", "tool_call", "run_meta"}
     assert [item.run_id for item in transcript] == [result.run_id] * len(transcript)
 
 
@@ -320,8 +330,91 @@ async def test_a_failed_run_is_separable_from_the_retry_that_followed_it(make_fa
 
     abandoned = next(run for run in runs if run != retry.run_id)
     failed_items = [item for item in transcript if item.run_id == abandoned]
-    assert [item.kind for item in failed_items] == ["message", "run_error"]
-    assert all(item.kind == "message" for item in transcript if item.run_id == retry.run_id)
+    assert [item.kind for item in failed_items] == ["message", "run_error", "run_meta"]
+    assert failed_items[-1].payload["outcome"] == "failed"
+
+
+async def test_a_run_records_how_it_was_configured():
+    """Two runs with identical text may have been given entirely different runs.
+
+    This is the record that tells them apart: which model answered, what it was
+    shown, and what it was allowed to do. Without it a transcript is readable
+    and not reconstructable — and an evaluation asking "did this run use the
+    right tool, with the right model" has nothing to read.
+    """
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+    await store.remember(session.session_id, key="tone", value="terse", reason="asked")
+    runtime = Runtime(model_client=FakeToolCallingClient(), session_store=store)
+
+    await runtime.run_turn(
+        session.session_id, "what time is it?", tool_registry=make_get_time_registry()
+    )
+
+    transcript = (await store.get_state(session.session_id)).transcript
+    metas = [item for item in transcript if item.kind == "run_meta"]
+    assert len(metas) == 1, "exactly one per run, or a run has two descriptions"
+    assert metas[0].payload == {
+        "model": "fake-model-1",
+        "tools_exposed": ["get_time"],
+        "messages_in_context": 1,
+        "memories_in_context": 1,
+        "tool_calls_proposed": 1,
+        "tool_calls_dropped": 0,
+        "outcome": "completed",
+    }
+
+
+async def test_a_run_that_fails_before_the_model_answers_still_describes_itself():
+    """The runs most worth explaining are the ones that produced no answer.
+
+    A run pointed at an unreachable model records no model, and that null is
+    the finding rather than a gap — it says the failure happened before
+    anything replied. Asserted because the natural implementation builds this
+    record from the response, which on this path does not exist.
+    """
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+    runtime = Runtime(model_client=FakeFailingClient(), session_store=store)
+
+    with pytest.raises(RuntimeError):
+        await runtime.run_turn(session.session_id, "hello")
+
+    transcript = (await store.get_state(session.session_id)).transcript
+    meta = next(item for item in transcript if item.kind == "run_meta")
+    assert meta.payload["outcome"] == "failed"
+    assert meta.payload["model"] is None
+    assert meta.payload["tool_calls_proposed"] == 0
+
+
+async def test_a_refused_tool_call_is_distinguishable_from_one_that_broke():
+    """"The boundary held" and "the tool crashed" must not look the same.
+
+    Both stop the run with a `ToolExecutionError` and both record `status:
+    failed`, so control flow genuinely cannot tell them apart — but they are
+    opposite facts about the system. Recovering the difference by matching on
+    the error message would make stored evidence depend on error wording.
+    """
+    async def run_and_capture(registry, approve):
+        store = SessionStore()
+        session = await store.create_session(user_id="u1")
+        runtime = Runtime(model_client=FakeToolCallingClient(), session_store=store)
+        with pytest.raises(ToolExecutionError):
+            await runtime.run_turn(
+                session.session_id, "go", tool_registry=registry, approve=approve
+            )
+        transcript = (await store.get_state(session.session_id)).transcript
+        return next(i for i in transcript if i.kind == "tool_call").payload
+
+    def explode(_tool_input):
+        raise RuntimeError("the handler broke")
+
+    refused = await run_and_capture(make_get_time_registry(), lambda _c: False)
+    broke = await run_and_capture(make_get_time_registry(handler=explode), lambda _c: True)
+
+    assert refused["status"] == broke["status"] == "failed"
+    assert refused["reason"] == "rejected"
+    assert broke["reason"] == "handler_error"
 
 
 async def test_runtime_honors_an_approving_callback():

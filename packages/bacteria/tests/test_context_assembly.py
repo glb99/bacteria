@@ -32,6 +32,47 @@ async def test_window_caps_transcript_length_to_the_most_recent_messages():
     assert context.messages[-1]["content"] == "latest"
 
 
+async def test_only_messages_become_context_not_the_runs_own_bookkeeping():
+    """Evidence about a run must never be fed back to a model as conversation.
+
+    The transcript is an event log, not a script: it holds tool records, run
+    errors, and — since ADR 0019 — a `run_meta` item naming the model, the tools
+    offered, and how much memory was shown. Replaying those as messages would
+    put the system's internals in its own prompt, teach the model the names of
+    tools it was not offered this turn, and let an error string become an
+    instruction.
+
+    Assembly already filtered by kind; nothing asserted it, and the cost of that
+    filter breaking rose sharply the moment run metadata started being recorded.
+    """
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+    await store.commit(
+        session.session_id,
+        new_transcript_items=[
+            TranscriptItem(kind="message", payload={"role": "user", "text": "real message"}),
+            TranscriptItem(
+                kind="tool_call",
+                payload={"name": "get_time", "input": {}, "status": "executed", "output": "10:00"},
+            ),
+            TranscriptItem(kind="run_error", payload={"error": "backend unavailable"}),
+            TranscriptItem(
+                kind="run_meta",
+                payload={"model": "secret-model-name", "tools_exposed": ["delete_everything"]},
+            ),
+        ],
+    )
+    state = await store.get_state(session.session_id)
+
+    context = assemble_context(state, user_text="next")
+
+    assert [m["content"] for m in context.messages] == ["real message", "next"]
+    rendered = str(context.messages) + str(context.system)
+    assert "secret-model-name" not in rendered
+    assert "delete_everything" not in rendered
+    assert "backend unavailable" not in rendered
+
+
 async def test_no_memory_means_no_system_prompt():
     state = await make_state_with_messages(count=1)
 

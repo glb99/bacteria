@@ -106,10 +106,16 @@ class AssembledContext:
             internal (Anthropic-shaped) format.
         system: System prompt, or ``None`` when there is nothing to say. Carries
             memory, kept out of ``messages`` deliberately.
+        memories_included: How many memory entries reached ``system``. Reported
+            rather than left for a caller to recompute, because the bound is
+            applied here — counting ``state.memory`` instead would report what
+            exists rather than what the model was shown, and those differ by
+            exactly the amount the limit is doing.
     """
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     system: str | None = None
+    memories_included: int = 0
 
 
 def assemble_context(
@@ -151,12 +157,23 @@ def assemble_context(
 
     # `or None` so that a limit of 0 yields no system prompt rather than an
     # empty one, which some providers reject outright.
-    system = _format_memory(state, memory_limit) or None if state.memory else None
-    return AssembledContext(messages=messages, system=system)
+    memory_text, memories_included = (
+        _format_memory(state, memory_limit) if state.memory else ("", 0)
+    )
+    return AssembledContext(
+        messages=messages,
+        system=memory_text or None,
+        memories_included=memories_included,
+    )
 
 
-def _format_memory(state: SessionState, limit: int) -> str:
+def _format_memory(state: SessionState, limit: int) -> tuple[str, int]:
     """Render the most recent memory entries as a system prompt.
+
+    Returns the rendered text and how many entries went into it. The count is
+    returned rather than left to the caller because the bound is applied here;
+    a caller counting ``state.memory`` would report what exists rather than
+    what was shown, and those differ by exactly the thing the limit does.
 
     Each line carries its ``reason`` alongside its value. That is provenance
     for the model as much as for us: a fact plus why it was kept is something
@@ -170,7 +187,8 @@ def _format_memory(state: SessionState, limit: int) -> str:
     order that changes between turns is an unnecessary difference in the prompt.
     """
     if limit <= 0:
-        return ""
+        return "", 0
     oldest_first = sorted(state.memory.values(), key=lambda entry: entry.created_at)
-    lines = [f"- {e.value} (reason: {e.reason})" for e in oldest_first[-limit:]]
-    return "Known context about this user/session:\n" + "\n".join(lines)
+    shown = oldest_first[-limit:]
+    lines = [f"- {e.value} (reason: {e.reason})" for e in shown]
+    return "Known context about this user/session:\n" + "\n".join(lines), len(shown)

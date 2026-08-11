@@ -291,8 +291,18 @@ No external evidence sources exist, so there is nothing to retrieve. When one
 does, it attaches as an added section — and must arrive as *candidate evidence*
 rather than authority.
 
-Separately, and easily confused with it: there is no relevance ranking over the
-session's *own* memory. Entries are chosen by recency, so the twentieth most
+Memory itself is scoped ([ADR
+0021](adr/0021-memory-is-scoped-to-a-session-or-a-user.md)): entries belong to
+the conversation or to the person, both reach the model, and the session wins a
+shared key. Assembly is the only place the two are merged.
+
+Selection is now a named strategy behind `context/retrieval.py`
+([ADR 0022](adr/0022-memory-selection-is-a-named-strategy.md)), with recency as
+the only implementation — and it reports how many entries it passed over, so a
+memory the owner kept and the model never saw is countable rather than silent.
+
+Separately, and easily confused with it: there is no relevance ranking over
+either scope. Entries are chosen by recency, so the twentieth most
 recent fact is invisible on the turn it finally matters. Ranking against the
 incoming message is what would make memory semantic by mechanism rather than
 only by role, and nothing structural blocks it — `assemble_context` already
@@ -310,6 +320,12 @@ than losing an old message. Recency is blunter and fails predictably.
 Also missing here: summarization (needed once conversations outgrow the window)
 and token-aware budgeting (the window counts messages, so twenty long ones cost
 far more than twenty short ones).
+
+Two gaps that scope made sharper rather than created. There is still no expiry,
+and a user-scoped memory now lasts across every future conversation rather than
+dying with one. And nothing about an entry's `source` or age reaches the model —
+a standing preference from months ago and one stated this morning render
+identically, as does a fact the owner typed and one a job extracted.
 
 ### Identity and policy — `tools/approval.py`
 

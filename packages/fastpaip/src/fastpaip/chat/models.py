@@ -109,6 +109,37 @@ class ChatMemoryEntry(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
 
+class ChatUserMemoryEntry(SQLModel, table=True):
+    """One active fact belonging to a person rather than to a conversation.
+
+    A third table rather than a ``scope`` column on ``chat_memory_entry``, and
+    the primary key is again the reason: this is keyed by ``(user_id, key)``,
+    where session memory is keyed by ``(session_id, key)``. Those are different
+    uniqueness rules over different owning entities, and one table would have to
+    hold a nullable ``session_id``, a nullable ``user_id``, and a check
+    constraint asserting exactly one is set — encoding in a constraint what two
+    primary keys state outright.
+
+    It also keeps the leakage question answerable by looking at a query rather
+    than at a filter: rows here are selected by ``user_id`` and nothing else, so
+    "could one person see another's memory" is a question about one join.
+
+    There is deliberately no foreign key to a users table. ``user_id`` is the
+    authenticated principal, which this application does not own a table for —
+    the same identifier ``chat_session.user_id`` already carries unconstrained.
+    Adding one here would invent an ownership this schema does not have.
+    """
+
+    __tablename__ = "chat_user_memory_entry"
+
+    user_id: str = Field(primary_key=True)
+    key: str = Field(primary_key=True)
+    source: str
+    value: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    reason: str
+    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
+
+
 class ChatMemoryProposal(SQLModel, table=True):
     """One suggested fact, which no model can see until a human activates it.
 

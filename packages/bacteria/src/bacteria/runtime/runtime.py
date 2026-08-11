@@ -159,6 +159,13 @@ def _run_meta(
             "tools_exposed": tools_exposed,
             "messages_in_context": len(context.messages),
             "memories_in_context": context.memories_included,
+            # What the turn did *not* see. A memory the owner kept can stop
+            # reaching the model because newer ones displaced it, and until this
+            # was recorded that happened with nothing anywhere saying so — the
+            # same unreportable loss ADR 0010 refused for messages, present all
+            # along for memory.
+            "memories_considered": context.memories_considered,
+            "retrieval_strategy": context.retrieval_strategy,
             "tool_calls_proposed": tool_calls_proposed,
             "tool_calls_dropped": tool_calls_dropped,
             "outcome": outcome,

@@ -41,6 +41,10 @@ which a type checker can verify, all of which callers depend on:
 - ``commit`` appends transcript items and merges working state. It never
   replaces either wholesale, and the two never touch each other.
 - ``remember`` overwrites by key; ``forget`` on an absent key is a no-op.
+- ``user``-scoped memory belongs to the session's *owner*, not to the session.
+  Two sessions of one person see the same entries, and one person's are never
+  visible to another. An implementation storing it per session satisfies every
+  signature here and silently reimplements session scope.
 - An unknown ``session_id`` raises
   :class:`~bacteria.session.store.UnknownSessionError` rather than creating a
   session, because an id that does not resolve usually means a caller lost one.
@@ -62,7 +66,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from bacteria.session.store import Session, SessionState, TranscriptItem
+from bacteria.session.store import MemoryScope, Session, SessionState, TranscriptItem
 
 
 @runtime_checkable
@@ -94,23 +98,37 @@ class SessionRepository(Protocol):
         ...
 
     async def remember(
-        self, session_id: str, key: str, value: Any, reason: str, source: str = "owner"
+        self,
+        session_id: str,
+        key: str,
+        value: Any,
+        reason: str,
+        source: str = "owner",
+        scope: MemoryScope = "session",
     ) -> SessionState:
         """Write an active memory directly. For the session's owner only."""
         ...
 
-    async def forget(self, session_id: str, key: str) -> SessionState:
+    async def forget(
+        self, session_id: str, key: str, scope: MemoryScope = "session"
+    ) -> SessionState:
         """Remove an active memory."""
         ...
 
     async def propose(
         self, session_id: str, key: str, value: Any, reason: str, source: str
     ) -> SessionState:
-        """Suggest a memory. Reaches no model until activated."""
+        """Suggest a memory. Reaches no model until activated.
+
+        Deliberately has no ``scope``: whoever proposes does not choose how far
+        the result reaches. See :meth:`activate`.
+        """
         ...
 
-    async def activate(self, session_id: str, source: str, key: str) -> SessionState:
-        """Promote a proposal into active memory."""
+    async def activate(
+        self, session_id: str, source: str, key: str, scope: MemoryScope = "session"
+    ) -> SessionState:
+        """Promote a proposal into active memory, at a scope the human picks."""
         ...
 
     async def reject(self, session_id: str, source: str, key: str) -> SessionState:

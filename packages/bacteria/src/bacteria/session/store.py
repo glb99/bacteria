@@ -163,6 +163,21 @@ class TranscriptItem:
     run_id: str | None = None
 
 
+MemoryScope = Literal["session", "user"]
+"""How far a memory reaches.
+
+``session`` lasts as long as the conversation. ``user`` outlives it and is
+visible in every session that person opens, which is what makes memory more than
+a slower way of reading the transcript.
+
+A closed ``Literal`` rather than a free string: a typo'd scope would otherwise
+create a third, silent category that nothing renders and nothing can delete. See
+[ADR 0021](../../docs/adr/0021-memory-is-scoped-to-a-session-or-a-user.md).
+"""
+
+SESSION_SCOPE: MemoryScope = "session"
+USER_SCOPE: MemoryScope = "user"
+
 OWNER = "owner"
 """The source of a memory written by the person who owns the session.
 
@@ -218,12 +233,23 @@ class SessionState:
 
     Only ``memory`` reaches a model. A proposal is inert until something
     activates it.
+
+    ``user_memory`` is the same idea one scope out: entries belonging to the
+    person rather than to this conversation, carried into every session they
+    open. Kept as a separate collection for the reason above — which collection
+    an entry is in *is* its scope, where an attribute could disagree with the
+    container holding it. Both are keyed by ``key``, but keyed within different
+    things, and a single dict would erase exactly that.
+
+    Assembly merges the two with session winning on a shared key; see
+    :func:`~bacteria.context.assembly.assemble_context`.
     """
 
     session: Session
     transcript: list[TranscriptItem] = field(default_factory=list)
     working_state: dict[str, Any] = field(default_factory=dict)
     memory: dict[str, MemoryEntry] = field(default_factory=dict)
+    user_memory: dict[str, MemoryEntry] = field(default_factory=dict)
     proposals: dict[tuple[str, str], MemoryEntry] = field(default_factory=dict)
 
 
@@ -257,6 +283,12 @@ class SessionStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, SessionState] = {}
+        # User memory lives outside the per-session dict because that is what it
+        # *is*: state belonging to a person rather than to one conversation.
+        # Holding a copy on each SessionState would satisfy every signature and
+        # implement the old behaviour — two sessions of the same person would
+        # each keep their own, which is session memory with a longer name.
+        self._user_memory: dict[str, dict[str, MemoryEntry]] = {}
 
     async def create_session(self, user_id: str) -> Session:
         """Open a new, empty session for ``user_id``.
@@ -285,7 +317,19 @@ class SessionStore:
         """
         if session_id not in self._sessions:
             raise UnknownSessionError(session_id)
-        return copy.deepcopy(self._sessions[session_id])
+        return self._detached(self._sessions[session_id])
+
+    def _detached(self, state: SessionState) -> SessionState:
+        """Copy ``state``, with the owner's user memory folded in.
+
+        User memory is stored per user and handed back per session, so this is
+        the one place the two views are joined. Doing it on read rather than on
+        write means a memory written in one session is visible in another
+        immediately, without anything having to fan the write out.
+        """
+        detached = copy.deepcopy(state)
+        detached.user_memory = copy.deepcopy(self._user_memory.get(state.session.user_id, {}))
+        return detached
 
     async def commit(
         self,
@@ -316,10 +360,16 @@ class SessionStore:
         state = self._sessions[session_id]
         state.transcript.extend(new_transcript_items or [])
         state.working_state.update(working_state_updates or {})
-        return copy.deepcopy(state)
+        return self._detached(state)
 
     async def remember(
-        self, session_id: str, key: str, value: Any, reason: str, source: str = OWNER
+        self,
+        session_id: str,
+        key: str,
+        value: Any,
+        reason: str,
+        source: str = OWNER,
+        scope: MemoryScope = SESSION_SCOPE,
     ) -> SessionState:
         """Record a fact worth re-surfacing later. The only write path for memory.
 
@@ -342,6 +392,10 @@ class SessionStore:
                 is not the owner should be calling ``propose`` instead. Kept as
                 an argument rather than hardcoded so an activated proposal can
                 retain the source that suggested it.
+            scope: How far it reaches. Defaults to the session, which is the
+                conservative one — a user-scoped write applies to every future
+                conversation that person has, and defaulting to that would make
+                the wider blast radius the accidental choice.
 
         Raises:
             UnknownSessionError: No such session.
@@ -349,8 +403,12 @@ class SessionStore:
         if session_id not in self._sessions:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
-        state.memory[key] = MemoryEntry(value=value, reason=reason, source=source)
-        return copy.deepcopy(state)
+        entry = MemoryEntry(value=value, reason=reason, source=source)
+        if scope == USER_SCOPE:
+            self._user_memory.setdefault(state.session.user_id, {})[key] = entry
+        else:
+            state.memory[key] = entry
+        return self._detached(state)
 
     async def propose(
         self, session_id: str, key: str, value: Any, reason: str, source: str
@@ -377,9 +435,11 @@ class SessionStore:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
         state.proposals[(source, key)] = MemoryEntry(value=value, reason=reason, source=source)
-        return copy.deepcopy(state)
+        return self._detached(state)
 
-    async def activate(self, session_id: str, source: str, key: str) -> SessionState:
+    async def activate(
+        self, session_id: str, source: str, key: str, scope: MemoryScope = SESSION_SCOPE
+    ) -> SessionState:
         """Promote a proposal into active memory. The human act.
 
         Collapsing happens here and only here: the proposal was keyed by
@@ -390,6 +450,13 @@ class SessionStore:
 
         The activated entry keeps its ``source``. A memory that forgot it was
         suggested by a job could not later be distrusted as one.
+
+        Args:
+            scope: Chosen here, by the person accepting, and never by whoever
+                proposed. A model able to mark its own suggestion user-scoped
+                would be deciding that something it wrote applies to every
+                future conversation that person has — the same escalation
+                confirmation exists to prevent, one level finer. See ADR 0021.
 
         Raises:
             UnknownSessionError: No such session.
@@ -407,10 +474,14 @@ class SessionStore:
         # accepted it. Carrying the proposal's timestamp over would let a
         # suggestion made weeks ago be activated today and immediately be at
         # risk of ageing out, which nobody could explain.
-        state.memory[key] = MemoryEntry(
+        activated = MemoryEntry(
             value=proposal.value, reason=proposal.reason, source=proposal.source
         )
-        return copy.deepcopy(state)
+        if scope == USER_SCOPE:
+            self._user_memory.setdefault(state.session.user_id, {})[key] = activated
+        else:
+            state.memory[key] = activated
+        return self._detached(state)
 
     async def reject(self, session_id: str, source: str, key: str) -> SessionState:
         """Discard a proposal without it ever becoming a memory.
@@ -427,9 +498,11 @@ class SessionStore:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
         state.proposals.pop((source, key), None)
-        return copy.deepcopy(state)
+        return self._detached(state)
 
-    async def forget(self, session_id: str, key: str) -> SessionState:
+    async def forget(
+        self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE
+    ) -> SessionState:
         """Remove a memory. The other half of a memory's lifecycle.
 
         Exists because a store with no removal path makes every memory
@@ -437,11 +510,21 @@ class SessionStore:
         preference outlives the situation that produced it. Removing an absent
         key is a no-op: the caller wanted it gone, and it is.
 
+        Args:
+            scope: Which one to remove. Scoped rather than removing both,
+                because a session that overrode a standing preference should be
+                able to drop the override without also deleting what it was
+                overriding — those are different intentions and one call cannot
+                mean both.
+
         Raises:
             UnknownSessionError: No such session.
         """
         if session_id not in self._sessions:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
-        state.memory.pop(key, None)
-        return copy.deepcopy(state)
+        if scope == USER_SCOPE:
+            self._user_memory.get(state.session.user_id, {}).pop(key, None)
+        else:
+            state.memory.pop(key, None)
+        return self._detached(state)

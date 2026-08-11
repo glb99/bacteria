@@ -361,6 +361,8 @@ async def test_a_run_records_how_it_was_configured():
         "tools_exposed": ["get_time"],
         "messages_in_context": 1,
         "memories_in_context": 1,
+        "memories_considered": 1,
+        "retrieval_strategy": "recency",
         "tool_calls_proposed": 1,
         "tool_calls_dropped": 0,
         "outcome": "completed",

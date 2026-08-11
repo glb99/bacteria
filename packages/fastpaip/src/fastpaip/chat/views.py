@@ -9,6 +9,7 @@ whether.
 from datetime import datetime
 from typing import Any
 
+from bacteria.session.store import SESSION_SCOPE, USER_SCOPE, MemoryScope
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -55,10 +56,18 @@ class MemoryWrite(BaseModel):
 
 
 class MemoryEntryOut(BaseModel):
+    """One stored fact, with enough to judge and to delete it.
+
+    ``scope`` is here because ``key`` alone no longer identifies an entry: a
+    standing preference and this conversation's override of it share a key and
+    are different rows. A reviewer deleting one has to say which.
+    """
+
     key: str
     value: Any
     reason: str
     source: str
+    scope: MemoryScope
     created_at: datetime
 
 
@@ -143,16 +152,25 @@ async def read_memory(
     Ordered oldest first, matching the order the agent renders them in.
     """
     state = await load_owned_session(SqlSessionRepository(db), principal, session_id)
-    entries = sorted(state.memory.items(), key=lambda item: item[1].created_at)
+    # Both scopes, each labelled, including an entry currently shadowed by a
+    # session-scoped one on the same key. The reviewer is judging what is stored
+    # rather than what this turn renders, and hiding the loser would make a
+    # memory they can still delete invisible to them.
+    scoped = [(SESSION_SCOPE, state.memory), (USER_SCOPE, state.user_memory)]
+    entries = sorted(
+        ((scope, key, entry) for scope, memory in scoped for key, entry in memory.items()),
+        key=lambda row: row[2].created_at,
+    )
     return [
         MemoryEntryOut(
             key=key,
             value=entry.value,
             reason=entry.reason,
             source=entry.source,
+            scope=scope,
             created_at=entry.created_at,
         )
-        for key, entry in entries
+        for scope, key, entry in entries
     ]
 
 
@@ -163,8 +181,14 @@ async def write_memory(
     body: MemoryWrite,
     principal: CurrentPrincipal,
     db: DbSession,
+    scope: MemoryScope = SESSION_SCOPE,
 ) -> MemoryEntryOut:
-    """Preserve a fact for every later turn in this session.
+    """Preserve a fact for this session, or for the caller everywhere.
+
+    ``?scope=user`` writes a memory that outlives this conversation and reaches
+    every session this principal opens. It defaults to ``session``, which is the
+    conservative one: the wider blast radius should be the choice someone made
+    rather than the one they got.
 
     ``PUT``, not ``POST``: writing the same key twice is one memory, not two.
     That is the agent store's own rule — ``remember`` overwrites by key, because
@@ -185,22 +209,33 @@ async def write_memory(
     repository = SqlSessionRepository(db)
     await load_owned_session(repository, principal, session_id)
 
-    state = await repository.remember(session_id, key=key, value=body.value, reason=body.reason)
-    entry = state.memory[key]
+    state = await repository.remember(
+        session_id, key=key, value=body.value, reason=body.reason, scope=scope
+    )
+    entry = (state.user_memory if scope == USER_SCOPE else state.memory)[key]
     return MemoryEntryOut(
         key=key,
         value=entry.value,
         reason=entry.reason,
         source=entry.source,
+        scope=scope,
         created_at=entry.created_at,
     )
 
 
 @router.delete("/sessions/{session_id}/memory/{key}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory(
-    session_id: str, key: str, principal: CurrentPrincipal, db: DbSession
+    session_id: str,
+    key: str,
+    principal: CurrentPrincipal,
+    db: DbSession,
+    scope: MemoryScope = SESSION_SCOPE,
 ) -> None:
-    """Remove a memory.
+    """Remove a memory from one scope.
+
+    Scoped rather than removing both, because dropping a session's override of a
+    standing preference should leave the standing one — those are different
+    intentions and one call cannot mean both.
 
     204 whether or not the key was there. Deleting an absent memory is not an
     error — the caller wanted it gone, and it is — and answering 404 would leak
@@ -211,7 +246,7 @@ async def delete_memory(
     """
     repository = SqlSessionRepository(db)
     await load_owned_session(repository, principal, session_id)
-    await repository.forget(session_id, key=key)
+    await repository.forget(session_id, key=key, scope=scope)
 
 
 @router.get("/sessions/{session_id}/memory-proposals", response_model=list[ProposalOut])
@@ -249,9 +284,19 @@ async def read_proposals(
     status_code=201,
 )
 async def activate_proposal(
-    session_id: str, source: str, key: str, principal: CurrentPrincipal, db: DbSession
+    session_id: str,
+    source: str,
+    key: str,
+    principal: CurrentPrincipal,
+    db: DbSession,
+    scope: MemoryScope = SESSION_SCOPE,
 ) -> MemoryEntryOut:
     """Accept a suggestion, making it a memory the model will see.
+
+    ``?scope=user`` accepts it for every future conversation. The scope is
+    chosen *here*, by the person accepting, and never carried on the proposal:
+    a model able to mark its own suggestion user-scoped would be deciding that
+    something it wrote applies to everything that person does later.
 
     The human act the whole design is built around. Addressed by ``source`` and
     ``key`` together, because two proposers may suggest the same key and the
@@ -266,18 +311,19 @@ async def activate_proposal(
     await load_owned_session(repository, principal, session_id)
 
     try:
-        state = await repository.activate(session_id, source=source, key=key)
+        state = await repository.activate(session_id, source=source, key=key, scope=scope)
     except KeyError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="no such proposal"
         ) from None
 
-    entry = state.memory[key]
+    entry = (state.user_memory if scope == USER_SCOPE else state.memory)[key]
     return MemoryEntryOut(
         key=key,
         value=entry.value,
         reason=entry.reason,
         source=entry.source,
+        scope=scope,
         created_at=entry.created_at,
     )
 

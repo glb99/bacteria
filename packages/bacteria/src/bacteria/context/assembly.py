@@ -32,6 +32,12 @@ watch was the one that could overflow it. The bound is on the read side, most
 recent first, so it is describable the same way — "the twenty most recent
 memories" is something a user can be told.
 
+Two scopes reach the model, merged here and nowhere else: what the owner keeps
+standing across every conversation, and what this one established. Session wins
+on a shared key, and the bound applies to the merged set rather than to each —
+the budget is prompt size, which does not care which scope filled it. See
+[ADR 0021](../../docs/adr/0021-memory-is-scoped-to-a-session-or-a-user.md).
+
 Not built:
     Retrieval over external evidence. There is no external source — no
     documents, no search, no vector store — so there is nothing to retrieve.
@@ -77,7 +83,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from bacteria.session.store import SessionState
+from bacteria.context.retrieval import RecentMemory, RetrievesMemory
+from bacteria.session.store import MemoryEntry, SessionState
 
 DEFAULT_WINDOW = 20
 """Messages kept from history. Small enough to stay cheap, large enough that a
@@ -111,11 +118,18 @@ class AssembledContext:
             applied here — counting ``state.memory`` instead would report what
             exists rather than what the model was shown, and those differ by
             exactly the amount the limit is doing.
+        memories_considered: How many were eligible before the bound. The
+            difference between this and ``memories_included`` is the number of
+            memories the owner kept and the model was not shown, which until now
+            nothing recorded anywhere.
+        retrieval_strategy: Which rule chose them.
     """
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     system: str | None = None
     memories_included: int = 0
+    memories_considered: int = 0
+    retrieval_strategy: str = ""
 
 
 def assemble_context(
@@ -123,6 +137,7 @@ def assemble_context(
     user_text: str,
     window_size: int = DEFAULT_WINDOW,
     memory_limit: int = DEFAULT_MEMORY_LIMIT,
+    retriever: RetrievesMemory | None = None,
 ) -> AssembledContext:
     """Build the working set for one turn.
 
@@ -138,7 +153,15 @@ def assemble_context(
         user_text: The new message, always included regardless of ``window_size``
             — dropping the thing being responded to would be incoherent.
         window_size: How many prior messages to keep.
-        memory_limit: How many memory entries to surface, most recent first.
+        memory_limit: How many memory entries to surface.
+        retriever: Which rule picks them. Defaults to
+            :class:`~bacteria.context.retrieval.RecentMemory`, which is what
+            this function did inline before the rule had a name.
+
+            Scopes are collapsed *before* it is called, so a strategy is handed
+            one candidate set and never sees where an entry came from.
+            Precedence is a policy (ADR 0021) and re-implementing it in every
+            strategy is how two of them come to disagree about it.
 
     Returns:
         The assembled context. Total message count is at most
@@ -153,40 +176,48 @@ def assemble_context(
     messages = [{"role": item.payload["role"], "content": item.payload["text"]} for item in recent]
     messages.append({"role": "user", "content": user_text})
 
-    # `or None` so that a limit of 0 yields no system prompt rather than an
-    # empty one, which some providers reject outright.
-    memory_text, memories_included = (
-        _format_memory(state, memory_limit) if state.memory else ("", 0)
+    selection = (retriever or RecentMemory()).select(
+        query=user_text, limit=memory_limit, candidates=_merge_scopes(state)
     )
+    # `or None` so that an empty selection yields no system prompt rather than
+    # an empty one, which some providers reject outright.
     return AssembledContext(
         messages=messages,
-        system=memory_text or None,
-        memories_included=memories_included,
+        system=_format_memory(selection.chosen) or None,
+        memories_included=len(selection.chosen),
+        memories_considered=selection.considered,
+        retrieval_strategy=selection.strategy,
     )
 
 
-def _format_memory(state: SessionState, limit: int) -> tuple[str, int]:
-    """Render the most recent memory entries as a system prompt.
+def _merge_scopes(state: SessionState) -> dict[str, MemoryEntry]:
+    """Combine the owner's standing memory with this conversation's.
 
-    Returns the rendered text and how many entries went into it. The count is
-    returned rather than left to the caller because the bound is applied here;
-    a caller counting ``state.memory`` would report what exists rather than
-    what was shown, and those differ by exactly the thing the limit does.
+    Session wins on a shared key. The narrower scope is the more current claim —
+    a preference stated in this conversation supersedes a standing one — and the
+    alternative is handing the model both and no rule for choosing, which is a
+    contradiction dressed as context.
 
-    Each line carries its ``reason`` alongside its value. That is provenance
-    for the model as much as for us: a fact plus why it was kept is something
-    the model can weigh, where a bare assertion can only be obeyed.
-
-    Sorted ascending and trimmed from the front, rather than sorted descending
-    and reversed. The two differ on ties: Python's sort is stable, so ascending
-    keeps entries that share a timestamp in insertion order, where reversing a
-    descending sort would flip them. Several memories written in one request do
-    share a timestamp, so this is the ordinary case, not a corner one — and an
-    order that changes between turns is an unnecessary difference in the prompt.
+    The loser is dropped rather than shown as superseded. The model is not the
+    right audience for a resolution it cannot act on, and both entries remain
+    separately readable through the store for anyone who is.
     """
-    if limit <= 0:
-        return "", 0
-    oldest_first = sorted(state.memory.values(), key=lambda entry: entry.created_at)
-    shown = oldest_first[-limit:]
-    lines = [f"- {e.value} (reason: {e.reason})" for e in shown]
-    return "Known context about this user/session:\n" + "\n".join(lines), len(shown)
+    return {**state.user_memory, **state.memory}
+
+
+def _format_memory(chosen: dict[str, MemoryEntry]) -> str:
+    """Render already-chosen entries as a system prompt.
+
+    Rendering only. Which entries these are, in what order, and how many, is
+    :mod:`bacteria.context.retrieval`'s question — this function used to answer
+    both and the two are unrelated: changing how memories are selected should
+    not require touching how they are written down.
+
+    Each line carries its ``reason`` alongside its value. That is provenance for
+    the model as much as for us: a fact plus why it was kept is something the
+    model can weigh, where a bare assertion can only be obeyed.
+    """
+    if not chosen:
+        return ""
+    lines = [f"- {e.value} (reason: {e.reason})" for e in chosen.values()]
+    return "Known context about this user/session:\n" + "\n".join(lines)

@@ -128,6 +128,92 @@ async def test_transcript_order_is_the_order_committed(repo):
     assert [i.payload["text"] for i in state.transcript] == ["a", "b", "c", "d"]
 
 
+async def test_user_memory_is_shared_across_that_persons_sessions(repo):
+    """The whole point of the scope, and the thing session memory cannot do.
+
+    Written first among these because an implementation can satisfy every
+    signature in the protocol while storing user memory per session — which is
+    session memory with a longer name, and would pass any test that only ever
+    looked at one conversation.
+    """
+    first = await repo.create_session(user_id="u1")
+    second = await repo.create_session(user_id="u1")
+
+    await repo.remember(first.session_id, key="tone", value="terse", reason="asked", scope="user")
+
+    state = await repo.get_state(second.session_id)
+    assert state.user_memory["tone"].value == "terse"
+    assert state.memory == {}, "a user-scoped write must not land in session memory"
+
+
+async def test_one_persons_memory_is_never_visible_to_another(repo):
+    """The leakage boundary. Personalization becomes a breach without it.
+
+    User memory is the first thing here selected by something other than
+    `session_id`, so it is the first place a wrong predicate shows one person
+    another's data rather than merely the wrong conversation.
+    """
+    mine = await repo.create_session(user_id="u1")
+    theirs = await repo.create_session(user_id="u2")
+
+    await repo.remember(mine.session_id, key="secret", value="mine alone", reason="r", scope="user")
+
+    assert (await repo.get_state(theirs.session_id)).user_memory == {}
+
+
+async def test_the_two_scopes_are_separate_collections(repo):
+    """One key may hold a standing fact and a different one for this conversation.
+
+    They must both survive storage. A store that let one overwrite the other
+    would silently destroy a memory the owner had deliberately kept, and
+    assembly's precedence rule would have nothing left to resolve.
+    """
+    session = await repo.create_session(user_id="u1")
+
+    await repo.remember(session.session_id, key="tone", value="standing", reason="r", scope="user")
+    await repo.remember(session.session_id, key="tone", value="this one", reason="r")
+
+    state = await repo.get_state(session.session_id)
+    assert state.user_memory["tone"].value == "standing"
+    assert state.memory["tone"].value == "this one"
+
+
+async def test_forgetting_one_scope_leaves_the_other(repo):
+    """Dropping an override must not delete what it was overriding.
+
+    Those are different intentions and one call cannot mean both — a session
+    that stops overriding a standing preference wants the standing one back,
+    not gone.
+    """
+    session = await repo.create_session(user_id="u1")
+    await repo.remember(session.session_id, key="tone", value="standing", reason="r", scope="user")
+    await repo.remember(session.session_id, key="tone", value="this one", reason="r")
+
+    await repo.forget(session.session_id, key="tone")
+
+    state = await repo.get_state(session.session_id)
+    assert state.memory == {}
+    assert state.user_memory["tone"].value == "standing"
+
+
+async def test_a_proposal_can_be_activated_into_user_scope(repo):
+    """The human picks the scope at activation; the proposer never does.
+
+    A model able to mark its own suggestion user-scoped would be deciding that
+    something it wrote applies to every future conversation that person has.
+    """
+    first = await repo.create_session(user_id="u1")
+    second = await repo.create_session(user_id="u1")
+    await repo.propose(first.session_id, key="tone", value="terse", reason="r", source="model")
+
+    await repo.activate(first.session_id, source="model", key="tone", scope="user")
+
+    elsewhere = await repo.get_state(second.session_id)
+    assert elsewhere.user_memory["tone"].value == "terse"
+    assert elsewhere.user_memory["tone"].source == "model"
+    assert (await repo.get_state(first.session_id)).memory == {}
+
+
 async def test_transcript_and_working_state_do_not_disturb_each_other(repo):
     session = await repo.create_session(user_id="u1")
 

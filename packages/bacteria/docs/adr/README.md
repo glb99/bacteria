@@ -32,6 +32,8 @@ together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | [0018](0018-transcript-items-carry-their-run-id.md) | Stamp every transcript item with the id of the run that wrote it | Accepted |
 | [0019](0019-a-run-records-how-it-was-configured.md) | Record how each run was configured, as evidence rather than a runs table | Accepted |
 | [0020](0020-deterministic-evals-over-recorded-runs.md) | Judge recorded runs with deterministic checks, seeded rather than captured | Accepted |
+| [0021](0021-memory-is-scoped-to-a-session-or-a-user.md) | Scope memory to a session or a user, with the human choosing at activation | Accepted |
+| [0022](0022-memory-selection-is-a-named-strategy.md) | Make memory selection a named strategy that reports what it passed over | Accepted |
 
 ## Writing a new one
 

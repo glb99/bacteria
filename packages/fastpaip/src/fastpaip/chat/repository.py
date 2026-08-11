@@ -37,7 +37,10 @@ from typing import Any, Optional, cast
 
 from bacteria.session.store import (
     OWNER,
+    SESSION_SCOPE,
+    USER_SCOPE,
     MemoryEntry,
+    MemoryScope,
     Session,
     SessionState,
     TranscriptItem,
@@ -53,6 +56,7 @@ from fastpaip.chat.models import (
     ChatMemoryProposal,
     ChatSession,
     ChatTranscriptItem,
+    ChatUserMemoryEntry,
 )
 
 
@@ -129,6 +133,17 @@ class SqlSessionRepository:
                 select(ChatMemoryProposal).where(ChatMemoryProposal.session_id == session_id)
             )
         ).all()
+        # Selected by the owner of *this* session and by nothing else. This is
+        # the only query in the application that reaches rows not keyed by
+        # `session_id`, so it is the only one where a wrong predicate would show
+        # one person another's memory rather than merely the wrong conversation.
+        # `row.user_id` comes from the session already loaded above, which the
+        # route has already checked the caller owns.
+        user_memories = (
+            await self._db.exec(
+                select(ChatUserMemoryEntry).where(ChatUserMemoryEntry.user_id == row.user_id)
+            )
+        ).all()
 
         # Plain dataclasses, never the ORM rows themselves. See the module
         # docstring: this is the detached-read guarantee, not a formality.
@@ -164,6 +179,15 @@ class SqlSessionRepository:
                     created_at=_as_utc(entry.created_at),
                 )
                 for entry in memories
+            },
+            user_memory={
+                entry.key: MemoryEntry(
+                    value=entry.value["value"],
+                    reason=entry.reason,
+                    source=entry.source,
+                    created_at=_as_utc(entry.created_at),
+                )
+                for entry in user_memories
             },
             # Keyed by (source, key), matching the table's own primary key.
             # Which collection a row lands in is decided by which table it came
@@ -233,9 +257,22 @@ class SqlSessionRepository:
         return await self.get_state(session_id)
 
     async def remember(
-        self, session_id: str, key: str, value: Any, reason: str, source: str = OWNER
+        self,
+        session_id: str,
+        key: str,
+        value: Any,
+        reason: str,
+        source: str = OWNER,
+        scope: MemoryScope = SESSION_SCOPE,
     ) -> SessionState:
-        await self._require(session_id)
+        row = await self._require(session_id)
+
+        if scope == USER_SCOPE:
+            await self._write_user_memory(
+                row.user_id, key=key, value=value, reason=reason, source=source
+            )
+            await self._db.commit()
+            return await self.get_state(session_id)
 
         existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:
@@ -268,10 +305,15 @@ class SqlSessionRepository:
         await self._db.commit()
         return await self.get_state(session_id)
 
-    async def forget(self, session_id: str, key: str) -> SessionState:
-        await self._require(session_id)
+    async def forget(
+        self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE
+    ) -> SessionState:
+        row = await self._require(session_id)
 
-        existing = await self._db.get(ChatMemoryEntry, (session_id, key))
+        if scope == USER_SCOPE:
+            existing = await self._db.get(ChatUserMemoryEntry, (row.user_id, key))
+        else:
+            existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:
             await self._db.delete(existing)
             await self._db.commit()
@@ -307,7 +349,38 @@ class SqlSessionRepository:
         await self._db.commit()
         return await self.get_state(session_id)
 
-    async def activate(self, session_id: str, source: str, key: str) -> SessionState:
+    async def _write_user_memory(
+        self, user_id: str, key: str, value: Any, reason: str, source: str
+    ) -> None:
+        """Upsert one user-scoped entry. Does not commit.
+
+        Shared by ``remember`` and ``activate`` so the two cannot drift on
+        overwrite semantics — which is exactly how the session-scoped versions
+        drifted on ``created_at`` once already. Refreshing the timestamp is the
+        behaviour the assembly bound needs: it shows the most recent entries, so
+        a memory the owner just rewrote must not be at risk of ageing out.
+        """
+        existing = await self._db.get(ChatUserMemoryEntry, (user_id, key))
+        if existing is not None:
+            existing.value = {"value": value}
+            existing.reason = reason
+            existing.source = source
+            existing.created_at = datetime.now(timezone.utc)
+            self._db.add(existing)
+        else:
+            self._db.add(
+                ChatUserMemoryEntry(
+                    user_id=user_id,
+                    key=key,
+                    value={"value": value},
+                    reason=reason,
+                    source=source,
+                )
+            )
+
+    async def activate(
+        self, session_id: str, source: str, key: str, scope: MemoryScope = SESSION_SCOPE
+    ) -> SessionState:
         """Move a proposal into active memory, in one transaction.
 
         Both writes commit together or neither does. A partial application here
@@ -321,11 +394,23 @@ class SqlSessionRepository:
                 silently creating a memory from nothing, which would let a stale
                 review page conjure a fact nobody just read.
         """
-        await self._require(session_id)
+        row = await self._require(session_id)
 
         proposal = await self._db.get(ChatMemoryProposal, (session_id, source, key))
         if proposal is None:
             raise KeyError((source, key))
+
+        if scope == USER_SCOPE:
+            await self._write_user_memory(
+                row.user_id,
+                key=key,
+                value=proposal.value["value"],
+                reason=proposal.reason,
+                source=proposal.source,
+            )
+            await self._db.delete(proposal)
+            await self._db.commit()
+            return await self.get_state(session_id)
 
         existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:

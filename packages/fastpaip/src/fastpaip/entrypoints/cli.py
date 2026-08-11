@@ -17,6 +17,7 @@ import argparse
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from fastpaip.auth import keys
 from fastpaip.auth.service import issue_key, revoke_key
 from fastpaip.core import platform
 from fastpaip.core.db import get_engine
@@ -28,8 +29,16 @@ async def _issue(principal_id: str, label: str) -> int:
     async with AsyncSession(get_engine()) as session:
         token = await issue_key(session, principal_id=principal_id, label=label)
 
+    # The id is printed as well as the token because `revoke-key` takes the id,
+    # and it did not used to appear anywhere in this output -- so the only thing
+    # an operator had to copy was the one value revocation rejects. The id is
+    # the public half and safe to show, log, and keep.
+    parsed = keys.split(token)
+    key_id = parsed[0] if parsed else ""
+
     print(f"principal: {principal_id}")
     print(f"label:     {label}")
+    print(f"key id:    {key_id}   (use this to revoke)")
     print(f"key:       {token}")
     print()
     print("Store it now. Only a hash is kept, so this cannot be shown again.")
@@ -76,6 +85,16 @@ async def _evaluate(
 
 
 async def _revoke(key_id: str) -> int:
+    if keys.split(key_id) is not None:
+        # A whole key was passed where an id belongs. Refused rather than
+        # accepted, even though the id is trivially recoverable from it: this
+        # command is most often run *because* a key leaked, and quietly taking
+        # the full token would put the secret in shell history at exactly that
+        # moment. The token is not echoed back here for the same reason.
+        print("that is a full key, not a key id.")
+        print("pass the middle segment -- `fp_<key id>_<secret>` -- shown as 'key id' at issue.")
+        return 1
+
     async with AsyncSession(get_engine()) as session:
         row = await revoke_key(session, key_id=key_id)
 
@@ -96,7 +115,10 @@ def main() -> int:
     issue.add_argument("--label", default="", help="human-readable note, for logs")
 
     revoke = commands.add_parser("revoke-key", help="make a key unusable")
-    revoke.add_argument("key_id", help="the public half of the key, as printed at issue")
+    revoke.add_argument(
+        "key_id",
+        help="the key id shown at issue -- the middle segment of fp_<key id>_<secret>, not the whole key",
+    )
 
     evaluate_cmd = commands.add_parser("eval", help="judge recorded runs against a policy")
     evaluate_cmd.add_argument(

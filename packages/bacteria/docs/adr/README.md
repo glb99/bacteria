@@ -31,6 +31,7 @@ together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | [0017](0017-memory-is-proposed-and-confirmed.md) | Separate proposing a memory from activating one | Accepted |
 | [0018](0018-transcript-items-carry-their-run-id.md) | Stamp every transcript item with the id of the run that wrote it | Accepted |
 | [0019](0019-a-run-records-how-it-was-configured.md) | Record how each run was configured, as evidence rather than a runs table | Accepted |
+| [0020](0020-deterministic-evals-over-recorded-runs.md) | Judge recorded runs with deterministic checks, seeded rather than captured | Accepted |
 
 ## Writing a new one
 

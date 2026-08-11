@@ -353,15 +353,20 @@ standing liability now that a host persists it.
 
 ### Evaluation and feedback
 
-No behavioral eval suite, no release gate, no online monitoring. The test suite
-covers architecture, not agent quality.
+Deterministic evaluation exists, in the host rather than here — the agent
+produces the evidence, the application judges it
+([ADR 0020](adr/0020-deterministic-evals-over-recorded-runs.md), implemented in
+`fastpaip.evaluation`). Five checks read recorded runs and the gate fails on any
+finding.
 
-What changed is that the deterministic half is now *writable*. A check like
-"every run used the pinned model" or "no run was offered a tool outside the
-approved set" is a query over `run_meta` rather than a property nobody kept —
-run against stored evidence, no model judge involved. Nothing runs those checks
-on a schedule or blocks anything on their result, which is the difference
-between having the evidence and having a loop.
+What that is not: those runs are seeded fixtures, so the checks verify the
+system still behaves as designed rather than how it behaves in front of people.
+Rubric scoring and model-graded judgment — the article's other two kinds — are
+absent, and both need calibration and a human rather than a database.
+
+The feedback loop is still missing entirely. Nothing turns a finding into a
+dataset item, a prompt change, or a policy change; the gate blocking on findings
+is one end of that loop with nothing attached to the other.
 
 ---
 

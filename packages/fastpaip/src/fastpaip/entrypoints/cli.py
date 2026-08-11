@@ -20,6 +20,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from fastpaip.auth.service import issue_key, revoke_key
 from fastpaip.core import platform
 from fastpaip.core.db import get_engine
+from fastpaip.evaluation.checks import Policy, evaluate
+from fastpaip.evaluation.runs import load_runs
 
 
 async def _issue(principal_id: str, label: str) -> int:
@@ -32,6 +34,45 @@ async def _issue(principal_id: str, label: str) -> int:
     print()
     print("Store it now. Only a hash is kept, so this cannot be shown again.")
     return 0
+
+
+async def _evaluate(
+    session_id: str | None, models: list[str], tools: list[str], max_failure_rate: float
+) -> int:
+    """Judge recorded runs and report, exiting non-zero on any finding.
+
+    Reads the database and writes nothing, so it is safe to point at
+    production — which is the case it exists for. The gate drives the same
+    checks over seeded fixtures instead; see
+    :mod:`fastpaip.evaluation.fixtures` for why those are not the same claim.
+    """
+    async with AsyncSession(get_engine()) as session:
+        runs = await load_runs(session, session_id=session_id)
+
+    policy = Policy(
+        expected_models=frozenset(models),
+        approved_tools=frozenset(tools),
+        max_failure_rate=max_failure_rate,
+    )
+    report = evaluate(runs, policy)
+
+    print(f"runs checked: {report.runs_checked}")
+    if not runs:
+        # Said out loud rather than reported as a pass. Zero runs satisfies
+        # every check by having nothing to violate them, and an empty database
+        # printing "no findings" is the most misleading output this could give.
+        print("no runs found — nothing was judged")
+        return 1
+
+    for finding in report.findings:
+        where = f" [{finding.run_id}]" if finding.run_id else ""
+        print(f"FAIL {finding.check}{where}: {finding.detail}")
+
+    if report.passed:
+        print("no findings")
+        return 0
+    print(f"\n{len(report.findings)} finding(s)")
+    return 1
 
 
 async def _revoke(key_id: str) -> int:
@@ -57,9 +98,34 @@ def main() -> int:
     revoke = commands.add_parser("revoke-key", help="make a key unusable")
     revoke.add_argument("key_id", help="the public half of the key, as printed at issue")
 
+    evaluate_cmd = commands.add_parser("eval", help="judge recorded runs against a policy")
+    evaluate_cmd.add_argument(
+        "--session", default=None, help="restrict to one session; omit to judge every run"
+    )
+    evaluate_cmd.add_argument(
+        "--model",
+        action="append",
+        default=[],
+        help="a model runs are allowed to have used; repeatable. Omitted, the check is skipped",
+    )
+    evaluate_cmd.add_argument(
+        "--tool",
+        action="append",
+        default=[],
+        help="a tool runs are allowed to have been offered; repeatable",
+    )
+    evaluate_cmd.add_argument(
+        "--max-failure-rate",
+        type=float,
+        default=1.0,
+        help="proportion of runs allowed to have failed, 0 to 1",
+    )
+
     args = parser.parse_args()
     if args.command == "issue-key":
         return platform.run(_issue(args.principal_id, args.label or args.principal_id))
+    if args.command == "eval":
+        return platform.run(_evaluate(args.session, args.model, args.tool, args.max_failure_rate))
     return platform.run(_revoke(args.key_id))
 
 

@@ -64,6 +64,17 @@ fmt:
     uvx {{ RUFF }} check --fix
     uvx {{ RUFF }} format
 
+# Judge the runs recorded in the configured database (ADR 0020)
+#
+# Reads only, so it is safe to point at production -- which is the case it
+# exists for. Deliberately not part of `check-all`: the gate judges seeded
+# fixtures, in tests/test_evaluation.py, because a gate that depends on what a
+# live database happens to contain is not a gate. Those are different claims and
+# the report should not be able to be mistaken for the other one.
+[group('qa')]
+eval *args:
+    uv run fastpaip-admin eval {{ args }}
+
 # Check types
 [group('qa')]
 typing:

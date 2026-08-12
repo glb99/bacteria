@@ -81,6 +81,11 @@ With the GitHub CLI authenticated this writes `FASTAPI_CLOUD_TOKEN` and
 `FASTAPI_CLOUD_APP_ID` itself; otherwise it prints them for
 **Settings → Secrets and variables → Actions**.
 
+**Until all three exist the workflow skips, on purpose.** It reports a notice and
+a job summary naming what is missing, rather than failing — a `main` that is red
+because a dashboard is half-configured teaches everyone to ignore the red. It
+does not report success for a deploy that did not happen either.
+
 Add `BACTERIA_DATABASE_URL` there too — the workflow migrates before deploying,
 so the runner needs it. Put all three in a `production` environment, which is
 what the workflow's `environment:` names.

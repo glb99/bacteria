@@ -50,14 +50,60 @@ jobs:
           version: "0.11.18"
           enable-cache: true
 
-      - run: uv sync --all-packages
+      # Deployment is skipped, loudly, until the three secrets exist.
+      #
+      # The alternative was letting it fail, which is defensible right up until
+      # you look at what it does to everything else: `main` goes red on the
+      # first push and stays red until someone finishes a dashboard setup that
+      # has nothing to do with the code. This repository already has an opinion
+      # about that -- "a gate nobody can turn green is a gate nobody consults",
+      # written in pyproject.toml about an unpinned linter, and it applies
+      # exactly here.
+      #
+      # Skipping quietly would be its own lie, so it is not quiet: a notice, a
+      # job summary naming what is missing, and no green tick claiming a deploy
+      # happened.
+      - name: Is deployment configured?
+        id: configured
+        env:
+          TOKEN: ${{ secrets.FASTAPI_CLOUD_TOKEN }}
+          APP_ID: ${{ secrets.FASTAPI_CLOUD_APP_ID }}
+          DB: ${{ secrets.BACTERIA_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "$TOKEN" ]  || missing+=("FASTAPI_CLOUD_TOKEN")
+          [ -n "$APP_ID" ] || missing+=("FASTAPI_CLOUD_APP_ID")
+          [ -n "$DB" ]     || missing+=("BACTERIA_DATABASE_URL")
 
-      # `--locked`, so a lockfile that disagrees with the pyprojects fails here
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Deploy skipped::Not configured yet: ${missing[*]}"
+          {
+            echo "### Deploy skipped"
+            echo
+            echo "Nothing was deployed. These repository secrets are not set:"
+            echo
+            for name in "${missing[@]}"; do echo "- \`$name\`"; done
+            echo
+            echo "See [docs/DEPLOYMENT.md](../blob/main/docs/DEPLOYMENT.md)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - run: uv sync --all-packages
+        if: steps.configured.outputs.ready == 'true'
+
+      # `--check`, so a lockfile that disagrees with the pyprojects fails here
       # rather than deploying versions nothing tested.
       - name: Check the lockfile is current
+        if: steps.configured.outputs.ready == 'true'
         run: uv lock --check
 
       - name: Apply migrations
+        if: steps.configured.outputs.ready == 'true'
         env:
           BACTERIA_DATABASE_URL: ${{ secrets.BACTERIA_DATABASE_URL }}
         run: uv run just migrate
@@ -66,6 +112,7 @@ jobs:
       # configured with and what makes `[tool.fastapi] entrypoint` in
       # backend/app/pyproject.toml resolvable without a --path flag.
       - name: Deploy
+        if: steps.configured.outputs.ready == 'true'
         working-directory: backend/app
         env:
           FASTAPI_CLOUD_TOKEN: ${{ secrets.FASTAPI_CLOUD_TOKEN }}

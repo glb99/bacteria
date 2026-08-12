@@ -1,8 +1,32 @@
 [project]
 name = "bacteria"
-version = "0.1.0"
+# Real semver, unlike the application that hosts it. This package is the
+# vendorable half -- it declares protocols other code implements, so a consumer
+# needs to be able to say which shape of `SessionRepository` it was written
+# against. `fastpaip` stays at "0" because nothing consumes it.
+#
+# 0.2.0 rather than 0.1.1: since 0.1.0 the package went async throughout
+# (ADR 0014), grew `session/protocol.py`, and added three methods to the store
+# for the proposal lifecycle. Every one of those is a breaking change to an
+# implementor, and pre-1.0 the minor is where breaking changes go.
+version = "0.2.0"
 description = "A small AI agent built as infrastructure: layered ownership boundaries, kept minimal enough to read."
+readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+# Its own copy, not a reference to the root one. `license-files` globs cannot
+# escape the project directory, and a wheel that names a licence it does not
+# ship is worse than one that names none.
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
 dependencies = [
     "anthropic>=0.40.0",
     "anyio>=4.6.0",

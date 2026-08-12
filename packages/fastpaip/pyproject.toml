@@ -1,7 +1,16 @@
 [project]
 name = "fastpaip"
+# Deliberately unversioned, where `bacteria` is not. Nothing consumes this
+# package -- it is a deployed application, and its releases are commits. Giving
+# it a semver would invite the question "compatible with what?", which has no
+# answer.
 version = "0"
+description = "An HTTP service hosting the bacteria agent: durable conversations and a bulk import pipeline."
+# No `readme`. The root README describes the workspace, and a path escaping this
+# directory is not portable across build backends -- see `license-files` below.
 requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
     "bacteria",
     "fastapi[standard]",

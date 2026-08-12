@@ -1,0 +1,59 @@
+# Hooks run by `prek` (a faster pre-commit), installed with `just hooks`.
+#
+# What belongs here and what does not: a hook must be fast enough that nobody
+# disables it, and must fail only on things that are wrong rather than merely
+# unusual. The test suite is not here for the first reason -- it needs Postgres
+# and takes tens of seconds. `just check-all` is where the slow gates live, and
+# CI is where they are enforced.
+#
+# Third-party hooks are pinned to a commit SHA with the tag in a comment. A
+# mutable tag means the hook that runs on your machine is not the hook that ran
+# on mine, which is the same failure the toolchain pins in pyproject.toml exist
+# to prevent.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      # `uv run`, not `language: python`, so every hook resolves the version in
+      # uv.lock rather than one prek installs into an environment of its own.
+      # Two pinned copies of ruff that can disagree is worse than none.
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --force-exclude --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types: [python]
+        require_serial: true
+
+      - id: ty
+        name: ty check
+        entry: uv run ty check --python .venv packages/bacteria/src packages/fastpaip/src
+        language: system
+        types: [python]
+        # Whole-project analysis: passing it the staged files only would let a
+        # change break an importer it does not itself touch.
+        pass_filenames: false
+        require_serial: true
+
+      - id: zizmor
+        name: zizmor
+        entry: uv run zizmor .github/workflows
+        language: system
+        files: ^\.github/workflows/
+        pass_filenames: false
+        require_serial: true

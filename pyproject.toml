@@ -13,11 +13,23 @@ package = false
 members = ["packages/*"]
 
 [dependency-groups]
+# The toolchain is a dependency of the workspace, not a string in the Justfile.
+# It used to be the latter: `uvx ruff@0.16.2`, pinned by hand because an
+# unpinned `uvx` resolves the newest release every time and turned `check-all`
+# red between two runs with no commit in between. The pin fixed that and left a
+# second problem -- a version nothing tracked, bumped only when someone noticed.
+# In the lockfile it is pinned *and* dependabot proposes the bump as a reviewable
+# PR that CI runs before anyone merges it.
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "coverage>=7.6",
     "fastapi[standard]",
+    "ruff==0.16.2",
+    "ty==0.0.70",
+    "prek>=0.4.11,<1.0.0",
+    "zizmor>=1.28.0",
+    "rust-just>=1.58.0",
 ]
 
 [tool.ruff]

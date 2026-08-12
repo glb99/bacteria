@@ -4,13 +4,17 @@ PORT := env("PORT", "8000")
 ARGS_TEST := env("_UV_RUN_ARGS_TEST", "")
 ARGS_SERVE := env("_UV_RUN_ARGS_SERVE", "")
 
-# Pinned, because `uvx ruff` resolves the newest release every time and these
-# are gates. An unpinned linter means `check-all` can turn red between two runs
-# with no commit in between -- which is how it stayed red here long enough for
-# everyone to route around it. Bump deliberately, with the diff in its own
-# commit.
-RUFF := "ruff@0.16.2"
-TY := "ty@0.0.70"
+# The linter and type checker used to be pinned here as `ruff@0.16.2` strings
+# and run with `uvx`. They are workspace dev dependencies now, so `uv run` picks
+# them out of the lockfile.
+#
+# The original reason for pinning still holds and is why they are not simply
+# unpinned: `uvx ruff` resolves the newest release every time, so an unpinned
+# gate turns red between two runs with no commit in between -- which is how it
+# stayed red here long enough for everyone to route around it. The lockfile pins
+# them just as hard and adds the part a string constant could not: dependabot
+# proposes the bump, and CI runs the new version against the code before anyone
+# merges it. A pin nobody tracks only gets bumped when someone notices.
 
 
 @_:
@@ -23,8 +27,15 @@ test *args:
     just test-agent {{ args }}
     just test-app {{ args }}
 
-# Run the agent's tests alone. Note this shares the workspace venv, so it does
-# not prove independence by itself -- test_package_boundaries.py does, statically.
+# Note this shares the workspace venv, so it does not prove independence by
+# itself -- test_package_boundaries.py does that, statically.
+#
+# `just` uses the last contiguous comment line as a recipe's description, so the
+# one-line summary goes immediately above the recipe and the reasoning goes
+# above a blank line. Without the blank line `just --list` shows the tail of the
+# explanation, which is how this file's listing came to read as fragments.
+
+# Run the agent's tests alone
 [group('qa')]
 test-agent *args:
     uv run --package bacteria {{ ARGS_TEST }} -m pytest packages/bacteria/tests {{ args }}
@@ -55,22 +66,34 @@ _cov *args:
 # Check lint and formatting. Reports; changes nothing -- see `just fmt`.
 [group('qa')]
 lint:
-    uvx {{ RUFF }} check
-    uvx {{ RUFF }} format --check
+    uv run ruff check
+    uv run ruff format --check
 
 # Apply what `lint` reports, where it can be applied automatically
 [group('qa')]
 fmt:
-    uvx {{ RUFF }} check --fix
-    uvx {{ RUFF }} format
+    uv run ruff check --fix
+    uv run ruff format
 
-# Judge the runs recorded in the configured database (ADR 0020)
-#
+# Run once per clone. `-f` replaces an older hook if one is already installed.
+
+# Install the git pre-commit hook, so lint runs before a commit not after CI
+[group('qa')]
+hooks:
+    uv run prek install -f
+
+# Run every pre-commit hook over the whole tree, not just staged files
+[group('qa')]
+hooks-all:
+    uv run prek run --all-files
+
 # Reads only, so it is safe to point at production -- which is the case it
 # exists for. Deliberately not part of `check-all`: the gate judges seeded
 # fixtures, in tests/test_evaluation.py, because a gate that depends on what a
 # live database happens to contain is not a gate. Those are different claims and
 # the report should not be able to be mistaken for the other one.
+
+# Judge the runs recorded in the configured database (ADR 0020)
 [group('qa')]
 eval *args:
     uv run fastpaip-admin eval {{ args }}
@@ -78,23 +101,42 @@ eval *args:
 # Check types
 [group('qa')]
 typing:
-    uvx {{ TY }} check --python .venv packages/bacteria/src packages/fastpaip/src
+    uv run ty check --python .venv packages/bacteria/src packages/fastpaip/src
 
-# Perform all checks
-#
+# Catches the class of bug that does not fail a run: an unpinned action, a
+# credential left available to a step that does not need it, a
+# `pull_request_target` that checks out untrusted code. None of those break CI --
+# they break trust in it.
+
+# Lint the GitHub Actions workflows for security mistakes
+[group('qa')]
+audit-ci:
+    uv run zizmor .github/workflows
+
 # `test-agent` is listed explicitly because `cov` does not cover it. Coverage
 # measures the application only, deliberately (ADR 0013) -- but "excluded from
 # the coverage report" quietly became "not run by the gate", so the agent's
 # architectural fitness functions, the tests most worth running before shipping,
 # were the ones this recipe skipped.
-[group('qa')]
-check-all: lint test-agent cov typing
+#
+# This is the same set CI runs, in the same order, and that is the point: a gate
+# you can only satisfy by pushing is a gate that trains people to push.
 
+# Perform all checks
+[group('qa')]
+check-all: lint test-agent cov typing audit-ci
+
+
+# Names the service rather than starting everything in the file, because
+# `compose.yml` will gain the application's own services once there is an image
+# to run -- and a bare `up` would then start a container of the code you are
+# about to edit. Kept out of the recipe body because `just` echoes body comments
+# on every run.
 
 # Start Postgres and wait until it is actually accepting queries
 [group('db')]
 db-up:
-    docker compose up -d --wait
+    docker compose up -d --wait postgres
 
 # Stop Postgres, keeping its data
 [group('db')]

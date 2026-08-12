@@ -1,0 +1,30 @@
+# Line endings are decided here, in the index, and not by whoever committed last.
+#
+# This repository is developed on Windows and runs on Linux, and had no rule
+# until now: whether a file was stored CRLF or LF depended on what `core.autocrlf`
+# happened to be when someone added it. A `mixed-line-ending` pre-commit hook was
+# tried first and was the wrong tool -- it rewrites the *working tree*, which
+# fights autocrlf and turned a six-file change into a 117-file one.
+#
+# `text=auto` stores text as LF and checks it out however the platform wants,
+# which is the same guarantee applied in the right place. Blobs committed as CRLF
+# before this file existed are left alone deliberately: git compares them
+# normalized, so they no longer show as modified, and rewriting a hundred files
+# to fix nothing observable would cost more history than it buys.
+* text=auto
+
+# These are read by Linux, always, and a CR is not whitespace to a kernel.
+# A shell script with CRLF fails as `bad interpreter: /usr/bin/env bash^M`,
+# which names the interpreter rather than the line ending and sends everyone
+# looking in the wrong place. The container in `Dockerfile` runs these.
+*.sh            text eol=lf
+Justfile        text eol=lf
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+
+# Generated and never hand-edited. Marking it keeps a lockfile bump from
+# dominating the diff view on a pull request.
+uv.lock         linguist-generated=true -diff
+
+# Excalidraw is JSON that its editor rewrites wholesale; diffing it helps nobody.
+*.excalidraw    -diff

@@ -6,13 +6,21 @@
 # and fail in production.
 #
 #   docker compose up -d      (or: just db-up)
+# Pinned rather than inferred. Compose otherwise names the project after the
+# directory it was cloned into, so containers, the network, and the volume all
+# take that name -- which meant they were still called `fastpaip-*` after the
+# rename, and would differ again for anyone who cloned into a differently named
+# directory. The volume name is the part that matters: change it and the
+# database appears to have been wiped.
+name: bacteria
+
 services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: fastpaip
-      POSTGRES_PASSWORD: fastpaip
-      POSTGRES_DB: fastpaip
+      POSTGRES_USER: bacteria
+      POSTGRES_PASSWORD: bacteria
+      POSTGRES_DB: bacteria
     ports:
       # Published so the application, migrations, and tests all reach it the
       # same way, whether or not they run in a container themselves.
@@ -22,7 +30,7 @@ services:
     healthcheck:
       # `just db-up` waits on this, so a migration cannot race a database that
       # is listening but not yet accepting queries.
-      test: ["CMD-SHELL", "pg_isready -U fastpaip -d fastpaip"]
+      test: ["CMD-SHELL", "pg_isready -U bacteria -d bacteria"]
       interval: 2s
       timeout: 3s
       retries: 15

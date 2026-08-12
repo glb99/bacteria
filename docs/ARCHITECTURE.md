@@ -1,7 +1,7 @@
 # Architecture
 
-Two packages. `bacteria` is the agent — layered by ownership boundary, knowing
-nothing about databases, HTTP, or this application. `fastpaip` is the
+Two packages. `bacteria.agent` is the agent — layered by ownership boundary, knowing
+nothing about databases, HTTP, or this application. `bacteria.app` is the
 application that hosts it. The dependency runs one way, and what connects them
 is a protocol the agent declares and the application implements.
 
@@ -23,9 +23,9 @@ sequenceDiagram
     participant Auth as auth/dependencies
     participant Access as chat/access
     participant Service as chat/service
-    participant Runtime as bacteria/runtime
-    participant Context as bacteria/context
-    participant Model as bacteria/model
+    participant Runtime as agent/runtime
+    participant Context as agent/context
+    participant Model as agent/model
     participant Repo as chat/repository
     participant DB as PostgreSQL
     participant Provider as Anthropic / Gemini
@@ -177,7 +177,7 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     note over Operator,DB: alembic upgrade head has already run —<br/>nothing here creates a schema
-    Operator->>CLI: fastpaip-admin issue-key acme-corp
+    Operator->>CLI: bacteria-admin issue-key acme-corp
     CLI->>Keys: generate()
     Keys-->>CLI: token, key_id, sha256(secret)
     CLI->>Repo: create(key_id, secret_hash, principal_id)
@@ -196,7 +196,7 @@ database, which is the right bar.
 
 | Boundary | Enforced by | What breaks if it erodes |
 |---|---|---|
-| The agent knows nothing of this app | `bacteria` imports no ORM, no web framework | The agent stops being vendorable elsewhere |
+| The agent knows nothing of this app | `bacteria.agent` imports no ORM, no web framework | The agent stops being vendorable elsewhere |
 | Authentication ≠ authorization | separate packages, `auth/` vs `chat/access.py` | "You know the id" becomes "you may read it" |
 | The runtime implements nothing | every step delegates | Ownership questions stop having answers |
 | Only the store writes turn state | one `commit` path, detached reads | State edited from outside, with no trace |

@@ -4,9 +4,9 @@
 
 **Discuss first if the change touches a boundary.** The boundaries are listed in
 [`CLAUDE.md`](CLAUDE.md) and, for the agent, in
-[`packages/bacteria/CLAUDE.md`](packages/bacteria/CLAUDE.md). A change that
+[`backend/agent/CLAUDE.md`](backend/agent/CLAUDE.md). A change that
 crosses one, adds a dependency, or commits to infrastructure gets an
-[ADR](packages/bacteria/docs/adr/) before it gets an implementation — the record
+[ADR](backend/agent/docs/adr/) before it gets an implementation — the record
 is the deliverable, not paperwork attached to one.
 
 Small internal changes need none of that ceremony. Fixing a bug inside a module
@@ -55,7 +55,7 @@ If it is a judgment call with no runtime behaviour — "we chose X because Y was
 premature" — it gets an ADR and no test.
 
 There is no coverage gate on the agent, on purpose
-([ADR 0013](packages/bacteria/docs/adr/0013-test-load-bearing-invariants-only.md)).
+([ADR 0013](backend/agent/docs/adr/0013-test-load-bearing-invariants-only.md)).
 Do not add one without reversing that decision deliberately.
 
 **Test docstrings state the invariant and the consequence of breaking it.** A test
@@ -112,15 +112,15 @@ memory-proposals    tests-on-postgres    transcript-ordering
 | Workflows | Kebab-case, verb-first: `test.yml`, `pre-commit.yml`. |
 | Compose files | `compose.yml` is shared; anything else is explicitly combined with `-f`. |
 | Migrations | Alembic's generated slug, kept descriptive: `unique_transcript_position_per_session`. |
-| Env vars | `FASTPAIP_*` for this application's settings, unprefixed for provider SDK credentials. The two are read by different things — see [`.env.example`](.env.example) and [`core/settings.py`](packages/fastpaip/src/fastpaip/core/settings.py). |
+| Env vars | `BACTERIA_*` for this application's settings, unprefixed for provider SDK credentials. The two are read by different things — see [`.env.example`](.env.example) and [`core/settings.py`](backend/app/src/bacteria/app/core/settings.py). |
 
 ### Versions
 
-`bacteria` carries real semver: it is the vendorable half, declaring protocols
+`bacteria-agent` carries real semver: it is the vendorable half, declaring protocols
 other code implements, so a consumer needs to know which shape it was written
 against. Pre-1.0, breaking changes to an implementor go in the minor.
 
-`fastpaip` stays at `"0"`. Nothing consumes it — it is a deployed application and
+`bacteria-app` stays at `"0"`. Nothing consumes it — it is a deployed application and
 its releases are commits.
 
 ### Comments and docstrings
@@ -136,8 +136,8 @@ only to do that; keep them accurate rather than tidy.
 Two grep-discoverable markers are load-bearing:
 
 ```bash
-grep -rn "Not built:" packages/*/src   # a deliberate gap: what, why, and where it goes
-grep -rn "Invariant:" packages/*/src   # an enforced, tested property
+grep -rn "Not built:" backend/*/src   # a deliberate gap: what, why, and where it goes
+grep -rn "Invariant:" backend/*/src   # an enforced, tested property
 ```
 
 A `Not built:` block describing something that now exists, or an `Invariant:` with

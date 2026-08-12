@@ -42,7 +42,7 @@ repos:
 
       - id: ty
         name: ty check
-        entry: uv run ty check --python .venv packages/bacteria/src packages/fastpaip/src
+        entry: uv run ty check --python .venv backend/agent/src backend/app/src
         language: system
         types: [python]
         # Whole-project analysis: passing it the staged files only would let a

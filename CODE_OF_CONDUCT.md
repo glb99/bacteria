@@ -60,7 +60,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the maintainers privately, using
-[GitHub's private reporting](https://github.com/glb99/fastpaip/security/advisories/new)
+[GitHub's private reporting](https://github.com/glb99/bacteria/security/advisories/new)
 or by contacting the repository owner through their GitHub profile. All
 complaints will be reviewed and investigated promptly and fairly.
 

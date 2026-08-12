@@ -1,17 +1,24 @@
-# fastpaip
+# bacteria
 
-[![Test](https://github.com/glb99/fastpaip/actions/workflows/test.yml/badge.svg)](https://github.com/glb99/fastpaip/actions/workflows/test.yml)
-[![Smoke](https://github.com/glb99/fastpaip/actions/workflows/smoke.yml/badge.svg)](https://github.com/glb99/fastpaip/actions/workflows/smoke.yml)
+[![Test](https://github.com/glb99/bacteria/actions/workflows/test.yml/badge.svg)](https://github.com/glb99/bacteria/actions/workflows/test.yml)
+[![Smoke](https://github.com/glb99/bacteria/actions/workflows/smoke.yml/badge.svg)](https://github.com/glb99/bacteria/actions/workflows/smoke.yml)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](.python-version)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 An HTTP service built around a small AI agent — conversations that survive a
 restart, and a bulk import pipeline — as a uv workspace of two packages.
 
-| Package | What it is |
-|---|---|
-| [`packages/bacteria`](packages/bacteria) | The agent. Layered by ownership boundary, self-contained, independently runnable and testable. |
-| [`packages/fastpaip`](packages/fastpaip) | The application that hosts it — HTTP API, persistence, credentials, features. |
+| Package | Imported as | What it is |
+|---|---|---|
+| [`backend/agent`](backend/agent) | `bacteria.agent` | The agent. Layered by ownership boundary, self-contained, independently runnable and testable. |
+| [`backend/app`](backend/app) | `bacteria.app` | The application that hosts it — HTTP API, persistence, credentials, features. |
+
+Both live under the `bacteria` namespace, which is a
+[PEP 420 namespace package](https://peps.python.org/pep-0420/) and therefore has
+no `__init__.py` — an `__init__.py` in either distribution would claim the
+directory outright and hide the other. They are released separately:
+`bacteria-agent` carries real semver because things implement its protocols;
+`bacteria-app` stays at `0` because nothing consumes it.
 
 The split is enforced by packaging rather than by discipline: the application
 depends on the agent, and the agent knows nothing about the application. It has
@@ -47,7 +54,7 @@ timestamp came back naive under test and aware in production.
 Issue yourself a credential — an operator command, not an endpoint:
 
 ```bash
-uv run fastpaip-admin issue-key acme-corp --label "local dev"
+uv run bacteria-admin issue-key acme-corp --label "local dev"
 ```
 
 It prints the key once. Only a hash is stored, so it cannot be shown again.
@@ -66,11 +73,11 @@ just worker
 Then have a conversation:
 
 ```bash
-curl -sX POST localhost:8000/chat/sessions -H "Authorization: Bearer $FASTPAIP_KEY"
+curl -sX POST localhost:8000/chat/sessions -H "Authorization: Bearer $BACTERIA_KEY"
 ```
 
 ```bash
-curl -sX POST localhost:8000/chat/sessions/$SESSION/turns -H "Authorization: Bearer $FASTPAIP_KEY" -H 'Content-Type: application/json' -d '{"text":"hello"}'
+curl -sX POST localhost:8000/chat/sessions/$SESSION/turns -H "Authorization: Bearer $BACTERIA_KEY" -H 'Content-Type: application/json' -d '{"text":"hello"}'
 ```
 
 `just --list` shows the rest. Interactive API docs are at `/docs` while the
@@ -134,10 +141,11 @@ bulk API and SQS's partial batch response report position or id.
 ## Layout
 
 ```
-packages/
-  bacteria/           the agent — see its own README and docs/adr/
-  fastpaip/
-    src/fastpaip/
+backend/
+  agent/              bacteria-agent — see its own README and docs/adr/
+    src/bacteria/agent/
+  app/                bacteria-app
+    src/bacteria/app/
       auth/           API keys and principals — who is calling
       core/           protocols, handlers, adapters, settings, db — cross-cutting
       chat/           conversations with the agent, durably stored
@@ -145,6 +153,7 @@ packages/
       entrypoints/    asgi · cli · worker — configuration only, no logic
     migrations/       alembic; the schema lives here, not in the app
     tests/
+frontend/             not built yet; frontend/README.md says what it needs first
 docs/
   ARCHITECTURE.md     sequence diagrams of each path through the system
   MIGRATION.md        the plan this structure came from, and what is left of it
@@ -181,7 +190,7 @@ cheap to fix.
 coverage for that reason. If an entrypoint ever looks like it deserves a test,
 that is the signal it holds logic belonging to a feature.
 
-**The application never imports `bacteria.interfaces`.** That package is the
+**The application never imports `bacteria.agent.interfaces`.** That package is the
 agent's own composition root, for running it standalone. The application
 composes what it needs in `entrypoints/`. Two composition roots is correct —
 they compose different processes — and this rule is what stops them becoming one
@@ -189,7 +198,7 @@ tangle.
 
 **The agent is excluded from coverage.** Its suite is architectural fitness
 functions rather than line coverage, and the unevenness is deliberate — see
-[ADR 0013](packages/bacteria/docs/adr/0013-test-load-bearing-invariants-only.md).
+[ADR 0013](backend/agent/docs/adr/0013-test-load-bearing-invariants-only.md).
 Measuring it produces a number whose only use is tempting someone to write the
 tests that record exists to decline.
 
@@ -205,7 +214,7 @@ codebase is otherwise organized against, and it is why the queue is not Redis.
 See `core/jobs.py`.
 
 **Entrypoints choose the event loop.** On Windows psycopg cannot run on the
-default `ProactorEventLoop`, and uvicorn hardcodes it — so `fastpaip-serve`
+default `ProactorEventLoop`, and uvicorn hardcodes it — so `bacteria-serve`
 drives the server itself rather than calling `uvicorn.run()`. All of that is in
 `core/platform.py`; nothing else needs to know.
 

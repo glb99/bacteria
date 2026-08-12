@@ -1,0 +1,63 @@
+[project]
+# Distribution `bacteria-app`, imported as `bacteria.app`. See the note on the
+# namespace in `backend/agent/pyproject.toml`.
+name = "bacteria-app"
+# Deliberately unversioned, where `bacteria-agent` is not. Nothing consumes this
+# package -- it is a deployed application, and its releases are commits. Giving
+# it a semver would invite the question "compatible with what?", which has no
+# answer.
+version = "0"
+description = "An HTTP service hosting the agent: durable conversations and a bulk import pipeline."
+# No `readme`. The root README describes the workspace, and a path escaping this
+# directory is not portable across build backends -- see `license-files` below.
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "bacteria-agent",
+    "fastapi[standard]",
+    "granian",
+    "sqlmodel",
+    "procrastinate",
+    "psycopg[binary,pool]",
+    "alembic",
+    "pydantic-settings",
+    # Declared even though `bacteria-agent` depends on it too. This package imports
+    # `dotenv` directly, and leaning on a transitive dependency means that the
+    # day the agent stops needing it, this breaks in a way that points at the
+    # wrong package.
+    "python-dotenv",
+]
+
+[project.scripts]
+bacteria-admin = "bacteria.app.entrypoints.cli:main"
+bacteria-serve = "bacteria.app.entrypoints.asgi:main"
+bacteria-worker = "bacteria.app.entrypoints.queue_worker:main"
+
+[tool.fastapi]
+# Lets `fastapi deploy` (run from backend/app, the Application Directory
+# set in the FastAPI Cloud dashboard) find the ASGI app without a --path flag.
+# The `app` object itself lives in entrypoints/asgi.py alongside `main`, which
+# only Windows dev needs -- see that module's docstring.
+entrypoint = "bacteria.app.entrypoints.asgi:app"
+
+[tool.uv.sources]
+# Resolved from backend/agent rather than an index. The agent is developed
+# alongside this application, not consumed as a release.
+bacteria-agent = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Same namespace as the agent, and for the same reason -- neither package may
+# own `bacteria/` outright. See `backend/agent/pyproject.toml`.
+module-name = "bacteria.app"
+namespace = true
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+asyncio_mode = "auto"

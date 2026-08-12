@@ -5,30 +5,30 @@
 
 !pyproject.toml
 !uv.lock
-!packages/
+!backend/
 !scripts/
 
 # Re-excluded from inside the directories added above. `.venv` is the important
 # one: it holds Linux-incompatible binaries when built on Windows or macOS, and
 # copying it in would shadow the venv the image builds and fail at import with a
 # message about a shared object rather than about the copy.
-packages/**/.venv/
-packages/**/__pycache__/
-packages/**/*.py[cod]
-packages/**/.pytest_cache/
-packages/**/.ruff_cache/
-packages/**/.mypy_cache/
-packages/**/dist/
+backend/**/.venv/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/**/.pytest_cache/
+backend/**/.ruff_cache/
+backend/**/.mypy_cache/
+backend/**/dist/
 
 # Tests are not shipped. They need Postgres and dev dependencies the image does
 # not install, so their presence would only be misleading.
-packages/*/tests/
+backend/*/tests/
 
 # Documentation and background reading. `articles/` and `pdfs/` are archived
 # material that nothing imports and that would roughly double the image.
-packages/*/docs/
-packages/bacteria/articles/
-packages/bacteria/pdfs/
+backend/*/docs/
+backend/agent/articles/
+backend/agent/pdfs/
 
 # Never, under any circumstance. `.env` holds real provider credentials, and a
 # layer that contains it keeps containing it after the file is deleted in a

@@ -38,12 +38,12 @@ test *args:
 # Run the agent's tests alone
 [group('qa')]
 test-agent *args:
-    uv run --package bacteria {{ ARGS_TEST }} -m pytest packages/bacteria/tests {{ args }}
+    uv run --package bacteria-agent {{ ARGS_TEST }} -m pytest backend/agent/tests {{ args }}
 
 # Run the application's tests alone
 [group('qa')]
 test-app *args:
-    uv run --package fastpaip {{ ARGS_TEST }} -m pytest packages/fastpaip/tests {{ args }}
+    uv run --package bacteria-app {{ ARGS_TEST }} -m pytest backend/app/tests {{ args }}
 
 _cov *args:
     uv run -m coverage {{ args }}
@@ -54,9 +54,9 @@ _cov *args:
     just _cov erase
     # The application only. The agent's suite is excluded on purpose --
     # see the note on `source` in pyproject.toml.
-    just _cov run -m pytest packages/fastpaip/tests
+    just _cov run -m pytest backend/app/tests
     # The entrypoint import check used to live here as `run -m
-    # fastpaip.entrypoints.asgi`, which quietly stopped being one when asgi.py
+    # bacteria.app.entrypoints.asgi`, which quietly stopped being one when asgi.py
     # grew a __main__ block: -m runs the module, so it started a server and hung.
     # It is tests/test_entrypoints.py now.
     just _cov combine
@@ -96,12 +96,12 @@ hooks-all:
 # Judge the runs recorded in the configured database (ADR 0020)
 [group('qa')]
 eval *args:
-    uv run fastpaip-admin eval {{ args }}
+    uv run bacteria-admin eval {{ args }}
 
 # Check types
 [group('qa')]
 typing:
-    uv run ty check --python .venv packages/bacteria/src packages/fastpaip/src
+    uv run ty check --python .venv backend/agent/src backend/app/src
 
 # Catches the class of bug that does not fail a run: an unpinned action, a
 # credential left available to a step that does not need it, a
@@ -153,33 +153,33 @@ db-reset:
 # Apply all pending migrations
 [group('db')]
 migrate *args="head":
-    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini upgrade {{ args }}
+    uv run --package bacteria-app -m alembic -c backend/app/alembic.ini upgrade {{ args }}
 
 # Generate a migration from changes to the models -- always read it before committing
 [group('db')]
 makemigration message:
-    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini revision --autogenerate -m "{{ message }}"
+    uv run --package bacteria-app -m alembic -c backend/app/alembic.ini revision --autogenerate -m "{{ message }}"
 
 # Undo the last migration
 [group('db')]
 rollback *args="-1":
-    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini downgrade {{ args }}
+    uv run --package bacteria-app -m alembic -c backend/app/alembic.ini downgrade {{ args }}
 
 # Show the migration the database is currently at
 [group('db')]
 db-version:
-    uv run --package fastpaip -m alembic -c packages/fastpaip/alembic.ini current
+    uv run --package bacteria-app -m alembic -c backend/app/alembic.ini current
 
 
 # Run development server -- migrates first, as a deployment would
 [group('run')]
 serve: db-up migrate
-    uv run {{ ARGS_SERVE }} fastpaip-serve
+    uv run {{ ARGS_SERVE }} bacteria-serve
 
 # Run the background worker
 [group('run')]
 worker *args:
-    uv run fastpaip-worker {{ args }}
+    uv run bacteria-worker {{ args }}
 
 # Migrations run to completion first, then the API and the worker start against
 # the same image. Combined explicitly rather than named `compose.override.yml`,
@@ -203,7 +203,7 @@ stack-down:
 # Talk to the agent in a terminal
 [group('run')]
 agent:
-    uv run bacteria
+    uv run bacteria-agent
 
 # Starts a server and a worker, issues a credential through the CLI, and makes
 # real requests -- because three times here a green suite described a system

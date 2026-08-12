@@ -7,7 +7,7 @@ body:
       value: >-
         Before filing: a great deal here is missing **on purpose**, documented at
         the place it would be built. Run
-        `grep -rn "Not built:" packages/*/src` and check the Status table in the
+        `grep -rn "Not built:" backend/*/src` and check the Status table in the
         README. A documented gap is not a bug — though an *inaccurate* marker is,
         and a good one to report.
 
@@ -28,7 +28,7 @@ body:
         loudly without it, and `just serve` fails.
       placeholder: |
         just db-up && just migrate
-        uv run fastpaip-admin issue-key acme --label local
+        uv run bacteria-admin issue-key acme --label local
         curl -sX POST localhost:8000/chat/sessions -H "Authorization: Bearer fp_..."
       render: bash
     validations:

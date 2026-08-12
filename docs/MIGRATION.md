@@ -1,10 +1,18 @@
 # Target structure and migration plan
 
-What this repository becomes: a uv workspace holding two packages — the agent
-(`bacteria`, unchanged in shape) and the application that hosts it (`fastpaip`).
+**A historical record.** Every step below is done, and this file is kept for the
+reasoning attached to each — what was tried, what was rejected, and what a
+decision cost. It is not a description of the current tree; the
+[README](../README.md) is.
 
-Steps 0-3 are **done**. The tree below is what exists now; the remaining work
-is in [Order of work](#order-of-work) at the end.
+Package names were updated in place when `bacteria-app` became `bacteria.app` and
+`bacteria` became `bacteria.agent`, so that a reader is not made to hold a
+retired vocabulary just to follow the argument. Quoted `pyproject.toml` excerpts
+are therefore not literal transcripts of what was committed at the time.
+
+What this repository is: a uv workspace holding two packages — the agent
+(`bacteria-agent`) and the application that hosts it (`bacteria-app`), both under
+`backend/`, alongside a `frontend/` that does not exist yet.
 
 ## Step 0 — put this under version control *(done)*
 
@@ -21,7 +29,7 @@ return to is the only genuinely reckless part of it.
 ## Target tree *(steps 3-4 realize the skeleton; feature packages are not created yet)*
 
 ```
-fastpaip/
+bacteria/
   pyproject.toml                 workspace root; builds nothing
   uv.lock                        one lockfile for both packages
   Justfile
@@ -29,15 +37,15 @@ fastpaip/
   docs/
     MIGRATION.md                 this file
   packages/
-    bacteria/                    the agent — vendored whole, its own package
+    agent/                       the agent — vendored whole, its own package
       pyproject.toml
-      src/bacteria/              imports unchanged: `from bacteria...`
+      src/bacteria/agent/        imports: `from bacteria...`
       tests/
       docs/adr/
       CLAUDE.md  README.md
-    fastpaip/                    the application
+    app/                         the application
       pyproject.toml
-      src/fastpaip/
+      src/bacteria/app/
         core/                    cross-cutting infrastructure
           __init__.py
           protocols.py           repository contracts
@@ -73,7 +81,7 @@ toolchain.
 
 ```toml
 [project]
-name = "fastpaip-workspace"
+name = "bacteria-workspace"
 version = "0"
 requires-python = ">=3.13"
 dependencies = []
@@ -82,7 +90,7 @@ dependencies = []
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["backend/*"]
 
 [dependency-groups]
 dev = [
@@ -96,7 +104,7 @@ dev = [
 [tool.coverage.run]
 branch = true
 parallel = true
-source = ["fastpaip"]
+source = ["bacteria.app"]
 
 [tool.coverage.report]
 show_missing = true
@@ -106,8 +114,8 @@ omit = ["**/entrypoints/*"]
 
 Two things in there are deliberate and worth not undoing.
 
-`source = ["fastpaip"]` excludes `bacteria`. The agent's test suite is
-[architectural fitness functions by design](../packages/bacteria/docs/adr/0013-test-load-bearing-invariants-only.md) —
+`source = ["bacteria.app"]` excludes `bacteria`. The agent's test suite is
+[architectural fitness functions by design](../backend/agent/docs/adr/0013-test-load-bearing-invariants-only.md) —
 uneven coverage is the stated intent, and pointing a coverage report at it will
 produce a number that invites someone to "fix" it by writing the tests that ADR
 exists to decline. The application gets measured; the agent does not.
@@ -117,15 +125,15 @@ matching your rule that entrypoints hold configuration only. If an entrypoint
 ever contains something worth testing, that is the signal it contains logic that
 belongs elsewhere.
 
-### `packages/bacteria/pyproject.toml`
+### `backend/agent/pyproject.toml`
 
 Unchanged from the agent's current file, except that `pytest-asyncio` joins the
-dev extra once [ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md)
+dev extra once [ADR 0014](../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md)
 lands.
 
 ```toml
 [project]
-name = "bacteria"
+name = "bacteria-agent"
 version = "0.1.0"
 description = "A small AI agent built as infrastructure: layered ownership boundaries, kept minimal enough to read."
 requires-python = ">=3.11"
@@ -141,7 +149,7 @@ dependencies = [
 dev = ["pytest>=8.3.0", "pytest-asyncio>=0.24"]
 
 [project.scripts]
-bacteria = "bacteria.interfaces.cli:main"
+bacteria = "bacteria.agent.interfaces.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
@@ -156,15 +164,15 @@ addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importli
 `requires-python` stays `>=3.11`. The application pins tighter; a lower bound on
 the library costs nothing and keeps it vendorable elsewhere.
 
-### `packages/fastpaip/pyproject.toml`
+### `backend/app/pyproject.toml`
 
 ```toml
 [project]
-name = "fastpaip"
+name = "bacteria-app"
 version = "0"
 requires-python = ">=3.13"
 dependencies = [
-    "bacteria",
+    "bacteria-agent",
     "fastapi",
     "granian",
     "sqlmodel",
@@ -174,7 +182,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-bacteria = { workspace = true }
+bacteria-agent = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
@@ -194,18 +202,18 @@ excludes 3.14, which is what the agent's virtualenv is currently running.
 
 | Today | Target | Note |
 |---|---|---|
-| `src/agent/` | *delete* | Broken copy — the directory was renamed but every internal import still says `from bacteria...`. Replaced by the real package. |
+| `src/agent/` (an earlier broken copy) | *delete* | Broken copy — the directory was renamed but every internal import still says `from bacteria...`. Replaced by the real package. |
 | `tests/agent/` | *delete* | Ships with the package. |
 | `src/protocols.py` | `core/protocols.py` | Trimmed — see below. |
 | `src/handlers.py` | `core/handlers.py` | Two fixes — see below. |
 | `src/adapters.py` | `core/adapters.py` | As-is. |
-| `src/fastpaip/models.py` | per feature | `User` is not a feature; it belongs wherever accounts land. Drop the unused `Session`, `create_engine`, `select` imports. |
-| `src/fastpaip/repositories.py` | per feature | **Has no imports at all** — references `Session`, `User`, `UserCreate`, `UserId`, `Optional` from nowhere. Note this is *worse* than it looks on Python 3.14: PEP 649 defers annotation evaluation, so the module now imports cleanly and fails at first **call** instead of at import. Moved as-is; still to fix. |
-| `src/fastpaip/services.py` | per feature | Empty today. |
-| `src/fastpaip/dependencies.py` | `core/dependencies.py` | Empty today. |
-| `src/fastpaip/views.py` | `<feature>/views.py` | The `/` hello route becomes a health check. |
-| `src/fastpaip/entrypoints/asgi.py` | `entrypoints/asgi.py` | Add the missing `__init__.py`. |
-| `tests/test_e2e.py` | `packages/fastpaip/tests/` | |
+| `src/bacteria/app/models.py` | per feature | `User` is not a feature; it belongs wherever accounts land. Drop the unused `Session`, `create_engine`, `select` imports. |
+| `src/bacteria/app/repositories.py` | per feature | **Has no imports at all** — references `Session`, `User`, `UserCreate`, `UserId`, `Optional` from nowhere. Note this is *worse* than it looks on Python 3.14: PEP 649 defers annotation evaluation, so the module now imports cleanly and fails at first **call** instead of at import. Moved as-is; still to fix. |
+| `src/bacteria/app/services.py` | per feature | Empty today. |
+| `src/bacteria/app/dependencies.py` | `core/dependencies.py` | Empty today. |
+| `src/bacteria/app/views.py` | `<feature>/views.py` | The `/` hello route becomes a health check. |
+| `src/bacteria/app/entrypoints/asgi.py` | `entrypoints/asgi.py` | Add the missing `__init__.py`. |
+| `tests/test_e2e.py` | `backend/app/tests/` | |
 | `Justfile` | root, edited | Three stale `hello_svc` references break `just serve` and `just cov`. |
 | `README.md` | rewrite | Currently a link to the uv video the template came from. |
 
@@ -228,7 +236,7 @@ skipped step should leave a record of *why* it was skipped, which
 Three things, in dependency order.
 
 **1. Async at the I/O boundaries.** Already decided and recorded as
-[ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md).
+[ADR 0014](../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md).
 This has to land first — every item below is written against the async shape.
 
 **2. Persistence arrives by dependency inversion.** `session/store.py` names its
@@ -244,7 +252,7 @@ into a project that uses something else entirely.
 That protocol is **not** `CRUDRepository`. `SessionStore` exposes
 `create_session` / `get_state` / `commit` / `remember` / `forget` — deliberately
 no `update`, because an update method is a second write path and
-[ADR 0004](../packages/bacteria/docs/adr/0004-single-commit-path.md) exists to
+[ADR 0004](../backend/agent/docs/adr/0004-single-commit-path.md) exists to
 guarantee there is exactly one. The generic CRUD protocols serve the
 application's own entities, where CRUD genuinely is the shape.
 
@@ -261,15 +269,15 @@ knowing now that approval is what drags it in, and that it needs its own ADR.
 
 ### What does *not* change: the two composition roots
 
-Correcting something I said earlier — `bacteria.interfaces` and
-`fastpaip.entrypoints` do not actually collide. They compose different
+Correcting something I said earlier — `bacteria.agent.interfaces` and
+`bacteria.app.entrypoints` do not actually collide. They compose different
 processes. The agent keeps `interfaces/cli.py` and stays independently runnable
 via `uv run bacteria`, which is worth preserving: it is the reference
 implementation of how the layers wire together, and the thing you can run to
 check the agent still works without standing up a web service.
 
 The rule that keeps them from colliding is one line: **the application never
-imports `bacteria.interfaces`.** It composes `Runtime`, a model client, a
+imports `bacteria.agent.interfaces`.** It composes `Runtime`, a model client, a
 registry, and a store itself, in `entrypoints/`. Provider selection exists in
 both places because both are entry points into the same library — that is what
 an entry point is for.
@@ -279,7 +287,7 @@ an entry point is for.
 1. ~~`git init` and commit the current state.~~ **Done.**
 2. ~~Async refactor in bacteria.~~ **Done** — 60 tests, one live Gemini
    tool-calling turn verified end to end.
-   ([ADR 0014](../packages/bacteria/docs/adr/0014-async-at-the-io-boundaries.md).)
+   ([ADR 0014](../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md).)
 3. ~~Create the workspace skeleton; move bacteria in.~~ **Done** — brought in
    with `git subtree`, so its history came along rather than arriving as an
    anonymous copy. `just test` runs both suites; `just agent` runs the CLI.

@@ -21,7 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: fastpaip:local
+    image: bacteria:local
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -29,21 +29,21 @@ services:
     environment:
       # `postgres` -- the compose service -- rather than localhost. The default
       # in settings.py is written for a process on the host.
-      FASTPAIP_DATABASE_URL: postgresql+psycopg://fastpaip:fastpaip@postgres:5432/fastpaip
+      BACTERIA_DATABASE_URL: postgresql+psycopg://bacteria:bacteria@postgres:5432/bacteria
     restart: "no"
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: fastpaip:local
+    image: bacteria:local
     # 0.0.0.0, because the default 127.0.0.1 in asgi.py is only reachable from
     # inside the container -- the port publish below would connect to nothing.
-    command: ["fastpaip-serve"]
+    command: ["bacteria-serve"]
     environment:
-      FASTPAIP_DATABASE_URL: postgresql+psycopg://fastpaip:fastpaip@postgres:5432/fastpaip
-      FASTPAIP_LOG_LEVEL: ${FASTPAIP_LOG_LEVEL:-INFO}
-      FASTPAIP_MODEL_PROVIDER: ${FASTPAIP_MODEL_PROVIDER:-anthropic}
+      BACTERIA_DATABASE_URL: postgresql+psycopg://bacteria:bacteria@postgres:5432/bacteria
+      BACTERIA_LOG_LEVEL: ${BACTERIA_LOG_LEVEL:-INFO}
+      BACTERIA_MODEL_PROVIDER: ${BACTERIA_MODEL_PROVIDER:-anthropic}
       # Passed through unprefixed, because the provider SDKs read these exact
       # names. Empty is fine until a turn is taken.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -75,12 +75,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: fastpaip:local
-    command: ["fastpaip-worker"]
+    image: bacteria:local
+    command: ["bacteria-worker"]
     environment:
-      FASTPAIP_DATABASE_URL: postgresql+psycopg://fastpaip:fastpaip@postgres:5432/fastpaip
-      FASTPAIP_LOG_LEVEL: ${FASTPAIP_LOG_LEVEL:-INFO}
-      FASTPAIP_MODEL_PROVIDER: ${FASTPAIP_MODEL_PROVIDER:-anthropic}
+      BACTERIA_DATABASE_URL: postgresql+psycopg://bacteria:bacteria@postgres:5432/bacteria
+      BACTERIA_LOG_LEVEL: ${BACTERIA_LOG_LEVEL:-INFO}
+      BACTERIA_MODEL_PROVIDER: ${BACTERIA_MODEL_PROVIDER:-anthropic}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     depends_on:

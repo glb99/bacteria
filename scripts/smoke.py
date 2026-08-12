@@ -114,7 +114,7 @@ def issue_key(principal: str) -> str:
         [
             sys.executable,
             "-m",
-            "fastpaip.entrypoints.cli",
+            "bacteria.app.entrypoints.cli",
             "issue-key",
             principal,
             "--label",
@@ -291,7 +291,7 @@ def main() -> int:
     args = parser.parse_args()
 
     database_url = os.environ.get(
-        "FASTPAIP_DATABASE_URL", "postgresql+psycopg://fastpaip:fastpaip@localhost:5432/fastpaip"
+        "BACTERIA_DATABASE_URL", "postgresql+psycopg://bacteria:bacteria@localhost:5432/bacteria"
     )
 
     try:
@@ -302,11 +302,11 @@ def main() -> int:
             host, _, port = args.base_url.removeprefix("http://").partition(":")
             environment = {**os.environ, "HOST": host, "PORT": port or "8000"}
             server = subprocess.Popen(
-                [sys.executable, "-m", "fastpaip.entrypoints.asgi"], env=environment
+                [sys.executable, "-m", "bacteria.app.entrypoints.asgi"], env=environment
             )
             try:
                 with background(
-                    "worker", [sys.executable, "-m", "fastpaip.entrypoints.queue_worker"]
+                    "worker", [sys.executable, "-m", "bacteria.app.entrypoints.queue_worker"]
                 ):
                     wait_for_health(args.base_url, server)
                     run_checks(args.base_url, database_url)

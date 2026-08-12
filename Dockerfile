@@ -1,5 +1,5 @@
-# One image, three processes. `fastpaip-serve`, `fastpaip-worker`, and
-# `fastpaip-admin` are console scripts on the same install, so the API, the queue
+# One image, three processes. `bacteria-serve`, `bacteria-worker`, and
+# `bacteria-admin` are console scripts on the same install, so the API, the queue
 # worker, and the operator CLI cannot drift onto different code -- which is the
 # failure a separate worker image invites, and it shows up as a job failing to
 # deserialize rather than as anything obviously version-shaped.
@@ -45,33 +45,33 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    --mount=type=bind,source=packages/bacteria/pyproject.toml,target=packages/bacteria/pyproject.toml \
-    --mount=type=bind,source=packages/fastpaip/pyproject.toml,target=packages/fastpaip/pyproject.toml \
-    uv sync --locked --no-install-workspace --no-dev --package fastpaip
+    --mount=type=bind,source=backend/agent/pyproject.toml,target=backend/agent/pyproject.toml \
+    --mount=type=bind,source=backend/app/pyproject.toml,target=backend/app/pyproject.toml \
+    uv sync --locked --no-install-workspace --no-dev --package bacteria-app
 
-COPY packages/ /app/packages/
+COPY backend/ /app/backend/
 COPY pyproject.toml uv.lock /app/
 COPY scripts/ /app/scripts/
 
-# Now the members themselves. `--package fastpaip` rather than a bare `uv sync`,
+# Now the members themselves. `--package bacteria-app` rather than a bare `uv sync`,
 # and that is not a refinement -- the workspace root sets `package = false`, so a
 # bare sync installs the root's own dependencies (there are none) and no member
-# at all. The image built, started, and had no `fastpaip` module in it. It pulls
-# `bacteria` in as a workspace dependency, so naming one member is enough.
+# at all. The image built, started, and had no `bacteria.app` module in it. It pulls
+# `bacteria-agent` in as a workspace dependency, so naming one member is enough.
 #
 # `--locked` fails rather than silently re-resolving if uv.lock disagrees with
 # the pyprojects, which is the point of building from a lockfile: a build that
 # quietly picks different versions than the ones tested is worse than one that
 # stops.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --package fastpaip
+    uv sync --locked --no-dev --package bacteria-app
 
 # Non-root, and created before the switch so the venv stays owned by root and
 # read-only to the process using it. A compromised worker cannot rewrite the code
 # it is running.
-RUN useradd --create-home --uid 10001 fastpaip
-USER fastpaip
+RUN useradd --create-home --uid 10001 bacteria
+USER bacteria
 
 # Alembic is invoked from the package directory, matching alembic.ini's own
 # relative paths, and matching how `just migrate` runs it.
-WORKDIR /app/packages/fastpaip
+WORKDIR /app/backend/app

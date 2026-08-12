@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through
-[GitHub's advisory form](https://github.com/glb99/fastpaip/security/advisories/new),
+[GitHub's advisory form](https://github.com/glb99/bacteria/security/advisories/new),
 not as a public issue.
 
 Include what you did, what happened, and what you expected. A proof of concept
@@ -24,13 +24,13 @@ fixed.
 
 | Limitation | Where |
 |---|---|
-| **A registered tool runs in-process with full privileges.** Approval answers "should this happen" and says nothing about "how far does the damage reach". There is no sandbox, no timeout, and no resource limit, so every registered tool must be trusted first-party code. That is the security model, not an oversight. | `bacteria/tools/execution.py` |
-| **API keys grant identity and therefore everything.** No scopes, no expiry, no read-only credential to hand a script. A key is valid until explicitly revoked. | `fastpaip/auth/keys.py` |
-| **Ingested records have no tenancy.** Submitting requires authentication, but a batch is not owned by its submitter. This becomes urgent the moment a read route exists. | `fastpaip/ingestion/views.py` |
-| **`database_url` is a plain `str`.** It will carry a password and can be printed, logged, or serialized into an error page by anything holding it. A real deployment wants `SecretStr` and a rule about what may be logged. | `fastpaip/core/settings.py` |
-| **Tool output reaches the model unmarked.** Nothing distinguishes content from an untrusted source, so the current tool set has to stay one where that does not arise. | `bacteria/tools/execution.py` |
-| **No retention or redaction rule.** Tool inputs and user text are recorded verbatim in the transcript, which was cheap when state died with the process and is a standing liability now that it is persisted. | `bacteria/session/store.py` |
-| **Trace and audit are one record.** Debugging wants broad access, audit wants tight control; splitting them is a host decision nobody has made. | `bacteria/docs/ARCHITECTURE.md` |
+| **A registered tool runs in-process with full privileges.** Approval answers "should this happen" and says nothing about "how far does the damage reach". There is no sandbox, no timeout, and no resource limit, so every registered tool must be trusted first-party code. That is the security model, not an oversight. | `bacteria/agent/tools/execution.py` |
+| **API keys grant identity and therefore everything.** No scopes, no expiry, no read-only credential to hand a script. A key is valid until explicitly revoked. | `bacteria/app/auth/keys.py` |
+| **Ingested records have no tenancy.** Submitting requires authentication, but a batch is not owned by its submitter. This becomes urgent the moment a read route exists. | `bacteria/app/ingestion/views.py` |
+| **`database_url` is a plain `str`.** It will carry a password and can be printed, logged, or serialized into an error page by anything holding it. A real deployment wants `SecretStr` and a rule about what may be logged. | `bacteria/app/core/settings.py` |
+| **Tool output reaches the model unmarked.** Nothing distinguishes content from an untrusted source, so the current tool set has to stay one where that does not arise. | `bacteria/agent/tools/execution.py` |
+| **No retention or redaction rule.** Tool inputs and user text are recorded verbatim in the transcript, which was cheap when state died with the process and is a standing liability now that it is persisted. | `bacteria/agent/session/store.py` |
+| **Trace and audit are one record.** Debugging wants broad access, audit wants tight control; splitting them is a host decision nobody has made. | `backend/agent/docs/ARCHITECTURE.md` |
 
 ## What is deliberately defended
 
@@ -50,7 +50,7 @@ Also worth stating, because these look like accidents and are not:
 - **The model cannot write active memory.** It can only propose, because memory is
   injected into the system prompt of every later turn — so a model that could
   write it directly could author its own future instructions. See
-  [ADR 0017](packages/bacteria/docs/adr/0017-memory-is-proposed-and-confirmed.md).
+  [ADR 0017](backend/agent/docs/adr/0017-memory-is-proposed-and-confirmed.md).
 - **Credentials are issued by an operator CLI, never an HTTP route.** Minting a
   credential over HTTP needs a credential, and the first one has nowhere to come
   from.

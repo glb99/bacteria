@@ -72,7 +72,7 @@ from typing import Any, Awaitable, Callable
 from bacteria.context.assembly import AssembledContext, assemble_context
 from bacteria.model.protocol import ModelResponse, SendsMessages, ToolCall
 from bacteria.session.protocol import SessionRepository
-from bacteria.session.store import SessionState, TranscriptItem
+from bacteria.session.store import TranscriptItem
 from bacteria.tools.execution import Approve, ToolExecutionError, ToolResult, execute_tool_call
 from bacteria.tools.registry import ToolRegistry
 
@@ -184,13 +184,17 @@ class RunResult:
             result was produced from — including on the failure path, where the
             exception carries no result but the evidence is committed anyway.
         response: The final model response, after any tool round.
-        committed_state: Session state as of the commit. A snapshot, not a live
-            view; re-read from the store for anything current.
+
+    Deliberately does not carry the committed state. It used to, and building it
+    meant re-reading the whole conversation at the end of every turn to produce a
+    value nothing read — its own docstring told callers not to trust it and to
+    re-read the store instead, which is now the only option and always was the
+    right one. See
+    [ADR 0023](../../docs/adr/0023-write-methods-return-what-the-caller-needs.md).
     """
 
     run_id: str
     response: ModelResponse
-    committed_state: SessionState
 
 
 class Runtime:
@@ -349,10 +353,8 @@ class Runtime:
             await self._session_store.commit(session_id, new_transcript_items=evidence)
             raise
 
-        committed_state = await self._session_store.commit(
-            session_id, new_transcript_items=evidence
-        )
-        return RunResult(run_id=run_id, response=response, committed_state=committed_state)
+        await self._session_store.commit(session_id, new_transcript_items=evidence)
+        return RunResult(run_id=run_id, response=response)
 
     async def _execute_tool_calls(
         self,

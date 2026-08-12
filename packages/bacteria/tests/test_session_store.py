@@ -33,15 +33,19 @@ async def test_commit_is_the_only_way_state_actually_changes():
     store = SessionStore()
     session = await store.create_session(user_id="u1")
 
-    committed = await store.commit(
+    await store.commit(
         session.session_id,
         new_transcript_items=[TranscriptItem(kind="message", payload={"text": "hi"})],
         working_state_updates={"step": 1},
     )
 
-    assert len(committed.transcript) == 1
-    assert committed.working_state == {"step": 1}
-    assert (await store.get_state(session.session_id)).working_state == {"step": 1}
+    # Read back through the store rather than from what `commit` returned, which
+    # is now nothing (ADR 0023). It is also the better check: the claim is that
+    # state changed *in the store*, and asking the store is more direct than
+    # trusting the writer's account of itself.
+    state = await store.get_state(session.session_id)
+    assert len(state.transcript) == 1
+    assert state.working_state == {"step": 1}
 
 
 async def test_session_identity_is_independent_of_user_identity():

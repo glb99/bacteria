@@ -230,6 +230,7 @@ the source with `grep -rn "Invariant:" src/`.
 | A retry re-sends an identical request | What makes retrying provably side-effect free | `test_serving_failure_is_retried_with_identical_request_then_succeeds` |
 | A step runs at most once per run | Guards a side effect being repeated by control flow looping back | `test_step_cannot_silently_run_twice` |
 | A failed run still commits evidence | Otherwise the runs worth investigating are the ones with no record | `test_a_failed_model_call_still_leaves_the_user_message_as_evidence` |
+| A turn reads the session once | `get_state` loads the whole transcript, so a second read is a slope, not an overhead | `test_a_turn_reads_the_session_once` |
 | Every item a run commits carries its `run_id` | `run_id` is optional, so a producer that forgets it writes valid, unattributable evidence | `test_every_item_a_run_commits_carries_that_run_id`, `test_a_failed_run_is_separable_from_the_retry_that_followed_it` |
 | Every run records how it was configured | Two runs with identical text may have used different models, tools, and memory; without this nothing tells them apart | `test_a_run_records_how_it_was_configured`, `test_a_run_that_fails_before_the_model_answers_still_describes_itself` |
 | A refusal is distinguishable from a crash | Same control flow, opposite facts — one says a boundary held | `test_a_refused_tool_call_is_distinguishable_from_one_that_broke` |

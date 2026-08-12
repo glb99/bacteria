@@ -336,7 +336,7 @@ class SessionStore:
         session_id: str,
         new_transcript_items: list[TranscriptItem] | None = None,
         working_state_updates: dict[str, Any] | None = None,
-    ) -> SessionState:
+    ) -> None:
         """Apply a proposed change. The only write path for turn state.
 
         Takes the change as plain arguments rather than a separate proposal
@@ -349,8 +349,11 @@ class SessionStore:
         Transcript items append; working state merges key-by-key. The two never
         touch each other — that separation is the point of having both.
 
-        Returns:
-            A deep copy of the resulting state.
+        Returns nothing. It used to return the resulting state, which meant a
+        full re-read — the whole transcript, all memory, all proposals — to build
+        a value every caller discarded, once per turn, growing with the
+        conversation. A caller wanting current state calls :meth:`get_state`.
+        See [ADR 0023](../../docs/adr/0023-write-methods-return-what-the-caller-needs.md).
 
         Raises:
             UnknownSessionError: No such session.
@@ -360,7 +363,6 @@ class SessionStore:
         state = self._sessions[session_id]
         state.transcript.extend(new_transcript_items or [])
         state.working_state.update(working_state_updates or {})
-        return self._detached(state)
 
     async def remember(
         self,
@@ -370,7 +372,7 @@ class SessionStore:
         reason: str,
         source: str = OWNER,
         scope: MemoryScope = SESSION_SCOPE,
-    ) -> SessionState:
+    ) -> MemoryEntry:
         """Record a fact worth re-surfacing later. The only write path for memory.
 
         Separate from :meth:`commit` on purpose. Routing memory through
@@ -408,11 +410,11 @@ class SessionStore:
             self._user_memory.setdefault(state.session.user_id, {})[key] = entry
         else:
             state.memory[key] = entry
-        return self._detached(state)
+        return entry
 
     async def propose(
         self, session_id: str, key: str, value: Any, reason: str, source: str
-    ) -> SessionState:
+    ) -> None:
         """Suggest a memory without making one. Reaches no model until activated.
 
         This is the write path for anything that is not the session's owner —
@@ -435,11 +437,10 @@ class SessionStore:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
         state.proposals[(source, key)] = MemoryEntry(value=value, reason=reason, source=source)
-        return self._detached(state)
 
     async def activate(
         self, session_id: str, source: str, key: str, scope: MemoryScope = SESSION_SCOPE
-    ) -> SessionState:
+    ) -> MemoryEntry:
         """Promote a proposal into active memory. The human act.
 
         Collapsing happens here and only here: the proposal was keyed by
@@ -481,9 +482,9 @@ class SessionStore:
             self._user_memory.setdefault(state.session.user_id, {})[key] = activated
         else:
             state.memory[key] = activated
-        return self._detached(state)
+        return activated
 
-    async def reject(self, session_id: str, source: str, key: str) -> SessionState:
+    async def reject(self, session_id: str, source: str, key: str) -> None:
         """Discard a proposal without it ever becoming a memory.
 
         A no-op on an absent proposal, matching :meth:`forget`: the caller
@@ -498,11 +499,8 @@ class SessionStore:
             raise UnknownSessionError(session_id)
         state = self._sessions[session_id]
         state.proposals.pop((source, key), None)
-        return self._detached(state)
 
-    async def forget(
-        self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE
-    ) -> SessionState:
+    async def forget(self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE) -> None:
         """Remove a memory. The other half of a memory's lifecycle.
 
         Exists because a store with no removal path makes every memory
@@ -527,4 +525,3 @@ class SessionStore:
             self._user_memory.get(state.session.user_id, {}).pop(key, None)
         else:
             state.memory.pop(key, None)
-        return self._detached(state)

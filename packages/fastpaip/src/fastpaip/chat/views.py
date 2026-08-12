@@ -119,6 +119,7 @@ async def take_turn(
     happened rather than finding a gap.
     """
     repository = SqlSessionRepository(db)
+    # Check ownership, only for exception in case
     await load_owned_session(repository, principal, session_id)
 
     result = await run_turn(
@@ -209,10 +210,9 @@ async def write_memory(
     repository = SqlSessionRepository(db)
     await load_owned_session(repository, principal, session_id)
 
-    state = await repository.remember(
+    entry = await repository.remember(
         session_id, key=key, value=body.value, reason=body.reason, scope=scope
     )
-    entry = (state.user_memory if scope == USER_SCOPE else state.memory)[key]
     return MemoryEntryOut(
         key=key,
         value=entry.value,
@@ -311,13 +311,12 @@ async def activate_proposal(
     await load_owned_session(repository, principal, session_id)
 
     try:
-        state = await repository.activate(session_id, source=source, key=key, scope=scope)
+        entry = await repository.activate(session_id, source=source, key=key, scope=scope)
     except KeyError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="no such proposal"
         ) from None
 
-    entry = (state.user_memory if scope == USER_SCOPE else state.memory)[key]
     return MemoryEntryOut(
         key=key,
         value=entry.value,

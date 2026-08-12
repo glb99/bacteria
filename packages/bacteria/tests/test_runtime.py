@@ -55,13 +55,43 @@ async def test_runtime_commits_via_the_store_not_by_direct_write(make_fake_model
 
     result = await runtime.run_turn(session.session_id, "hello")
 
+    # Read from the store, which is now the only place to read it from (ADR
+    # 0023) and was always the right place: if the turn's writes are visible
+    # here, they went through commit, because nothing else can put them here.
+    #
     # Counted by kind rather than by length: a run also commits evidence about
     # itself, and this test is about the conversation reaching the store.
-    messages = [i for i in result.committed_state.transcript if i.kind == "message"]
-    assert len(messages) == 2
-    assert (
-        await store.get_state(session.session_id)
-    ).transcript == result.committed_state.transcript
+    transcript = (await store.get_state(session.session_id)).transcript
+    assert len([i for i in transcript if i.kind == "message"]) == 2
+    assert result.response.text == "assistant reply"
+
+
+async def test_a_turn_reads_the_session_once(make_fake_model_client):
+    """One read per turn, at the start, to assemble context.
+
+    A second read is not a constant overhead but a slope: `get_state` loads the
+    whole transcript, so re-reading it costs more every turn of a conversation.
+    That is what `commit` used to do to build a return value nothing consumed
+    (ADR 0023), and the natural way to reintroduce it is to want post-write
+    state for something and reach for the convenient round trip.
+    """
+
+    class CountingStore(SessionStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.reads = 0
+
+        async def get_state(self, session_id: str):
+            self.reads += 1
+            return await super().get_state(session_id)
+
+    store = CountingStore()
+    session = await store.create_session(user_id="u1")
+    runtime = Runtime(model_client=make_fake_model_client(), session_store=store)
+
+    await runtime.run_turn(session.session_id, "hello")
+
+    assert store.reads == 1
 
 
 async def test_runtime_calls_model_client_exactly_once_per_turn(make_fake_model_client):
@@ -177,9 +207,10 @@ async def test_tool_execution_is_recorded_in_the_transcript():
         )
     )
 
-    result = await runtime.run_turn(session.session_id, "what time is it?", tool_registry=registry)
+    await runtime.run_turn(session.session_id, "what time is it?", tool_registry=registry)
 
-    tool_items = [item for item in result.committed_state.transcript if item.kind == "tool_call"]
+    transcript = (await store.get_state(session.session_id)).transcript
+    tool_items = [item for item in transcript if item.kind == "tool_call"]
     assert len(tool_items) == 1
     assert tool_items[0].payload == {
         "name": "get_time",

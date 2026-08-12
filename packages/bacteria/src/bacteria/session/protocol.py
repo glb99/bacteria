@@ -66,7 +66,13 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from bacteria.session.store import MemoryScope, Session, SessionState, TranscriptItem
+from bacteria.session.store import (
+    MemoryEntry,
+    MemoryScope,
+    Session,
+    SessionState,
+    TranscriptItem,
+)
 
 
 @runtime_checkable
@@ -93,7 +99,7 @@ class SessionRepository(Protocol):
         session_id: str,
         new_transcript_items: list[TranscriptItem] | None = None,
         working_state_updates: dict[str, Any] | None = None,
-    ) -> SessionState:
+    ) -> None:
         """Apply a proposed change. The only write path for turn state."""
         ...
 
@@ -105,19 +111,22 @@ class SessionRepository(Protocol):
         reason: str,
         source: str = "owner",
         scope: MemoryScope = "session",
-    ) -> SessionState:
-        """Write an active memory directly. For the session's owner only."""
+    ) -> MemoryEntry:
+        """Write an active memory directly. For the session's owner only.
+
+        Returns the entry written, which is what a caller wants and what an
+        implementation already holds — see ADR 0023 for why this is not a
+        ``SessionState``.
+        """
         ...
 
-    async def forget(
-        self, session_id: str, key: str, scope: MemoryScope = "session"
-    ) -> SessionState:
+    async def forget(self, session_id: str, key: str, scope: MemoryScope = "session") -> None:
         """Remove an active memory."""
         ...
 
     async def propose(
         self, session_id: str, key: str, value: Any, reason: str, source: str
-    ) -> SessionState:
+    ) -> None:
         """Suggest a memory. Reaches no model until activated.
 
         Deliberately has no ``scope``: whoever proposes does not choose how far
@@ -127,10 +136,10 @@ class SessionRepository(Protocol):
 
     async def activate(
         self, session_id: str, source: str, key: str, scope: MemoryScope = "session"
-    ) -> SessionState:
+    ) -> MemoryEntry:
         """Promote a proposal into active memory, at a scope the human picks."""
         ...
 
-    async def reject(self, session_id: str, source: str, key: str) -> SessionState:
+    async def reject(self, session_id: str, source: str, key: str) -> None:
         """Discard a proposal."""
         ...

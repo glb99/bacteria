@@ -209,7 +209,7 @@ class SqlSessionRepository:
         session_id: str,
         new_transcript_items: Optional[list[TranscriptItem]] = None,
         working_state_updates: Optional[dict[str, Any]] = None,
-    ) -> SessionState:
+    ) -> None:
         # Locks the session row, and everything below depends on it. `seq` is
         # computed from the current maximum, so two commits that both read
         # before either writes claim the same position -- and the column that
@@ -254,7 +254,6 @@ class SqlSessionRepository:
             self._db.add(row)
 
         await self._db.commit()
-        return await self.get_state(session_id)
 
     async def remember(
         self,
@@ -264,16 +263,21 @@ class SqlSessionRepository:
         reason: str,
         source: str = OWNER,
         scope: MemoryScope = SESSION_SCOPE,
-    ) -> SessionState:
+    ) -> MemoryEntry:
         row = await self._require(session_id)
 
         if scope == USER_SCOPE:
-            await self._write_user_memory(
+            entry = await self._write_user_memory(
                 row.user_id, key=key, value=value, reason=reason, source=source
             )
             await self._db.commit()
-            return await self.get_state(session_id)
+            return entry
 
+        # The timestamp is taken once and used for both the row and the returned
+        # entry, rather than left to the column default on the insert path. The
+        # caller is handed the same value that was stored; deriving it twice is
+        # how the two paths would come to differ by microseconds.
+        now = datetime.now(timezone.utc)
         existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:
             existing.source = source
@@ -289,7 +293,7 @@ class SqlSessionRepository:
             # the model the most recent entries by this field, so a preserved
             # timestamp would let a memory the owner just rewrote age out and
             # stay invisible -- the one outcome nobody could explain.
-            existing.created_at = datetime.now(timezone.utc)
+            existing.created_at = now
             self._db.add(existing)
         else:
             self._db.add(
@@ -299,15 +303,14 @@ class SqlSessionRepository:
                     value={"value": value},
                     reason=reason,
                     source=source,
+                    created_at=now,
                 )
             )
 
         await self._db.commit()
-        return await self.get_state(session_id)
+        return MemoryEntry(value=value, reason=reason, source=source, created_at=now)
 
-    async def forget(
-        self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE
-    ) -> SessionState:
+    async def forget(self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE) -> None:
         row = await self._require(session_id)
 
         if scope == USER_SCOPE:
@@ -318,11 +321,10 @@ class SqlSessionRepository:
             await self._db.delete(existing)
             await self._db.commit()
         # Absent key is a no-op: the caller wanted it gone, and it is.
-        return await self.get_state(session_id)
 
     async def propose(
         self, session_id: str, key: str, value: Any, reason: str, source: str
-    ) -> SessionState:
+    ) -> None:
         """Write a suggestion into the proposals table. Reaches no model."""
         await self._require(session_id)
 
@@ -347,11 +349,10 @@ class SqlSessionRepository:
             )
 
         await self._db.commit()
-        return await self.get_state(session_id)
 
     async def _write_user_memory(
         self, user_id: str, key: str, value: Any, reason: str, source: str
-    ) -> None:
+    ) -> MemoryEntry:
         """Upsert one user-scoped entry. Does not commit.
 
         Shared by ``remember`` and ``activate`` so the two cannot drift on
@@ -360,12 +361,13 @@ class SqlSessionRepository:
         behaviour the assembly bound needs: it shows the most recent entries, so
         a memory the owner just rewrote must not be at risk of ageing out.
         """
+        now = datetime.now(timezone.utc)
         existing = await self._db.get(ChatUserMemoryEntry, (user_id, key))
         if existing is not None:
             existing.value = {"value": value}
             existing.reason = reason
             existing.source = source
-            existing.created_at = datetime.now(timezone.utc)
+            existing.created_at = now
             self._db.add(existing)
         else:
             self._db.add(
@@ -375,12 +377,14 @@ class SqlSessionRepository:
                     value={"value": value},
                     reason=reason,
                     source=source,
+                    created_at=now,
                 )
             )
+        return MemoryEntry(value=value, reason=reason, source=source, created_at=now)
 
     async def activate(
         self, session_id: str, source: str, key: str, scope: MemoryScope = SESSION_SCOPE
-    ) -> SessionState:
+    ) -> MemoryEntry:
         """Move a proposal into active memory, in one transaction.
 
         Both writes commit together or neither does. A partial application here
@@ -401,7 +405,7 @@ class SqlSessionRepository:
             raise KeyError((source, key))
 
         if scope == USER_SCOPE:
-            await self._write_user_memory(
+            entry = await self._write_user_memory(
                 row.user_id,
                 key=key,
                 value=proposal.value["value"],
@@ -410,8 +414,14 @@ class SqlSessionRepository:
             )
             await self._db.delete(proposal)
             await self._db.commit()
-            return await self.get_state(session_id)
+            return entry
 
+        activated = MemoryEntry(
+            value=proposal.value["value"],
+            reason=proposal.reason,
+            source=proposal.source,
+            created_at=datetime.now(timezone.utc),
+        )
         existing = await self._db.get(ChatMemoryEntry, (session_id, key))
         if existing is not None:
             # Activation is where competing proposals collapse onto one key --
@@ -419,7 +429,7 @@ class SqlSessionRepository:
             existing.value = proposal.value
             existing.reason = proposal.reason
             existing.source = proposal.source
-            existing.created_at = datetime.now(timezone.utc)
+            existing.created_at = activated.created_at
             self._db.add(existing)
         else:
             self._db.add(
@@ -429,14 +439,15 @@ class SqlSessionRepository:
                     value=proposal.value,
                     reason=proposal.reason,
                     source=proposal.source,
+                    created_at=activated.created_at,
                 )
             )
         await self._db.delete(proposal)
 
         await self._db.commit()
-        return await self.get_state(session_id)
+        return activated
 
-    async def reject(self, session_id: str, source: str, key: str) -> SessionState:
+    async def reject(self, session_id: str, source: str, key: str) -> None:
         """Discard a proposal. A no-op if it is not there, matching ``forget``."""
         await self._require(session_id)
 
@@ -444,7 +455,6 @@ class SqlSessionRepository:
         if existing is not None:
             await self._db.delete(existing)
             await self._db.commit()
-        return await self.get_state(session_id)
 
     async def _require(self, session_id: str, *, lock: bool = False) -> ChatSession:
         """Load the session row or raise the agent's own error type.

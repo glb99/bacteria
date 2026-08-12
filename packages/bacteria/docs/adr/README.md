@@ -34,6 +34,7 @@ together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | [0020](0020-deterministic-evals-over-recorded-runs.md) | Judge recorded runs with deterministic checks, seeded rather than captured | Accepted |
 | [0021](0021-memory-is-scoped-to-a-session-or-a-user.md) | Scope memory to a session or a user, with the human choosing at activation | Accepted |
 | [0022](0022-memory-selection-is-a-named-strategy.md) | Make memory selection a named strategy that reports what it passed over | Accepted |
+| [0023](0023-write-methods-return-what-the-caller-needs.md) | Write methods return what the caller needs, not the whole session | Accepted |
 
 ## Writing a new one
 

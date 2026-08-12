@@ -1,0 +1,76 @@
+name: Bug report
+description: Something behaves differently from what the code says it does
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Before filing: a great deal here is missing **on purpose**, documented at
+        the place it would be built. Run
+        `grep -rn "Not built:" backend/*/src` and check the Status table in the
+        README. A documented gap is not a bug — though an *inaccurate* marker is,
+        and a good one to report.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what the code or docs led you to expect instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >-
+        Exact commands. Note whether Postgres was running — the suite skips
+        loudly without it, and `just serve` fails.
+      placeholder: |
+        just db-up && just migrate
+        uv run bacteria-admin issue-key acme --label local
+        curl -sX POST localhost:8000/chat/sessions -H "Authorization: Bearer fp_..."
+      render: bash
+    validations:
+      required: true
+
+  - type: dropdown
+    id: verified-how
+    attributes:
+      label: How did you find it?
+      description: >-
+        Asked because it changes what the fix has to prove. A failure only the
+        real path shows is the kind this project keeps hitting, and it needs a
+        guard that has been watched to fail — not another passing test.
+      options:
+        - Running the real thing (server, worker, live provider)
+        - A test failed
+        - Reading the code
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        OS, Python version, and model provider if one is involved. Windows is
+        worth naming — the event loop and the database driver both behave
+        differently there, and `core/platform.py` exists because of it.
+      placeholder: |
+        OS:       Windows 11 / Ubuntu 24.04
+        Python:   3.13.14
+        Provider: anthropic
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or traceback
+      description: >-
+        A failed turn commits its evidence before raising, so the transcript
+        usually explains itself. `GET /chat/sessions/{id}/transcript` and the
+        `run_id` from the response are the useful things to include.
+      render: text

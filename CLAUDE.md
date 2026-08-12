@@ -1,14 +1,14 @@
-# fastpaip — working in this repository
+# bacteria — working in this repository
 
 ## What this is
 
-A uv workspace of two packages. `packages/bacteria` is an AI agent built as
-layered infrastructure; `packages/fastpaip` is the HTTP service that hosts it.
+A uv workspace of two packages. `backend/agent` is an AI agent built as
+layered infrastructure; `backend/app` is the HTTP service that hosts it.
 The application depends on the agent; the agent knows nothing about the
 application.
 
-**Working inside `packages/bacteria`? Read its own
-[`CLAUDE.md`](packages/bacteria/CLAUDE.md) first.** It has stricter rules than
+**Working inside `backend/agent`? Read its own
+[`CLAUDE.md`](backend/agent/CLAUDE.md) first.** It has stricter rules than
 this file — ADRs for boundary changes, two grep-discoverable markers, and a
 testing bar that deliberately rejects coverage. Do not apply this file's
 conventions there.
@@ -25,11 +25,20 @@ Read first, in order:
 ```bash
 just db-up          # Postgres in Docker. Required before almost anything.
 just install
+just hooks          # pre-commit hook; once per clone
 just migrate
 just test           # both suites
+just check-all      # what CI runs, recipe for recipe
+just smoke          # real server + real worker + real requests
 just serve          # migrates first
 just worker         # deferred jobs only run if this is running
+just stack          # all three processes in containers
 ```
+
+`just --list` is the full set. A recipe's description is the **last** contiguous
+comment line above it, so the one-line summary goes immediately above the recipe
+and the reasoning above a blank line — otherwise `just --list` prints the tail of
+an explanation, which it did for six recipes.
 
 **Postgres must be running.** Without it, migration tests skip (loudly) and
 `just serve` fails. Docker Desktop has to be started manually on this machine.
@@ -47,14 +56,14 @@ routes the URL to psycopg2, which is not installed.
 **Do not use `asyncio.set_event_loop_policy` to fix Windows loop problems.**
 uvicorn passes its own `loop_factory`, hardcoded to `ProactorEventLoop`, which
 silently wins. Everything that starts a loop goes through
-`fastpaip.core.platform.run`, and `fastpaip-serve` drives `Server.serve()`
+`bacteria.app.core.platform.run`, and `bacteria-serve` drives `Server.serve()`
 rather than calling `uvicorn.run()`.
 
 **Importing a module must not read settings.** `get_settings` is cached for the
 process, so anything that reads it at import freezes configuration before tests
 can patch it. This already happened once: procrastinate discovers tasks by
 import, building the app read settings, and the chat tests called the live
-Anthropic API instead of the fake. If a test monkeypatches `FASTPAIP_*`, it may
+Anthropic API instead of the fake. If a test monkeypatches `BACTERIA_*`, it may
 also need `get_settings.cache_clear()`.
 
 **`just makemigration` produces a draft, not a migration.** Autogenerate wrote
@@ -65,7 +74,7 @@ that has data in it.
 **Alembic must keep ignoring `procrastinate_*` tables.** They come from
 procrastinate's own SQL via a migration, not from SQLModel metadata, so
 autogenerate would write a migration to drop them. The filter is
-`fastpaip.core.db.include_name`, used by both `migrations/env.py` and the drift
+`bacteria.app.core.db.include_name`, used by both `migrations/env.py` and the drift
 test.
 
 ## Boundaries not to erode
@@ -78,7 +87,7 @@ test.
   coverage on that basis, so logic there is untested by rule.
 - **Migrations own the schema.** Nothing creates tables at startup — not the
   server, not the admin CLI. A test asserts migrations and models agree.
-- **The application never imports `bacteria.interfaces`.** Two composition
+- **The application never imports `bacteria.agent.interfaces`.** Two composition
   roots is correct; they compose different processes.
 - **Jobs are enqueued inside the caller's transaction.** That is the entire
   reason the queue is Postgres rather than Redis. Do not add a broker without
@@ -97,8 +106,23 @@ repeatedly here, not theoretically:
 - The queue's tests passed before the app could enqueue anything at all.
 
 Exercise the real path. Start the server on a socket, run the worker, issue a
-key through the CLI, make the request. Scripts for this belong in a scratchpad,
-not the repository.
+key through the CLI, make the request.
+
+`just smoke` now does exactly that, as `scripts/smoke.py`, and is run by CI. It
+issues a credential through the admin CLI, drives a real server and a real
+worker over HTTP, and asserts the things a test cannot reach — most importantly
+that a deferred job is picked up by a worker in another process, which no test
+run can show because there is no worker in one.
+
+**A one-off verification script still belongs in a scratchpad rather than here.**
+The distinction is whether it is a gate. `scripts/smoke.py` is kept because it
+runs on every pull request and fails them; a script written to answer one
+question, once, is not that, and adding it to the repository leaves behind
+something nobody maintains and nobody trusts.
+
+What `just smoke` deliberately does not cover: an agent turn. That needs a model
+provider, and the options are billing a vendor from CI or putting a test-only
+seam into production code. The turn is still verified by hand.
 
 **Prove a new guard can fail.** The migration drift test was checked by adding
 a field without a migration and watching it break. A guard nobody has seen fail
@@ -138,10 +162,27 @@ that ceremony.
 
 ## The other bacteria repository
 
-`packages/bacteria` came in via `git subtree` and is the working copy. Every
-change to the agent belongs here.
+**Two different things are now called bacteria, and the ambiguity is new.** This
+repository took the name in the rename that produced `bacteria.agent` and
+`bacteria.app`; the repository below had it first. When either is meant, say
+which:
 
-`~/Projects/bacteria` is where it started — the study project it was built in,
+- **this one** — the workspace, at `~/Documents/Projects/bacteria`, whose agent
+  package is `backend/agent` and imports as `bacteria.agent`.
+- **the origin** — `~/Documents/Projects/bacteria-core`, frozen, described below.
+
+This file said the origin was at `~/Projects/bacteria` until that path was
+checked and found not to exist. It is `bacteria-core`, in the same directory as
+everything else. A third directory, `~/Documents/Projects/bacteria-main`, shares
+the prefix and is a different project entirely — not a git repository, and
+nothing here depends on it.
+
+`backend/agent` came in via `git subtree` and is the working copy. Every
+change to the agent belongs here. The subtree link is not maintained — the
+directory has since been renamed and its modules moved under a namespace, so a
+future `git subtree pull` would not apply cleanly and should not be attempted.
+
+`bacteria-core` is where it started — the study project it was built in,
 working through an article series. It is frozen at `f58e89b`, 2026-08-06, which
 is **before the async refactor**: its code is synchronous throughout and has no
 `session/protocol.py`. Never copy code from it in this direction.

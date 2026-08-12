@@ -1,0 +1,61 @@
+"""Background worker entrypoint: configuration, and nothing else.
+
+Runs jobs enqueued by anything else in the system. It defines no work of its
+own — the tasks live with the features that own them, and this process only
+decides which queues to serve and with what concurrency.
+
+Run it alongside the web server:
+
+    uv run bacteria-worker
+
+A worker and the API are separate processes on purpose. They fail differently,
+scale differently, and a slow import must not be able to make the API
+unresponsive — which is precisely what happens while ingestion runs inline.
+"""
+
+import argparse
+import logging
+
+from bacteria.app.core import platform
+from bacteria.app.core.jobs import register_tasks
+from bacteria.app.core.settings import get_settings, load_env_file
+
+
+async def _run(queues: list[str] | None, concurrency: int) -> None:
+    app = register_tasks()
+    async with app.open_async():
+        # `queues=None` is procrastinate's documented "listen to every queue",
+        # which its own annotation (`Iterable[str]`) does not admit.
+        await app.run_worker_async(queues=queues, concurrency=concurrency)  # ty: ignore[invalid-argument-type]
+
+
+def main() -> int:
+    """Parse arguments and run the worker until interrupted."""
+    # Every entrypoint loads it, including the ones with no provider key to find
+    # today. The bug being fixed was one process behaving differently from
+    # another for reasons invisible in the code, and "which of the three reads
+    # `.env`" is the same question in a smaller form.
+    load_env_file()
+
+    parser = argparse.ArgumentParser(prog="bacteria-worker", description=__doc__)
+    parser.add_argument(
+        "--queue",
+        action="append",
+        dest="queues",
+        help="serve only this queue; repeatable. Omit to serve all of them.",
+    )
+    parser.add_argument("--concurrency", type=int, default=4)
+    args = parser.parse_args()
+
+    logging.basicConfig(level=get_settings().log_level)
+    try:
+        platform.run(_run(args.queues, args.concurrency))
+    except KeyboardInterrupt:
+        # An interrupted worker is an ordinary way to stop one, not a crash.
+        # Procrastinate finishes the job in hand before the loop exits.
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,185 @@
+"""Where work enters the system: a terminal read-eval loop.
+
+An interface's job is narrow — receive an event from outside and hand it to the
+runtime. It holds no conversation logic, no prompting, and no tool behavior, so
+adding a second interface (HTTP, a bot, a scheduled job) means writing another
+module this thin rather than untangling this one.
+
+It does own **composition**, though, and that is deliberate. Nothing else in the
+system decides which model provider to use, which tools this deployment has, or
+who approves a call — those are deployment questions, not library questions, and
+answering them here keeps every other module free of global configuration. This
+is the only file that constructs concrete implementations; everything below it
+receives what it needs as an argument.
+
+Credentials are read from the process environment, with ``.env`` loaded into it
+first. Provider SDKs read real environment variables and never a ``.env`` file
+on their own, so without that call a configured key looks, from inside the SDK,
+exactly like no key at all.
+
+Not built:
+    Session continuity. Each invocation creates a fresh session, so nothing is
+    remembered between runs of the command. This is a consequence of the store
+    being in-memory, not an interface decision — see
+    :mod:`bacteria.agent.session.store`.
+
+    Per-run tool scoping. Every registered tool is exposed on every turn. The
+    registry supports narrowing; there is no policy here to narrow by.
+
+    Argument parsing. No flags, no subcommands, no ``--provider``. Environment
+    variables are the entire configuration surface. A real CLI would use
+    ``argparse`` here and keep the environment as the fallback.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Callable
+
+import anyio
+from dotenv import load_dotenv
+
+from bacteria.agent.model.client import ModelClient
+from bacteria.agent.model.gemini_client import GeminiClient
+from bacteria.agent.model.protocol import SendsMessages
+from bacteria.agent.runtime.runtime import Runtime
+from bacteria.agent.session.protocol import SessionRepository
+from bacteria.agent.session.store import SessionStore
+from bacteria.agent.tools.approval import cli_approve
+from bacteria.agent.tools.memory import build_remember_tool
+from bacteria.agent.tools.registry import ToolRegistry
+
+# The annotation is the contract this table exists to state; a checker reading
+# the literal infers the two concrete classes and calls the wider declared type
+# a mismatch. Widening to `dict[str, Any]` to satisfy it would delete the only
+# thing here worth checking.
+PROVIDERS: dict[str, Callable[[], SendsMessages]] = {  # ty: ignore[invalid-assignment]
+    "anthropic": ModelClient,
+    "gemini": GeminiClient,
+}
+"""Selectable model providers, keyed by ``MODEL_PROVIDER``.
+
+A table rather than a chain of conditionals: adding a provider is one entry,
+and the set of valid values is readable at a glance instead of inferred from
+control flow. Each entry needs its own API key in the environment.
+
+Typed as a zero-argument factory rather than a class, because that is all this
+module requires — a provider needing constructor arguments can be added as a
+``lambda`` without changing the table's type.
+"""
+
+DEFAULT_PROVIDER = "anthropic"
+
+
+def build_model_client(provider: str | None = None) -> SendsMessages:
+    """Construct the configured model client.
+
+    Args:
+        provider: Overrides ``MODEL_PROVIDER``. Mostly for tests.
+
+    Returns:
+        A client satisfying the protocol. Which concrete class it is stops
+        mattering the moment it is returned.
+
+    Raises:
+        ValueError: Unrecognized provider name. Rejected rather than silently
+            falling back to the default — a typo in ``MODEL_PROVIDER`` should
+            not quietly bill a different vendor.
+        CredentialsError: The chosen provider found no usable API key. Some
+            providers surface this at construction, others on the first call.
+    """
+    name = (provider or os.getenv("MODEL_PROVIDER", DEFAULT_PROVIDER)).strip().lower()
+    try:
+        client_cls = PROVIDERS[name]
+    except KeyError:
+        known = ", ".join(sorted(PROVIDERS))
+        raise ValueError(f"unknown MODEL_PROVIDER {name!r}; expected one of: {known}") from None
+    return client_cls()
+
+
+def build_tool_registry(session_store: SessionRepository, session_id: str) -> ToolRegistry:
+    """Declare what this deployment can do.
+
+    The complete capability surface, in one readable list. A tool that is not
+    registered here does not exist as far as the model is concerned, which is
+    the property that makes this function worth having separately.
+
+    Takes the store and the session because ``remember`` proposes *into* one
+    conversation, so it cannot be built before there is a conversation to build
+    it for. That is also why the model supplies the fact and never the session:
+    the binding happens here, out of its reach.
+
+    ``add_note`` is no longer registered. :mod:`bacteria.agent.tools.notes` is kept as
+    the worked example a new tool should be modelled on, and keeping it out of
+    the registry is the demonstration of what "registered" means — the module
+    exists, its tests pass, and the model cannot call it.
+
+    ``remember`` activates in the same call here, which it does on no other
+    surface. The precondition is :func:`~bacteria.agent.tools.approval.cli_approve`,
+    wired below: it asks the person at the keyboard, before the handler runs,
+    showing them the key and the value, and they can refuse. That is the human
+    ADR 0017 requires, and they are *upstream* rather than downstream.
+
+    Without this the tool was a dead end on this surface. The model proposed,
+    the user approved the call, the proposal went into a queue nothing in an
+    interactive session drains, and the model reported that it had noted
+    something that was never active on any later turn.
+    """
+    registry = ToolRegistry()
+    registry.register(build_remember_tool(session_store, session_id, activate_immediately=True))
+    return registry
+
+
+async def _run() -> None:
+    """Run the interactive loop until the user exits.
+
+    Exits on an empty line, EOF, or interrupt. Exceptions from a turn are not
+    caught: a failed turn should be visible, and its evidence is already
+    committed to the session by the runtime before the exception reaches here.
+    """
+    load_dotenv()
+
+    session_store = SessionStore()
+    runtime = Runtime(model_client=build_model_client(), session_store=session_store)
+
+    # The session is created before the registry, not after: `remember` is bound
+    # to a conversation, so there has to be one first.
+    session = await session_store.create_session(user_id="local-cli")
+    tool_registry = build_tool_registry(session_store, session.session_id)
+    print(f"session: {session.session_id}  (empty line or Ctrl+C to quit)")
+
+    while True:
+        try:
+            # Blocking `input` on the event loop, knowingly. This process runs
+            # one turn at a time and has nothing else to schedule, so there is
+            # no concurrency for it to stall. A surface that serves more than
+            # one caller must not read its input this way.
+            user_text = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not user_text:
+            break
+
+        result = await runtime.run_turn(
+            session.session_id,
+            user_text,
+            tool_registry=tool_registry,
+            # The real gate. Omitting it would leave the permissive default in
+            # place, which is wrong the moment a human is watching.
+            approve=cli_approve,
+        )
+        print(result.response.text)
+
+
+def main() -> None:
+    """Console-script entry point: start an event loop and hand off to :func:`_run`.
+
+    The loop is started *here*, at the outermost edge, and nowhere else. A
+    library that starts its own loop cannot be embedded in a process that
+    already has one — which is the entire situation this agent is heading into.
+    """
+    anyio.run(_run)
+
+
+if __name__ == "__main__":
+    main()

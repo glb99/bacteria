@@ -19,12 +19,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
-      # Findings are uploaded as SARIF so they appear in the Security tab rather
-      # than only in a log nobody opens after a green run.
+      # Kept even though this repo cannot use what it grants today. The scan
+      # itself was passing; only "Upload SARIF file to GitHub Advanced
+      # Security" failed, with "Resource not accessible by integration" --
+      # GitHub Code Scanning refusing the upload, not zizmor finding anything.
+      # The Security tab it feeds is part of GitHub Advanced Security, free on
+      # public repositories and gated behind a paid plan on private ones.
+      # `security-events: write` grants the permission; it does not turn the
+      # feature on, and `advanced-security` below is what actually routes
+      # around it. Left declared so the day this repository goes public or
+      # upgrades, flipping that one input is the only change needed.
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        with:
+          # Skips the SARIF upload this repository's plan cannot accept, and
+          # prints findings as inline run annotations instead -- visible on
+          # every run and on a PR's Files tab, which is what a repo without
+          # Advanced Security can actually use.
+          advanced-security: false
+          annotations: true

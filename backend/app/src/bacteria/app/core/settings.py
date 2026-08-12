@@ -73,6 +73,27 @@ class Settings(BaseSettings):
             Provider *credentials* are not here: the SDKs read their own
             variables, and routing a secret through this class would mean
             holding it in a place with no reason to.
+        run_worker_in_api: Run the job worker inside the API process instead of
+            as ``bacteria-worker``.
+
+            **False by default, and that default is the honest one.** A worker
+            and the API fail differently, scale differently, and a job that
+            saturates the loop should not be able to make the API unresponsive —
+            which is why they are two commands. Turning this on gives that up.
+
+            It exists because a single-process platform is a real deployment
+            target and the alternative there is worse: with no worker anywhere,
+            ``POST /ingestion/batches:defer`` answers ``202`` for work nothing
+            will ever perform, which is a route that lies. A degraded separation
+            beats a silent drop. See
+            [ADR 0001](../../../../../docs/adr/0001-run-the-worker-in-the-api-process.md).
+
+            Leave it off anywhere you can run two processes — ``just stack``,
+            Docker Compose, or a host with a worker service.
+        worker_concurrency: How many jobs the in-process worker runs at once.
+            Ignored unless ``run_worker_in_api`` is set. Lower than the standalone
+            worker's default would be defensible, since here it competes with
+            request handling for one event loop.
     """
 
     model_config = SettingsConfigDict(
@@ -97,6 +118,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://bacteria:bacteria@localhost:5432/bacteria"
     log_level: str = "INFO"
     model_provider: str = "anthropic"
+    run_worker_in_api: bool = False
+    worker_concurrency: int = 4
 
     @model_validator(mode="after")
     def _reject_unknown_prefixed_variables(self) -> "Settings":

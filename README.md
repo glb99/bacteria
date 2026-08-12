@@ -156,7 +156,9 @@ backend/
 frontend/             not built yet; frontend/README.md says what it needs first
 docs/
   ARCHITECTURE.md     sequence diagrams of each path through the system
+  DEPLOYMENT.md       FastAPI Cloud, and what that platform costs
   MIGRATION.md        the plan this structure came from, and what is left of it
+  adr/                decisions about the application, not the agent
 scripts/
   smoke.py            drives a real server and worker; the check tests cannot make
 .github/workflows/    test · smoke · pre-commit · zizmor
@@ -286,10 +288,26 @@ rather than only here:
 | A nudge to review proposals | The model can suggest memories and a human must accept them, but nothing surfaces how many are waiting. A queue nobody reads looks exactly like an agent with no memory. |
 | Memory that follows a user | Memory is keyed by session, so a new conversation starts with none. Cross-session memory would change `SessionRepository`, which is a boundary change with its own record. |
 | Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
-| A deployment target | There is an image and a compose file that runs it, but nowhere it goes. The choice is open because it turns on one constraint: this is three processes, not one, and `:defer` is broken the moment the worker has no home. A single-app platform would need the worker folded into the API, which contradicts why they are separate. |
 
 What is planned, in what order, and why, is in
 [`docs/MIGRATION.md`](docs/MIGRATION.md).
+
+## Deployment
+
+[FastAPI Cloud](https://fastapicloud.com), on every push to `main`, via
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Migrations run
+from the workflow before the deploy, never at startup.
+
+That platform runs one process and this service is two, so the job worker runs
+**inside the API** there — `BACTERIA_RUN_WORKER_IN_API=true`. It is off by
+default and should stay off anywhere two processes are possible, because it
+gives up the isolation the separate worker exists for. The reasoning, and what
+it costs, is [ADR 0001](docs/adr/0001-run-the-worker-in-the-api-process.md);
+the setup is [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+Deploying somewhere that can run two processes is the better shape and already
+works: [`Dockerfile`](Dockerfile) plus
+[`compose.app.yml`](compose.app.yml), or `just stack`.
 
 ## License
 

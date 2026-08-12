@@ -1,0 +1,73 @@
+# Deploy to FastAPI Cloud on every push to main.
+#
+# Migrations run here, from the runner, before the deploy -- not from the
+# application at startup. Nothing in this repository creates or upgrades a
+# schema on boot, deliberately: a process that builds its own schema starts
+# happily against a database missing a column and fails later at the query,
+# which is worse than refusing to start. So the ordering is the deployment's
+# job, and this is where it lives.
+#
+# That has a consequence worth stating: the database must be reachable from a
+# GitHub-hosted runner. Neon and Supabase are; a database inside a private
+# network is not, and would need this step to move to something that can reach
+# it.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two deploys at once, and never cancel one in flight. A cancelled
+  # deploy can leave migrations applied with the old code still serving, which
+  # is the one state nothing here knows how to reason about.
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A deployment environment, so the secrets below are scoped to it and can
+    # carry a required reviewer if this ever wants one.
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.18"
+          enable-cache: true
+
+      - run: uv sync --all-packages
+
+      # `--locked`, so a lockfile that disagrees with the pyprojects fails here
+      # rather than deploying versions nothing tested.
+      - name: Check the lockfile is current
+        run: uv lock --check
+
+      - name: Apply migrations
+        env:
+          BACTERIA_DATABASE_URL: ${{ secrets.BACTERIA_DATABASE_URL }}
+        run: uv run just migrate
+
+      # Run from the application directory, which is what FastAPI Cloud is
+      # configured with and what makes `[tool.fastapi] entrypoint` in
+      # backend/app/pyproject.toml resolvable without a --path flag.
+      - name: Deploy
+        working-directory: backend/app
+        env:
+          FASTAPI_CLOUD_TOKEN: ${{ secrets.FASTAPI_CLOUD_TOKEN }}
+          FASTAPI_CLOUD_APP_ID: ${{ secrets.FASTAPI_CLOUD_APP_ID }}
+        run: uv run fastapi deploy

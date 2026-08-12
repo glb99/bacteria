@@ -17,6 +17,8 @@ changes, start successfully against a database that is missing a column and fail
 later at the query — which is a worse failure than refusing to start.
 """
 
+import asyncio
+import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -27,6 +29,8 @@ from bacteria.app.core import platform
 from bacteria.app.core.jobs import register_tasks
 from bacteria.app.core.settings import get_settings, load_env_file
 from bacteria.app.views import create_app
+
+logger = logging.getLogger(__name__)
 
 # First, and before settings are read. Provider SDKs look for their keys in the
 # real environment under unprefixed names, which nothing else puts there; see
@@ -40,7 +44,7 @@ logging.basicConfig(level=settings.log_level)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Hold the job queue open for the life of the process.
+    """Hold the job queue open, and optionally run a worker beside the API.
 
     Procrastinate needs its connection pool open before anything can enqueue,
     and it has to stay open for the life of the process rather than being set up
@@ -49,9 +53,43 @@ async def lifespan(_app: FastAPI):
     than at boot, which is the wrong end to find out.
 
     Opening it here rather than per request means one pool for the process.
+
+    The worker is started only when ``run_worker_in_api`` is set, and this stays
+    an entrypoint's job rather than a feature's: it decides *which processes this
+    deployment has*, which is the same kind of question as which port to bind.
+    What it is not is a good idea in general -- see the setting's own
+    documentation and ADR 0001. It exists for platforms that run one process, and
+    the honest comparison there is not against a separate worker but against no
+    worker at all.
     """
-    async with register_tasks().open_async():
-        yield
+    settings = get_settings()
+    # The app object, not whatever `open_async` yields -- `queue_worker.py` uses
+    # it this way and the two must not disagree about what "the queue" is.
+    queue = register_tasks()
+    async with queue.open_async():
+        if not settings.run_worker_in_api:
+            yield
+            return
+
+        logger.warning(
+            "running the job worker inside the API process (concurrency=%d); "
+            "a worker failure can now take the API with it",
+            settings.worker_concurrency,
+        )
+        worker = asyncio.create_task(
+            queue.run_worker_async(concurrency=settings.worker_concurrency),
+            name="in-api-procrastinate-worker",
+        )
+        try:
+            yield
+        finally:
+            # Cancelled and awaited, not abandoned. An un-awaited task is
+            # destroyed with a warning and whatever job it held stays marked
+            # `doing` -- so the row is invisible to the next worker and to
+            # anyone reading the table for stuck work.
+            worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker
 
 
 app = create_app(lifespan=lifespan)

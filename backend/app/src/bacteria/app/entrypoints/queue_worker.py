@@ -11,6 +11,17 @@ Run it alongside the web server:
 A worker and the API are separate processes on purpose. They fail differently,
 scale differently, and a slow import must not be able to make the API
 unresponsive — which is precisely what happens while ingestion runs inline.
+
+One deployment shape does not get that, and it is worth knowing here rather than
+discovering it from the other side. A platform that runs a single ASGI process
+has nowhere to put this command, and with no worker anywhere
+``POST /ingestion/batches:defer`` answers ``202`` for work nothing performs. So
+``BACTERIA_RUN_WORKER_IN_API`` starts a worker from the API's lifespan instead,
+off by default, and every consequence above is genuinely surrendered when it is
+on. See [ADR 0001](../../../../../docs/adr/0001-run-the-worker-in-the-api-process.md).
+
+Do not set it anywhere this command can run. Two workers on one queue is not an
+error either of them can detect.
 """
 
 import argparse

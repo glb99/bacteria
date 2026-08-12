@@ -1,0 +1,34 @@
+# What is not uploaded when `fastapi deploy` packages the application.
+#
+# Same reasoning as `.dockerignore`, which is the file to keep this in step
+# with: anything that is local state, build output, or a credential has no
+# business in a deployed artefact, and a layer that once contained a secret
+# keeps containing it.
+
+.env
+**/.env
+
+.venv/
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/dist/
+htmlcov/
+.coverage
+.coverage.*
+
+# Not shipped: they need Postgres and dev dependencies the deployment does not
+# install, so their presence would only be misleading.
+backend/*/tests/
+
+# Archived background reading. Nothing imports it and it is large.
+backend/agent/articles/
+backend/agent/pdfs/
+backend/*/docs/
+
+.git/
+.github/
+diagram.excalidraw

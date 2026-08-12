@@ -15,6 +15,19 @@ repos:
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
     hooks:
       - id: check-added-large-files
+        # `diagram.excalidraw` is ~6 MB of JSON and is excluded by name rather
+        # than by raising the limit, so the 500 KB ceiling still catches the
+        # next large file somebody adds without meaning to. Excluding the one
+        # known exception keeps the guard doing its job; raising the number
+        # would retire it.
+        #
+        # Worth knowing what committing it costs: the editor rewrites the whole
+        # file on every save, and `-diff` in .gitattributes means no useful
+        # textual delta, so each save adds another multi-megabyte blob to
+        # history permanently. Fine at this size and this edit rate. If the
+        # diagram becomes something that changes weekly, it wants git-lfs or a
+        # home outside the repository.
+        exclude: ^diagram\.excalidraw$
       - id: check-toml
       - id: check-yaml
       - id: check-merge-conflict

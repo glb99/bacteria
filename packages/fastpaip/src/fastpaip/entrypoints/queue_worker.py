@@ -18,7 +18,7 @@ import logging
 
 from fastpaip.core import platform
 from fastpaip.core.jobs import register_tasks
-from fastpaip.core.settings import get_settings
+from fastpaip.core.settings import get_settings, load_env_file
 
 
 async def _run(queues: list[str] | None, concurrency: int) -> None:
@@ -31,6 +31,12 @@ async def _run(queues: list[str] | None, concurrency: int) -> None:
 
 def main() -> int:
     """Parse arguments and run the worker until interrupted."""
+    # Every entrypoint loads it, including the ones with no provider key to find
+    # today. The bug being fixed was one process behaving differently from
+    # another for reasons invisible in the code, and "which of the three reads
+    # `.env`" is the same question in a smaller form.
+    load_env_file()
+
     parser = argparse.ArgumentParser(prog="fastpaip-worker", description=__doc__)
     parser.add_argument(
         "--queue",

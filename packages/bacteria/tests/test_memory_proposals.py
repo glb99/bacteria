@@ -189,3 +189,71 @@ async def test_proposing_into_an_unknown_session_raises():
 
     with pytest.raises(UnknownSessionError):
         await store.propose("nope", key="k", value="v", reason="r", source="model")
+
+
+async def test_the_tool_only_proposes_by_default():
+    """The safe setting is the one you get without asking.
+
+    Every surface except an interactive one has nobody upstream to confirm, so a
+    default that activated would hand the model its own future instructions on
+    the surfaces where that matters most. Pinned as a test because the guard is a
+    default value, and a default is the easiest thing in a signature to change
+    without anyone noticing.
+    """
+    store, sid = await a_session()
+    tool = build_remember_tool(store, sid)
+
+    message = await tool.handler({"key": "tone", "value": "terse", "reason": "asked"})
+
+    state = await store.get_state(sid)
+    assert state.memory == {}
+    assert state.proposals[(MODEL_SOURCE, "tone")].value == "terse"
+    assert "suggested" in message
+
+
+async def test_an_interactive_surface_can_activate_in_the_same_call():
+    """What fixes the CLI's dead end, and what the model is told about it.
+
+    The precondition is an approval gate that asked a human before the handler
+    ran — `cli_approve` does, showing them the key and the value. Requiring a
+    second confirmation there added no check and added a queue nothing drains,
+    which is exactly what happened: the model reported it had noted something
+    that never became active on any later turn.
+
+    The reply is asserted too. A model told "suggested" after the fact is already
+    saved will hedge to the user about something that is true, and the mismatch
+    is invisible unless the message is checked alongside the state.
+    """
+    store, sid = await a_session()
+    tool = build_remember_tool(store, sid, activate_immediately=True)
+
+    message = await tool.handler({"key": "tone", "value": "terse", "reason": "asked"})
+
+    state = await store.get_state(sid)
+    assert state.proposals == {}, "the proposal must not linger once activated"
+    assert state.memory["tone"].value == "terse"
+    # Provenance survives: activated, not written directly, so `source` is intact
+    # and a noisy model's memories stay distinguishable from the owner's.
+    assert state.memory["tone"].source == MODEL_SOURCE
+    assert "remembered" in message
+
+    context = assemble_context(await store.get_state(sid), user_text="hi")
+    assert "terse" in context.system
+
+
+async def test_the_tools_description_matches_what_it_does():
+    """The model is told to hedge only when hedging is correct.
+
+    Both halves of the tool have to agree: a description saying the user will
+    review this, attached to a handler that saves immediately, makes the model
+    understate what it just did — and the reverse makes it promise something that
+    has not happened.
+    """
+    store, sid = await a_session()
+
+    proposing = build_remember_tool(store, sid).description
+    activating = build_remember_tool(store, sid, activate_immediately=True).description
+
+    assert "do not tell them it has been saved" in proposing
+    assert "do not tell them it has been saved" not in activating
+    assert "you may say so" in activating

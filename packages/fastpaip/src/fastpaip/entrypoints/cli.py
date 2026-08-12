@@ -21,6 +21,7 @@ from fastpaip.auth import keys
 from fastpaip.auth.service import issue_key, revoke_key
 from fastpaip.core import platform
 from fastpaip.core.db import get_engine
+from fastpaip.core.settings import load_env_file
 from fastpaip.evaluation.checks import Policy, evaluate
 from fastpaip.evaluation.runs import load_runs
 
@@ -107,6 +108,8 @@ async def _revoke(key_id: str) -> int:
 
 def main() -> int:
     """Parse arguments and run the requested command."""
+    load_env_file()
+
     parser = argparse.ArgumentParser(prog="fastpaip-admin", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 

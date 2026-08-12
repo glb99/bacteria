@@ -1,7 +1,9 @@
 """Tests for the one place the environment is read."""
 
+import os
+
 import pytest
-from fastpaip.core.settings import Settings
+from fastpaip.core.settings import Settings, load_env_file
 from pydantic import ValidationError
 
 
@@ -71,3 +73,42 @@ def test_a_typo_in_a_prefixed_variable_is_still_rejected(monkeypatch):
 
     with pytest.raises(ValidationError, match="DATABSE"):
         Settings()
+
+
+def test_load_env_file_puts_unprefixed_keys_where_the_sdks_look(tmp_path, monkeypatch):
+    """The gap between `Settings` reading `.env` and a provider SDK finding a key.
+
+    The test above proves an unprefixed key in `.env` does not *break* this
+    class. This proves the other half, which is the one that bit: pydantic
+    reading that file into its own fields puts nothing into `os.environ`, and
+    `ANTHROPIC_API_KEY` is read from the real environment by the SDK under that
+    exact name. So the service could not reach a model locally while
+    `uv run bacteria` could — the agent's composition root called `load_dotenv`
+    and no entrypoint here did.
+    """
+    (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=from-the-file\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    assert Settings().model_provider == "anthropic"
+    assert "ANTHROPIC_API_KEY" not in os.environ, "constructing Settings must not export it"
+
+    load_env_file()
+
+    assert os.environ["ANTHROPIC_API_KEY"] == "from-the-file"
+
+
+def test_the_real_environment_wins_over_the_file(tmp_path, monkeypatch):
+    """A container's configuration must not be overridden by a file in the image.
+
+    Same rule `Settings` follows, and the reason it matters more here: this one
+    writes into `os.environ`, so getting the precedence backwards would let a
+    stale committed `.env` silently replace a deployment's real key.
+    """
+    (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=from-the-file\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-the-environment")
+
+    load_env_file()
+
+    assert os.environ["ANTHROPIC_API_KEY"] == "from-the-environment"

@@ -113,9 +113,20 @@ def build_tool_registry(session_store: SessionRepository, session_id: str) -> To
     the worked example a new tool should be modelled on, and keeping it out of
     the registry is the demonstration of what "registered" means — the module
     exists, its tests pass, and the model cannot call it.
+
+    ``remember`` activates in the same call here, which it does on no other
+    surface. The precondition is :func:`~bacteria.tools.approval.cli_approve`,
+    wired below: it asks the person at the keyboard, before the handler runs,
+    showing them the key and the value, and they can refuse. That is the human
+    ADR 0017 requires, and they are *upstream* rather than downstream.
+
+    Without this the tool was a dead end on this surface. The model proposed,
+    the user approved the call, the proposal went into a queue nothing in an
+    interactive session drains, and the model reported that it had noted
+    something that was never active on any later turn.
     """
     registry = ToolRegistry()
-    registry.register(build_remember_tool(session_store, session_id))
+    registry.register(build_remember_tool(session_store, session_id, activate_immediately=True))
     return registry
 
 

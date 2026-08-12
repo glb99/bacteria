@@ -20,6 +20,13 @@ being gated is "record a suggestion a human will read", which genuinely is
 low-risk. If anyone ever gives this handler the ability to write active memory
 directly, that reasoning collapses and the gate must come back.
 
+The exception, and it is the mirror image rather than a loophole: a surface whose
+gate *does* ask a human, before the handler runs and with the key and value in
+front of them, has already taken the step confirmation exists to take. There the
+tool activates in the same call — see ``activate_immediately`` below. What makes
+that safe is the gate, so the two settings are coupled, and the unsafe
+combination is the one nothing here can detect.
+
 Built per turn, not once per process: the handler is closed over a store *and a
 session id*, because a proposal belongs to the conversation that prompted it.
 A module-level definition would have nowhere to put either.
@@ -43,7 +50,11 @@ deployment decided to call it.
 
 
 def build_remember_tool(
-    store: SessionRepository, session_id: str, source: str = MODEL_SOURCE
+    store: SessionRepository,
+    session_id: str,
+    source: str = MODEL_SOURCE,
+    *,
+    activate_immediately: bool = False,
 ) -> ToolDefinition:
     """Build a ``remember`` tool that proposes into ``session_id``.
 
@@ -56,9 +67,34 @@ def build_remember_tool(
         source: Attribution for the proposal. Defaults to
             :data:`MODEL_SOURCE`; a host running several distinguishable agents
             may override it.
+        activate_immediately: Whether the proposal becomes active memory in the
+            same call.
+
+            **Only correct where the approval gate asks a human before the
+            handler runs**, and false by default because most surfaces are not
+            like that. Over HTTP the request that would answer arrives after the
+            one that asked, so nobody is upstream and a proposal must wait.
+
+            An interactive surface is the exception rather than a shortcut around
+            ADR 0017. That ADR requires a human between a suggestion and the
+            model's future instructions; a gate like
+            :func:`bacteria.tools.approval.cli_approve` *is* that human, asked
+            first, shown the key and the value, and able to refuse. Requiring a
+            second confirmation afterwards does not add a check — it adds a queue
+            nothing in an interactive session ever drains, which is exactly what
+            it did: the model reported a suggestion, the user approved it, and it
+            sat inert while the model told them it had been noted.
+
+            Passing ``True`` without such a gate hands the model the ability to
+            write its own future instructions. Nothing here can detect that,
+            which is why it is keyword-only, off by default, and stated at
+            length.
 
     Returns:
-        A registrable tool definition.
+        A registrable tool definition. Its description and its reply to the
+        model both change with ``activate_immediately``, so the model is never
+        told to hedge about a memory that is already active, or that something
+        is saved when it is only suggested.
     """
 
     async def handler(tool_input: dict[str, Any]) -> str:
@@ -70,21 +106,38 @@ def build_remember_tool(
             reason=tool_input["reason"],
             source=source,
         )
-        # Says "suggested", not "remembered". The model is told the truth about
-        # what happened, because a model that believes a fact is now active will
-        # rely on it next turn and be wrong until someone confirms it.
-        return f"suggested remembering {key!r}; it takes effect once the user confirms it"
+        if not activate_immediately:
+            # Says "suggested", not "remembered". The model is told the truth
+            # about what happened, because a model that believes a fact is now
+            # active will rely on it next turn and be wrong until someone
+            # confirms it.
+            return f"suggested remembering {key!r}; it takes effect once the user confirms it"
+
+        # Proposed and then activated rather than written directly, so the
+        # entry keeps `source` and the lifecycle stays the one ADR 0017
+        # describes — the human step happened at the gate, not here.
+        await store.activate(session_id, source=source, key=key)
+        return f"remembered {key!r} for the rest of this conversation"
+
+    proposes_only = (
+        "Suggests a durable fact about this user or conversation, to be kept for "
+        "future turns. The suggestion is reviewed by the user before it takes "
+        "effect, so do not tell them it has been saved. Use it for stable "
+        "preferences and facts, not for things only relevant right now."
+    )
+    takes_effect = (
+        "Records a durable fact about this user or conversation, kept for future "
+        "turns. The user is asked to approve the call before it runs, so if it "
+        "succeeds the fact is saved and you may say so. Use it for stable "
+        "preferences and facts, not for things only relevant right now."
+    )
 
     return ToolDefinition(
         name="remember",
-        # Written for the model. It states the confirmation step, so the model
-        # does not promise the user that something has been saved.
-        description=(
-            "Suggests a durable fact about this user or conversation, to be kept for "
-            "future turns. The suggestion is reviewed by the user before it takes "
-            "effect, so do not tell them it has been saved. Use it for stable "
-            "preferences and facts, not for things only relevant right now."
-        ),
+        # Written for the model, and it has to match what actually happens: a
+        # description telling the model to hedge, attached to a tool that saves
+        # immediately, makes the model understate what it just did.
+        description=takes_effect if activate_immediately else proposes_only,
         input_schema={
             "type": "object",
             "properties": {

@@ -25,8 +25,14 @@ from fastapi import FastAPI
 
 from fastpaip.core import platform
 from fastpaip.core.jobs import register_tasks
-from fastpaip.core.settings import get_settings
+from fastpaip.core.settings import get_settings, load_env_file
 from fastpaip.views import create_app
+
+# First, and before settings are read. Provider SDKs look for their keys in the
+# real environment under unprefixed names, which nothing else puts there; see
+# `load_env_file`. An entrypoint is the right place for it because this is where
+# the process is composed, and the wrong place for it is anywhere importable.
+load_env_file()
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)

@@ -607,6 +607,7 @@ dependencies = [
     { name = "procrastinate" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "sqlmodel" },
 ]
 
@@ -619,6 +620,7 @@ requires-dist = [
     { name = "procrastinate" },
     { name = "psycopg", extras = ["binary", "pool"] },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "sqlmodel" },
 ]
 

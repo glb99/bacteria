@@ -38,6 +38,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_PREFIX = "FASTPAIP_"
 
+ENV_FILE = ".env"
+"""The dotenv file, named once so the two readers of it cannot drift apart.
+
+:class:`Settings` reads it for its own prefixed values; :func:`load_env_file`
+reads it into the process environment for the provider SDKs. Both resolve it
+relative to the working directory.
+"""
+
 
 class Settings(BaseSettings):
     """Everything this deployment can be configured with.
@@ -69,7 +77,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix=ENV_PREFIX,
-        env_file=".env",
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         # ``ignore``, not ``forbid``, and this is not a weakening of the guard.
         # The guard is :meth:`_reject_unknown_prefixed_variables` below, written
@@ -116,6 +124,41 @@ class Settings(BaseSettings):
                 f"unrecognized {ENV_PREFIX}* environment variable(s): {', '.join(unknown)}"
             )
         return self
+
+
+def load_env_file() -> None:
+    """Load `.env` into the process environment. Call from an entrypoint only.
+
+    :class:`Settings` already reads `.env` for its own ``FASTPAIP_*`` values, so
+    this is not about configuration reaching this class. It is about the values
+    that never do: provider SDKs read ``ANTHROPIC_API_KEY`` and
+    ``GEMINI_API_KEY`` from the real environment, under those exact unprefixed
+    names, and pydantic-settings reading a file into *its own* fields puts
+    nothing into ``os.environ`` for them to find.
+
+    So the service could not reach a model locally without an operator exporting
+    keys by hand, while ``uv run bacteria`` worked — because the agent's own
+    composition root called this and no entrypoint here did. The asymmetry was
+    invisible in the code and immediate the first time anyone served a turn.
+
+    A function called from an entrypoint rather than an import side effect.
+    Loading a file on import would mutate the environment of anything that
+    imported anything downstream, test collection included, which is the property
+    :func:`get_settings` is shaped to avoid.
+
+    Existing variables win, matching :class:`Settings` and for the same reason: a
+    container's configuration must not be overridden by a file left in an image.
+
+    The path is given explicitly rather than discovered. Bare ``load_dotenv()``
+    searches *upward from the calling module's own file*, so it would resolve
+    relative to this package's location on disk while ``Settings(env_file=ENV_FILE)``
+    resolves relative to the working directory — two mechanisms that agree until
+    a process is started from somewhere unexpected and then load different files.
+    One of them being right and the other subtly wrong is worse than either.
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=ENV_FILE, override=False)
 
 
 @lru_cache

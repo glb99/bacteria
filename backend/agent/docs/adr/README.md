@@ -10,6 +10,13 @@ reasoning behind the original.
 These answer *why*. What the code does is in the docstrings; how it fits
 together is in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
+**Records 0001–0023 were written before the package was renamed** and say
+`bacteria` where they mean `bacteria.agent`, and `fastpaip` where they mean
+`bacteria.app`. They were rewritten in place rather than superseded: a rename
+changes what a reader has to translate, not what any of them decided. `git log`
+on this directory shows what they said before. See the rule and its one
+exception in [`../../CLAUDE.md`](../../CLAUDE.md#decision-records).
+
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions in this repository | Accepted |

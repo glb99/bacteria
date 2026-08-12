@@ -38,13 +38,30 @@ ranking and no query — so this is semantic memory by role and a keyed profile
 store by mechanism. Relevance is that module's question, not this one's; this
 module owns what is true, not what is worth saying now.
 
-Invariant: nothing mutates authoritative state except :meth:`SessionStore.commit`,
-:meth:`SessionStore.remember`, and :meth:`SessionStore.forget`. This is enforced
+Invariant: nothing outside this class mutates authoritative state. The writers
+are :meth:`SessionStore.create_session` for the session itself,
+:meth:`SessionStore.commit` for turn state, :meth:`SessionStore.remember` and
+:meth:`SessionStore.forget` for the owner's memory, and
+:meth:`SessionStore.propose`, :meth:`SessionStore.activate` and
+:meth:`SessionStore.reject` for the proposal lifecycle. This is enforced
 structurally rather than by convention — :meth:`SessionStore.get_state` returns a
 deep copy, so a caller that mutates what it reads changes nothing. Without the
 copy the invariant would hold only as long as every caller behaved, and the
 class of bug it prevents (authoritative state quietly edited from outside the
 module that owns it) is close to untraceable once it happens.
+
+The list above said only ``commit``, ``remember`` and ``forget`` until the
+proposal methods had existed for three ADRs. Worth knowing why that was harmless
+and still wrong: the enforcement is the deep copy, which never depended on the
+list, so nothing broke — but the marker is what a reader trusts instead of
+checking, and an ``Invariant:`` naming three of seven writers is a claim they
+have no reason to doubt.
+
+Correcting it, the first attempt named six and still missed ``create_session``,
+which was found by walking this module's AST rather than by reading it. That is
+the honest measure of how much an enumeration in prose is worth: nothing asserts
+the size of this set, so an eighth writer added later leaves this paragraph
+wrong and every test passing.
 
 Everything a model or runtime produces reaches this store as a *proposal*: it is
 passed to ``commit`` and becomes canonical only if ``commit`` applies it. The

@@ -180,7 +180,14 @@ but the three classical kinds of memory, which is why they cannot be merged:
 |---|---|---|---|---|
 | `transcript` | Episodic | What happened | Append-only, permanent | `commit` |
 | `working_state` | Working | What is held right now | Current turn; assume nothing survives | `commit` |
-| `memory` | Semantic | What is true | Deliberate, until deliberately removed | `remember` / `forget` |
+| `memory` | Semantic | What is true | Deliberate, until deliberately removed | `remember` / `forget` — the owner; `activate` for anything else |
+| `proposals` | — | What was suggested | Until accepted or rejected | `propose` / `activate` / `reject` |
+
+`proposals` is not a fourth kind of memory — it is semantic memory that has not
+been accepted yet, kept in its own collection because *which collection an entry
+is in* is what decides whether a model can see it. A `status` column would let
+that answer disagree with its container. See
+[ADR 0017](adr/0017-memory-is-proposed-and-confirmed.md).
 
 The distinctions that look like taste follow from the kinds. Memory reaches the
 model through the system prompt and never through the messages, because a fact
@@ -223,7 +230,7 @@ the source with `grep -rn "Invariant:" src/`.
 
 | Invariant | Why it matters | Test |
 |---|---|---|
-| Only `commit`/`remember`/`forget` mutate state | Authoritative state edited from outside leaves no trace of who did it | `test_get_state_returns_a_copy_not_the_authoritative_record` |
+| Nothing outside `SessionStore` mutates state — the writers are `create_session`, `commit`, `remember`, `forget`, `propose`, `activate`, `reject` | Authoritative state edited from outside leaves no trace of who did it | `test_get_state_returns_a_copy_not_the_authoritative_record` |
 | A handler never reaches the model | The model would hold the ability to run code, not just request it | `test_schema_never_exposes_the_handler` |
 | Rejection means nothing ran | A gate checked after the fact is not a gate | `test_rejected_approval_prevents_the_handler_from_running` |
 | Only `ServingError` retries | Retrying a non-transient failure burns quota to fail identically | `test_asset_failure_is_not_retried` and siblings |

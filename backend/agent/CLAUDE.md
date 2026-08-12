@@ -87,9 +87,24 @@ Any decision that constrains future work, that a reasonable engineer would make
 differently, or that is a deliberate omission which will look like a bug, gets an
 ADR. Nygard format — Status, Context, Decision, Consequences.
 
-Records are immutable. Supersede with a new record; do not edit an old one. The
+Records are immutable **in substance**. Supersede with a new record; do not edit
+an old one to change what it decided, what it considered, or what it cost. The
 Consequences section must include the ones you dislike, or the record is useless
 to whoever later considers reversing it.
+
+Renaming is the one exception, and it has been used once. When the package was
+renamed — `bacteria` to `bacteria.agent`, `fastpaip` to `bacteria.app` — every
+record was rewritten in place rather than superseded. Twenty-three records
+describing a package under a name that no longer appears anywhere would have
+made the whole directory a translation exercise, and the alternative on offer
+was one new ADR that every reader would have to find *before* the record they
+actually wanted. Nothing about any decision changed; only the words for the
+things it decided about.
+
+The line to hold: if an edit would change what a reader concludes, it is a new
+record. If it only changes what they have to translate, it is a rename. A rename
+is recorded in the commit that makes it, so `git log` still shows what the
+records said before.
 
 Library choices and formatting conventions do not qualify.
 

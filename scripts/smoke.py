@@ -111,7 +111,15 @@ def issue_key(principal: str) -> str:
     the hashing between them is exactly where they could disagree.
     """
     result = subprocess.run(
-        [sys.executable, "-m", "fastpaip.entrypoints.cli", "issue-key", principal, "--label", "smoke"],
+        [
+            sys.executable,
+            "-m",
+            "fastpaip.entrypoints.cli",
+            "issue-key",
+            principal,
+            "--label",
+            "smoke",
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -153,7 +161,11 @@ def check_ownership(base_url: str, key: str, other_key: str) -> str:
     )
     # 404 and not 403: a 403 would confirm the session exists, which turns an id
     # into an oracle for enumeration.
-    check(stranger.status_code == 404, "another principal's session is 404, not 403", stranger.status_code)
+    check(
+        stranger.status_code == 404,
+        "another principal's session is 404, not 403",
+        stranger.status_code,
+    )
 
     absent = httpx.get(
         f"{base_url}/chat/sessions/does-not-exist/transcript", headers=headers, timeout=10.0
@@ -173,12 +185,20 @@ def check_memory(base_url: str, key: str, session_id: str) -> None:
     )
     check(written.status_code == 200, "memory written", written.status_code)
 
-    listed = httpx.get(f"{base_url}/chat/sessions/{session_id}/memory", headers=headers, timeout=10.0)
+    listed = httpx.get(
+        f"{base_url}/chat/sessions/{session_id}/memory", headers=headers, timeout=10.0
+    )
     entries = listed.json()
-    check(any(e["key"] == "tone" and e["value"] == "terse" for e in entries), "memory reads back", entries)
+    check(
+        any(e["key"] == "tone" and e["value"] == "terse" for e in entries),
+        "memory reads back",
+        entries,
+    )
     check(all(e["reason"] for e in entries), "every entry carries its reason", entries)
 
-    httpx.delete(f"{base_url}/chat/sessions/{session_id}/memory/tone", headers=headers, timeout=10.0)
+    httpx.delete(
+        f"{base_url}/chat/sessions/{session_id}/memory/tone", headers=headers, timeout=10.0
+    )
     after = httpx.get(
         f"{base_url}/chat/sessions/{session_id}/memory", headers=headers, timeout=10.0
     ).json()
@@ -205,7 +225,11 @@ def check_inline_ingestion(base_url: str, key: str) -> None:
     check(body["accepted"] == 1, "one record accepted", body)
     check(len(body["rejected"]) == 2, "two records rejected, not counted away", body)
     # The index is what makes two identical bad records distinguishable.
-    check(sorted(r["index"] for r in body["rejected"]) == [1, 2], "rejections carry their position", body)
+    check(
+        sorted(r["index"] for r in body["rejected"]) == [1, 2],
+        "rejections carry their position",
+        body,
+    )
 
 
 def check_deferred_ingestion(base_url: str, key: str, database_url: str) -> None:
@@ -281,7 +305,9 @@ def main() -> int:
                 [sys.executable, "-m", "fastpaip.entrypoints.asgi"], env=environment
             )
             try:
-                with background("worker", [sys.executable, "-m", "fastpaip.entrypoints.queue_worker"]):
+                with background(
+                    "worker", [sys.executable, "-m", "fastpaip.entrypoints.queue_worker"]
+                ):
                     wait_for_health(args.base_url, server)
                     run_checks(args.base_url, database_url)
             finally:

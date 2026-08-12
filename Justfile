@@ -181,6 +181,25 @@ serve: db-up migrate
 worker *args:
     uv run fastpaip-worker {{ args }}
 
+# Migrations run to completion first, then the API and the worker start against
+# the same image. Combined explicitly rather than named `compose.override.yml`,
+# which Docker Compose would load on its own -- `just db-up` and the test suite
+# want the database and nothing else.
+#
+# This is not a deployment: no TLS, no restart policy, development credentials.
+# It exists so the image is known to run all three processes, which a Dockerfile
+# otherwise only appears to do.
+
+# Run the whole stack in containers, as one image and three processes
+[group('run')]
+stack *args:
+    docker compose -f compose.yml -f compose.app.yml up --build {{ args }}
+
+# Stop the containerized stack and remove its volumes
+[group('run')]
+stack-down:
+    docker compose -f compose.yml -f compose.app.yml down -v --remove-orphans
+
 # Talk to the agent in a terminal
 [group('run')]
 agent:

@@ -1,0 +1,90 @@
+# The application in containers, on top of `compose.yml`. Combined explicitly:
+#
+#   docker compose -f compose.yml -f compose.app.yml up
+#
+# Not an override file, which Docker Compose loads automatically. `just db-up`
+# and the test suite want the database and nothing else, and a file that loads
+# itself would start a container of the code you are about to edit.
+#
+# This is not a deployment. There is no TLS, no restart policy, and the database
+# is the development one with its password in the clear. It exists to prove the
+# image runs all three processes against a real database -- which is the question
+# a Dockerfile can otherwise only be assumed to answer. What a deployment needs
+# on top is a decision nobody has made yet; see the Status table in README.md.
+
+services:
+  # Migrations as their own service, run to completion before anything serves.
+  # Nothing in this repository creates tables at startup, so the schema has to
+  # arrive from somewhere, and putting `alembic upgrade head` in the API's own
+  # command would run it once per replica -- concurrently, on the same database.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fastpaip:local
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # `postgres` -- the compose service -- rather than localhost. The default
+      # in settings.py is written for a process on the host.
+      FASTPAIP_DATABASE_URL: postgresql+psycopg://fastpaip:fastpaip@postgres:5432/fastpaip
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fastpaip:local
+    # 0.0.0.0, because the default 127.0.0.1 in asgi.py is only reachable from
+    # inside the container -- the port publish below would connect to nothing.
+    command: ["fastpaip-serve"]
+    environment:
+      FASTPAIP_DATABASE_URL: postgresql+psycopg://fastpaip:fastpaip@postgres:5432/fastpaip
+      FASTPAIP_LOG_LEVEL: ${FASTPAIP_LOG_LEVEL:-INFO}
+      FASTPAIP_MODEL_PROVIDER: ${FASTPAIP_MODEL_PROVIDER:-anthropic}
+      # Passed through unprefixed, because the provider SDKs read these exact
+      # names. Empty is fine until a turn is taken.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      HOST: 0.0.0.0
+      PORT: "8000"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # /health deliberately does not touch the database, so this reports on the
+      # process rather than on Postgres. A health check that fails when a
+      # dependency is down makes the orchestrator restart a working process and
+      # turns one outage into two.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # A separate process, not a thread inside the API, and not optional. Without
+  # it `POST /ingestion/batches:defer` accepts work that nothing ever performs --
+  # the route answers 202 and the job sits in the table forever.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fastpaip:local
+    command: ["fastpaip-worker"]
+    environment:
+      FASTPAIP_DATABASE_URL: postgresql+psycopg://fastpaip:fastpaip@postgres:5432/fastpaip
+      FASTPAIP_LOG_LEVEL: ${FASTPAIP_LOG_LEVEL:-INFO}
+      FASTPAIP_MODEL_PROVIDER: ${FASTPAIP_MODEL_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

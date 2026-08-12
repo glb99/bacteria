@@ -144,3 +144,33 @@ def test_the_job_schema_is_installed_by_the_migration_history(migrated_db):
     engine.dispose()
 
     assert {"procrastinate_jobs", "procrastinate_events"} <= present
+
+
+def test_every_memory_table_carries_the_same_content_columns():
+    """The three memory tables differ in their keys and in nothing else.
+
+    They inherit `MemoryContent` so that a field is added once rather than
+    three times. That only helps while it holds: the plausible mistake is
+    adding a column to one class instead of the base, and the one most likely
+    to be forgotten is `chat_user_memory_entry` — the table where an
+    `expires_at` would matter most, since a user-scoped memory outlives every
+    session it was written in.
+
+    Compares content columns only. The keys are *supposed* to differ; that
+    difference is what ADR 0021 and ADR 0017 are about.
+    """
+    from fastpaip.chat.models import ChatMemoryEntry, ChatMemoryProposal, ChatUserMemoryEntry
+
+    def content(model) -> set[str]:
+        table = model.__table__
+        keys = {column.name for column in table.primary_key.columns}
+        return {column.name for column in table.columns} - keys
+
+    session_scoped = content(ChatMemoryEntry)
+
+    assert session_scoped, "discovery found no content columns, so this proves nothing"
+    assert content(ChatUserMemoryEntry) == session_scoped
+    # The proposal table's `source` is part of its key rather than content,
+    # which is exactly the rule that keeps two proposers from overwriting one
+    # another -- so it is expected to be absent here.
+    assert content(ChatMemoryProposal) == session_scoped - {"source"}

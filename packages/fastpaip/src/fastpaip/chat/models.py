@@ -32,6 +32,37 @@ def _tz_column() -> Column:
     return Column(DateTime(timezone=True), nullable=False)
 
 
+class MemoryContent(SQLModel):
+    """What every memory row holds, whatever owns it.
+
+    A non-table base. The three tables below stay three tables with three
+    primary keys — the keys *are* the rules each one states (ADR 0021), and the
+    only thing that was ever duplicated is the column list. So each table
+    declares its own identity and inherits what they all say.
+
+    Adding a field here adds it to all three, which is the point: the lifecycle
+    work will want an ``expires_at``, and adding it to two of three is the
+    plausible mistake — the omitted one would be user-scoped memory, where
+    expiry matters most.
+
+    ``sa_type`` rather than ``sa_column``, and that is not a style preference. A
+    ``Column`` is an instance bound to one ``Table``; three subclasses
+    inheriting a single one would fight over which table owns it.
+    """
+
+    value: dict[str, Any] = Field(default_factory=dict, sa_type=JSON, nullable=True)
+    reason: str
+    # `sa_type` is annotated as taking a type, and this passes an instance,
+    # because the timezone flag is an argument to the type rather than part of
+    # it. SQLAlchemy accepts either; SQLModel's signature does not say so. The
+    # rendered DDL was diffed against the previous `sa_column=_tz_column()`
+    # form and is identical — `TIMESTAMP WITH TIME ZONE NOT NULL`.
+    created_at: datetime = Field(
+        default_factory=_utcnow,
+        sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
+    )
+
+
 class ChatSession(SQLModel, table=True):
     """One conversation. The row the other two tables hang off.
 
@@ -83,7 +114,7 @@ class ChatTranscriptItem(SQLModel, table=True):
     timestamp: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
 
-class ChatMemoryEntry(SQLModel, table=True):
+class ChatMemoryEntry(MemoryContent, table=True):
     """One active fact — something the model is told on every later turn.
 
     ``value`` is wrapped in a JSON object rather than stored bare, because a
@@ -104,12 +135,9 @@ class ChatMemoryEntry(SQLModel, table=True):
     session_id: str = Field(foreign_key="chat_session.session_id", primary_key=True)
     key: str = Field(primary_key=True)
     source: str
-    value: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    reason: str
-    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
 
-class ChatUserMemoryEntry(SQLModel, table=True):
+class ChatUserMemoryEntry(MemoryContent, table=True):
     """One active fact belonging to a person rather than to a conversation.
 
     A third table rather than a ``scope`` column on ``chat_memory_entry``, and
@@ -135,12 +163,9 @@ class ChatUserMemoryEntry(SQLModel, table=True):
     user_id: str = Field(primary_key=True)
     key: str = Field(primary_key=True)
     source: str
-    value: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    reason: str
-    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
 
-class ChatMemoryProposal(SQLModel, table=True):
+class ChatMemoryProposal(MemoryContent, table=True):
     """One suggested fact, which no model can see until a human activates it.
 
     A separate table rather than a ``status`` column on the one above, and the
@@ -162,6 +187,3 @@ class ChatMemoryProposal(SQLModel, table=True):
     session_id: str = Field(foreign_key="chat_session.session_id", primary_key=True)
     source: str = Field(primary_key=True)
     key: str = Field(primary_key=True)
-    value: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    reason: str
-    created_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())

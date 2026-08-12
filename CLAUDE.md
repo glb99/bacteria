@@ -169,14 +169,20 @@ which:
 
 - **this one** — the workspace, at `~/Documents/Projects/bacteria`, whose agent
   package is `backend/agent` and imports as `bacteria.agent`.
-- **the origin** — `~/Projects/bacteria`, frozen, described below.
+- **the origin** — `~/Documents/Projects/bacteria-core`, frozen, described below.
+
+This file said the origin was at `~/Projects/bacteria` until that path was
+checked and found not to exist. It is `bacteria-core`, in the same directory as
+everything else. A third directory, `~/Documents/Projects/bacteria-main`, shares
+the prefix and is a different project entirely — not a git repository, and
+nothing here depends on it.
 
 `backend/agent` came in via `git subtree` and is the working copy. Every
 change to the agent belongs here. The subtree link is not maintained — the
 directory has since been renamed and its modules moved under a namespace, so a
 future `git subtree pull` would not apply cleanly and should not be attempted.
 
-`~/Projects/bacteria` is where it started — the study project it was built in,
+`bacteria-core` is where it started — the study project it was built in,
 working through an article series. It is frozen at `f58e89b`, 2026-08-06, which
 is **before the async refactor**: its code is synchronous throughout and has no
 `session/protocol.py`. Never copy code from it in this direction.

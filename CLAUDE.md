@@ -25,11 +25,20 @@ Read first, in order:
 ```bash
 just db-up          # Postgres in Docker. Required before almost anything.
 just install
+just hooks          # pre-commit hook; once per clone
 just migrate
 just test           # both suites
+just check-all      # what CI runs, recipe for recipe
+just smoke          # real server + real worker + real requests
 just serve          # migrates first
 just worker         # deferred jobs only run if this is running
+just stack          # all three processes in containers
 ```
+
+`just --list` is the full set. A recipe's description is the **last** contiguous
+comment line above it, so the one-line summary goes immediately above the recipe
+and the reasoning above a blank line — otherwise `just --list` prints the tail of
+an explanation, which it did for six recipes.
 
 **Postgres must be running.** Without it, migration tests skip (loudly) and
 `just serve` fails. Docker Desktop has to be started manually on this machine.

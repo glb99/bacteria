@@ -1,5 +1,10 @@
 # fastpaip
 
+[![Test](https://github.com/glb99/fastpaip/actions/workflows/test.yml/badge.svg)](https://github.com/glb99/fastpaip/actions/workflows/test.yml)
+[![Smoke](https://github.com/glb99/fastpaip/actions/workflows/smoke.yml/badge.svg)](https://github.com/glb99/fastpaip/actions/workflows/smoke.yml)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](.python-version)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 An HTTP service built around a small AI agent — conversations that survive a
 restart, and a bulk import pipeline — as a uv workspace of two packages.
 
@@ -17,13 +22,20 @@ them is a protocol the agent declares and the application implements.
 
 ## Quickstart
 
-Needs Python 3.13+, [uv](https://docs.astral.sh/uv/), and
-[just](https://just.systems/). An `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` in
-`.env` is required for anything that calls a model.
+Needs Python 3.13+, [uv](https://docs.astral.sh/uv/), [just](https://just.systems/),
+and Docker. An `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` in `.env` is required for
+anything that calls a model.
+
+```bash
+cp .env.example .env
+```
 
 ```bash
 just db-up && just install && just migrate && just test
 ```
+
+Contributing? `just hooks` installs the pre-commit hook as well, and
+[CONTRIBUTING.md](CONTRIBUTING.md) has the conventions.
 
 `just db-up` starts Postgres in Docker and waits until it accepts queries. It is
 required — the tests skip without it, and there is no SQLite fallback anywhere.
@@ -136,6 +148,12 @@ packages/
 docs/
   ARCHITECTURE.md     sequence diagrams of each path through the system
   MIGRATION.md        the plan this structure came from, and what is left of it
+scripts/
+  smoke.py            drives a real server and worker; the check tests cannot make
+.github/workflows/    test · smoke · pre-commit · zizmor
+Dockerfile            one image; compose picks which of the three processes it is
+compose.yml           Postgres, for development and tests
+compose.app.yml       the application in containers, combined explicitly
 ```
 
 Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). A chat turn drawn end
@@ -200,8 +218,30 @@ just test            # both suites; test-agent and test-app run them separately
 just cov             # application coverage, entrypoints omitted
 just lint            # ruff check + format
 just typing          # ty
+just audit-ci        # zizmor over the workflows
 just check-all       # all of the above
 ```
+
+`just check-all` is what CI runs, recipe for recipe. A check that exists only in
+CI is one people meet by being rejected by it.
+
+```bash
+just smoke           # start a server and a worker, issue a key, make real requests
+```
+
+The one check the suite structurally cannot make. It proves a deferred job is
+picked up by a worker in another process — there is no worker in a test run, and
+this project has already shipped a queue whose tests passed before the
+application could enqueue anything at all.
+
+```bash
+just stack           # the whole thing in containers: migrate, then API + worker
+just stack-down
+```
+
+One image, three processes. Not a deployment — no TLS, no restart policy,
+development credentials — but proof the image runs all of them against a real
+database.
 
 ```bash
 just makemigration "add whatever"   # generate from model changes — read it before committing
@@ -237,6 +277,7 @@ rather than only here:
 | A nudge to review proposals | The model can suggest memories and a human must accept them, but nothing surfaces how many are waiting. A queue nobody reads looks exactly like an agent with no memory. |
 | Memory that follows a user | Memory is keyed by session, so a new conversation starts with none. Cross-session memory would change `SessionRepository`, which is a boundary change with its own record. |
 | Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
+| A deployment target | There is an image and a compose file that runs it, but nowhere it goes. The choice is open because it turns on one constraint: this is three processes, not one, and `:defer` is broken the moment the worker has no home. A single-app platform would need the worker folded into the API, which contradicts why they are separate. |
 
 What is planned, in what order, and why, is in
 [`docs/MIGRATION.md`](docs/MIGRATION.md).

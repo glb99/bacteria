@@ -97,8 +97,23 @@ repeatedly here, not theoretically:
 - The queue's tests passed before the app could enqueue anything at all.
 
 Exercise the real path. Start the server on a socket, run the worker, issue a
-key through the CLI, make the request. Scripts for this belong in a scratchpad,
-not the repository.
+key through the CLI, make the request.
+
+`just smoke` now does exactly that, as `scripts/smoke.py`, and is run by CI. It
+issues a credential through the admin CLI, drives a real server and a real
+worker over HTTP, and asserts the things a test cannot reach — most importantly
+that a deferred job is picked up by a worker in another process, which no test
+run can show because there is no worker in one.
+
+**A one-off verification script still belongs in a scratchpad rather than here.**
+The distinction is whether it is a gate. `scripts/smoke.py` is kept because it
+runs on every pull request and fails them; a script written to answer one
+question, once, is not that, and adding it to the repository leaves behind
+something nobody maintains and nobody trusts.
+
+What `just smoke` deliberately does not cover: an agent turn. That needs a model
+provider, and the options are billing a vendor from CI or putting a test-only
+seam into production code. The turn is still verified by hand.
 
 **Prove a new guard can fail.** The migration drift test was checked by adding
 a field without a migration and watching it break. A guard nobody has seen fail

@@ -1,0 +1,158 @@
+# The gate. Every job here is a `just` recipe you can run locally with the same
+# name, deliberately: a check that only exists in CI is a check people discover
+# by having it reject them.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only by default. Any job needing more says so itself.
+permissions:
+  contents: read
+
+concurrency:
+  # Supersede an in-flight run when a branch is pushed again. Not applied to
+  # `main`, where each commit's result is a record worth keeping.
+  group: test-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Pinned so a uv release cannot change what the gate means. Before
+          # bumping, check astral-sh/setup-uv knows the new version's checksum.
+          version: "0.11.18"
+          enable-cache: true
+      - run: uv sync --all-packages
+      - run: uv run just lint
+
+  typing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Pinned so a uv release cannot change what the gate means. Before
+          # bumping, check astral-sh/setup-uv knows the new version's checksum.
+          version: "0.11.18"
+          enable-cache: true
+      - run: uv sync --all-packages
+      - run: uv run just typing
+
+  test-agent:
+    # Windows is here because this project keeps being bitten by it, and the
+    # agent is the half that can be tested there cheaply -- pure Python, no
+    # database, no event-loop policy to negotiate. `core/platform.py` and the
+    # `pytest_asyncio_loop_factories` hook both exist because of Windows
+    # behaviour that no Linux run would ever reveal.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Pinned so a uv release cannot change what the gate means. Before
+          # bumping, check astral-sh/setup-uv knows the new version's checksum.
+          version: "0.11.18"
+          enable-cache: true
+      - run: uv sync --all-packages
+      - run: uv run just test-agent
+
+  test-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Pinned so a uv release cannot change what the gate means. Before
+          # bumping, check astral-sh/setup-uv knows the new version's checksum.
+          version: "0.11.18"
+          enable-cache: true
+      - run: uv sync --all-packages
+
+      # Compose, not a `services:` block. The service block is the idiomatic
+      # choice and would duplicate the image, credentials, and healthcheck that
+      # compose.yml already states -- two declarations of one database, free to
+      # drift, with the drift showing up as a test suite that passes here and
+      # fails locally. `--wait` blocks on the same healthcheck `just db-up` uses.
+      - name: Start Postgres
+        run: uv run just db-up
+
+      - name: Migrate
+        run: uv run just migrate
+
+      # `cov` rather than `test-app`: it runs the same suite and produces the
+      # report below. Running both would run the tests twice.
+      - name: Test with coverage
+        run: uv run just cov
+
+      # No --fail-under. The application is measured and the agent deliberately
+      # is not (ADR 0013), so a single number over the workspace would be
+      # meaningless, and a threshold over the application alone is a policy
+      # nobody has chosen yet. Published so the choice can be made from data.
+      - name: Upload coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-html
+          path: htmlcov
+          include-hidden-files: true
+          if-no-files-found: error
+
+      - name: Stop Postgres
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  # One required check for branch protection, instead of a list that has to be
+  # edited in the GitHub UI every time a job is added or renamed. A skipped or
+  # cancelled job counts as a failure here, which a plain `needs:` would not.
+  test-alls-green:
+    if: always()
+    needs: [lint, typing, test-agent, test-app]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

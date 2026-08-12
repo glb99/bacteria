@@ -1,0 +1,38 @@
+# Runs the same hooks a contributor's commit runs, for the case where they did
+# not install them. `just hooks` is a request, not an enforcement.
+name: pre-commit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Pinned so a uv release cannot change what the gate means. Before
+          # bumping, check astral-sh/setup-uv knows the new version's checksum.
+          version: "0.11.18"
+          enable-cache: true
+      - run: uv sync --all-packages
+      # Reports and fails; does not push a fix back to the branch. The template
+      # this was modelled on auto-commits formatting, which needs a GitHub App
+      # with write access to pull requests -- a standing credential that can
+      # write to any branch, in exchange for saving one `just fmt`.
+      - run: uv run prek run --all-files --show-diff-on-failure

@@ -1,0 +1,54 @@
+# Grouped and monthly, on purpose.
+#
+# Ungrouped weekly updates produce a stream of single-dependency pull requests
+# that each need a CI run and a review, and the predictable result is that they
+# get merged unread -- which is worse than not having them, because it looks
+# like supply-chain diligence. One monthly pull request per ecosystem is a thing
+# a person actually reads.
+#
+# The cooldown is the other half: a release that is withdrawn or patched within
+# a week never reaches a pull request here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: "Bump"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Covers the whole uv workspace, including the linter and type checker that
+  # used to be pinned as strings in the Justfile. That move is the reason this
+  # entry earns its place: the pins are now proposed, tested, and reviewed
+  # rather than bumped when someone happens to notice.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    labels: [dependencies, python]
+    commit-message:
+      prefix: "Bump"
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: "Bump"
+    groups:
+      docker-compose:
+        patterns: ["*"]

@@ -1,0 +1,21 @@
+# Deliberate gaps are not bugs, and routing them to the right place keeps both
+# categories legible. Most of what looks missing here is missing on purpose and
+# already documented at the point in the code it would be filled.
+blank_issues_enabled: false
+contact_links:
+  - name: Something is missing on purpose
+    url: https://github.com/glb99/fastpaip/blob/main/README.md#status
+    about: >-
+      Tools over HTTP, key scopes, cross-batch duplicates, tenancy for ingested
+      records and more are deliberate omissions with recorded reasoning. Check
+      the Status table and `grep -rn "Not built:" packages/*/src` first.
+
+  - name: Design question or proposal
+    url: https://github.com/glb99/fastpaip/discussions
+    about: >-
+      Anything that would change a boundary belongs in a discussion before an
+      issue. Those become ADRs, not tickets.
+
+  - name: Security vulnerability
+    url: https://github.com/glb99/fastpaip/security/advisories/new
+    about: Report privately. See SECURITY.md for what is already known and by design.

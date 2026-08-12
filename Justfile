@@ -186,6 +186,20 @@ worker *args:
 agent:
     uv run bacteria
 
+# Starts a server and a worker, issues a credential through the CLI, and makes
+# real requests -- because three times here a green suite described a system
+# that did not work, each time because the test supplied the thing whose absence
+# was the bug. Notably it is the only check that proves a deferred job reaches a
+# worker, which no test run can: there is no worker in one.
+#
+# Assumes the database is up and migrated. Verified to fail: run it with the
+# worker stopped and the queue check times out.
+
+# Exercise the real path against a running stack
+[group('qa')]
+smoke *args:
+    uv run python scripts/smoke.py --managed {{ args }}
+
 # Send HTTP request to development server
 [group('run')]
 req path="" *args:

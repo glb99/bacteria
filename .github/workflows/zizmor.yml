@@ -1,0 +1,30 @@
+# Static analysis of the workflows themselves.
+#
+# The bugs it finds are the ones that do not fail a run: an action pinned to a
+# mutable tag, a token left readable by a step that had no need for it, a
+# `pull_request_target` that checks out code from the pull request. CI going
+# green is not evidence against any of them.
+name: Zizmor
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Findings are uploaded as SARIF so they appear in the Security tab rather
+      # than only in a log nobody opens after a green run.
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1

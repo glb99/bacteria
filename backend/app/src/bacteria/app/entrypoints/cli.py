@@ -28,6 +28,7 @@ from bacteria.agent.session.store import (
 )
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, revoke_key
+from bacteria.app.chat import review
 from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
 from bacteria.app.core import platform
@@ -145,11 +146,17 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
             session_id = session.session_id
             print(f"new session: {session_id}")
         else:
-            # Fails loudly on an id that does not resolve, rather than creating
-            # one: a session id that is wrong usually means it was copied
-            # wrong, and silently opening an empty conversation instead would
-            # look like the transcript had been lost.
-            await repository.get_state(session_id)
+            # Refuses an id that does not resolve rather than creating one: a
+            # wrong session id usually means it was copied wrong, and silently
+            # opening an empty conversation instead would look like the
+            # transcript had been lost. Reported rather than raised, because a
+            # traceback for a mistyped argument tells an operator nothing they
+            # did not already know.
+            try:
+                await repository.get_state(session_id)
+            except UnknownSessionError:
+                print(f"no session {session_id}")
+                return 1
             print(f"resuming: {session_id}")
 
         print(f"provider: {settings.model_provider}", end="")
@@ -196,17 +203,16 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
             if not user_text:
                 break
 
-            if user_text.startswith("//"):
-                # The escape, so a message that genuinely begins with a slash is
-                # still sendable. One line, and it removes the only case where
-                # this loop would refuse to say something on the user's behalf.
-                user_text = user_text[1:]
-            elif user_text.startswith("/"):
-                await _slash(repository, session_id, user_text)
+            command = review.parse_console_line(user_text)
+            if not isinstance(command, review.SendMessage):
+                await _run_console_command(repository, session_id, command)
                 # Back to the top, which re-counts: accepting one of three
                 # proposals then reports two, so the effect of the command is
                 # visible without asking for it again.
                 continue
+            # Whatever `review` decided should actually be sent -- the `//`
+            # escape means that is not always what was typed.
+            user_text = command.text
 
             result = await run_turn(
                 repository=repository,
@@ -220,110 +226,64 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
     return 0
 
 
-async def _list_proposals(repository: SqlSessionRepository, session_id: str) -> int:
-    """Show what is waiting for a decision, and what accepting it would replace.
-
-    The review surface the agent's ADR 0017 requires a host to supply. It
-    existed over HTTP only, which meant a conversation held in this same CLI
-    could not be reviewed without starting a server — and a queue nobody reads
-    is the failure that record warned about.
-
-    The replacement note is the part worth having. Proposals are keyed by
-    ``(source, key)`` and active memory by ``key`` alone, so two proposers may
-    both suggest ``nickname`` and accepting the second silently overwrites the
-    first. That collapse is correct (ADR 0017 puts it at activation, where a
-    human is) and invisible unless something says so before the choice.
-
-    Takes a repository rather than opening a session, so the conversation loop
-    and the one-shot subcommand run the same code against whichever session
-    their caller already owns. Two ways to reach a review that each opened their
-    own would be two transactions disagreeing about what is pending.
-    """
-    try:
-        state = await repository.get_state(session_id)
-    except UnknownSessionError:
-        print(f"no session {session_id}")
+def _print_pending(result: review.Pending | review.NoSuchSession) -> int:
+    """Render a listing. The decisions it renders were made in `chat.review`."""
+    if isinstance(result, review.NoSuchSession):
+        print(f"no session {result.session_id}")
         return 1
 
-    if not state.proposals:
+    if not result.entries:
         print("no proposals waiting")
         return 0
 
-    for (source, key), entry in sorted(state.proposals.items()):
-        print(f"{source}/{key}")
+    for entry in result.entries:
+        print(f"{entry.source}/{entry.key}")
         print(f"  value:  {entry.value}")
         print(f"  reason: {entry.reason}")
-        held = [
-            name
-            for name, collection in ((SESSION_SCOPE, state.memory), (USER_SCOPE, state.user_memory))
-            if key in collection
-        ]
-        if held:
-            print(
-                f"  note:   accepting replaces the active {' and '.join(held)} memory for this key"
-            )
+        if entry.held_by:
+            replaced = " and ".join(entry.held_by)
+            print(f"  note:   accepting replaces the active {replaced} memory for this key")
 
-    print(f"\n{len(state.proposals)} waiting. Accept or reject one by source and key.")
+    print()
+    print(f"{len(result)} waiting. Accept or reject one by source and key.")
     return 0
+
+
+async def _list_proposals(repository: SqlSessionRepository, session_id: str) -> int:
+    return _print_pending(await review.pending(repository, session_id))
 
 
 async def _accept_proposal(
     repository: SqlSessionRepository, session_id: str, source: str, key: str, scope: str
 ) -> int:
-    """Promote one proposal into memory the model will be told about.
-
-    Scope is the caller's to choose and defaults to the session, matching the
-    protocol. ``user`` is the one that makes a fact outlive the conversation,
-    which is what memory is for and also the wider blast radius — hence the
-    narrow default, per the agent's ADR 0021.
-
-    Ownership is not checked, for the reason ``_chat`` gives: running this needs
-    the database, which is more access than any ownership rule protects against.
-    """
-    try:
-        entry = await repository.activate(
-            session_id, source=source, key=key, scope=cast(MemoryScope, scope)
-        )
-    # Before the bare KeyError, and not interchangeable with it:
-    # `UnknownSessionError` *subclasses* KeyError, so catching that first
-    # would report a missing proposal for a session that does not exist.
-    except UnknownSessionError:
-        print(f"no session {session_id}")
+    result = await review.accept(repository, session_id, source, key, cast(MemoryScope, scope))
+    if isinstance(result, review.NoSuchSession):
+        print(f"no session {result.session_id}")
         return 1
-    except KeyError:
-        print(f"no proposal {source}/{key} in that session")
+    if isinstance(result, review.NoSuchProposal):
+        print(f"no proposal {result.source}/{result.key} in that session")
         return 1
 
-    print(f"activated {key!r} at {scope} scope: {entry.value}")
+    print(f"activated {result.key!r} at {result.scope} scope: {result.entry.value}")
     return 0
 
 
 async def _reject_proposal(
     repository: SqlSessionRepository, session_id: str, source: str, key: str
 ) -> int:
-    """Discard a proposal so it stops appearing for review.
-
-    Reports whether there was anything there while still succeeding either way.
-    Rejection is idempotent by design — "the caller wanted it gone, and it is" —
-    so this deliberately differs from ``revoke-key``, which exits non-zero on a
-    missing target because revoking a key that does not exist means the key you
-    meant is still live somewhere.
-    """
-    try:
-        state = await repository.get_state(session_id)
-    except UnknownSessionError:
-        print(f"no session {session_id}")
+    result = await review.discard(repository, session_id, source, key)
+    if isinstance(result, review.NoSuchSession):
+        print(f"no session {result.session_id}")
         return 1
 
-    present = (source, key) in state.proposals
-    await repository.reject(session_id, source=source, key=key)
-
-    print(f"discarded {source}/{key}" if present else f"nothing to discard: no {source}/{key}")
+    if result.present:
+        print(f"discarded {result.source}/{result.key}")
+    else:
+        print(f"nothing to discard: no {result.source}/{result.key}")
     return 0
 
 
-_SLASH_HELP = """\
-  /proposals                    what is waiting for a decision
+_SLASH_HELP = """  /proposals                    what is waiting for a decision
   /accept <source> <key> [user] make one active; `user` carries it to later sessions
   /reject <source> <key>        discard one
   /help                         this
@@ -331,37 +291,26 @@ Anything else is sent to the model. Begin a message with // to send a literal /.
 """
 
 
-async def _slash(repository: SqlSessionRepository, session_id: str, line: str) -> None:
-    """Run one review command typed inside a conversation.
+async def _run_console_command(
+    repository: SqlSessionRepository, session_id: str, command: review.ConsoleCommand
+) -> None:
+    """Print the result of one command `chat.review` already parsed.
 
-    Deliberately a short if-chain over whitespace-split words, not an argument
-    parser. ``CLAUDE.md`` says entrypoints hold configuration and that an
-    entrypoint which looks like it deserves a test is holding a feature's logic
-    — so the line to hold is that this stays a lookup, dispatching to functions
-    that live outside it. If it ever needs flags, optional arguments, or quoting,
-    it has stopped being configuration and belongs in a module ``chat`` owns.
-
-    Reaching the same three functions the subcommands reach is the whole point.
-    Reviewing has one implementation; this is a second way to invoke it, not a
-    second version of it.
-
-    An unrecognized command prints help rather than being sent to the model. A
-    mistyped ``/acccept`` is not something anyone meant to say out loud, and
-    silently forwarding it would spend a turn on it.
+    A mapping from outcome to output, which is what an entrypoint is for. What
+    the words mean, which arguments are valid, and whether an unrecognized line
+    reaches the model are decided in `chat.review` -- where they are tested,
+    because this file is omitted from coverage on the grounds that it holds no
+    decisions.
     """
-    name, *rest = line.split()
-
-    if name == "/proposals" and not rest:
+    if isinstance(command, review.ListPending):
         await _list_proposals(repository, session_id)
-    elif name == "/accept" and len(rest) in (2, 3):
-        scope = rest[2] if len(rest) == 3 else SESSION_SCOPE
-        if scope not in (SESSION_SCOPE, USER_SCOPE):
-            print(f"scope must be {SESSION_SCOPE} or {USER_SCOPE}")
-            return
-        await _accept_proposal(repository, session_id, rest[0], rest[1], scope)
-    elif name == "/reject" and len(rest) == 2:
-        await _reject_proposal(repository, session_id, rest[0], rest[1])
-    else:
+    elif isinstance(command, review.AcceptOne):
+        await _accept_proposal(repository, session_id, command.source, command.key, command.scope)
+    elif isinstance(command, review.DiscardOne):
+        await _reject_proposal(repository, session_id, command.source, command.key)
+    elif isinstance(command, review.ShowHelp):
+        if command.detail:
+            print(command.detail)
         print(_SLASH_HELP, end="")
 
 

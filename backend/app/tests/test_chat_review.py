@@ -1,0 +1,157 @@
+"""The review workflow, tested where it lives rather than where it is printed.
+
+These behaviours used to sit in ``entrypoints/cli.py``, which is omitted from
+coverage on the grounds that it holds configuration and no decisions. That
+omission is only honest while it is true, and it had stopped being true: the
+exception ordering below is a correctness detail that fails silently, and it was
+in a file nothing measured.
+"""
+
+import pytest
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from bacteria.agent.session.store import SESSION_SCOPE, USER_SCOPE
+from bacteria.app.chat import review
+from bacteria.app.chat.repository import SqlSessionRepository
+
+
+@pytest.fixture(name="repo")
+async def _repo(engine):
+    async with AsyncSession(engine) as db:
+        yield SqlSessionRepository(db)
+
+
+@pytest.fixture(name="session_id")
+async def _session_id(repo):
+    session = await repo.create_session("owner-1")
+    return session.session_id
+
+
+# --- Parsing -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("/proposals", review.ListPending()),
+        ("/help", review.ShowHelp()),
+        ("/accept model tone", review.AcceptOne("model", "tone", SESSION_SCOPE)),
+        ("/accept model tone user", review.AcceptOne("model", "tone", USER_SCOPE)),
+        ("/reject model tone", review.DiscardOne("model", "tone")),
+        ("hello there", review.SendMessage("hello there")),
+    ],
+)
+def test_a_line_is_read_as_the_thing_it_names(line, expected):
+    assert review.parse_console_line(line) == expected
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["/acccept model tone", "/proposals extra", "/accept model", "/reject model", "/nope"],
+)
+def test_a_command_that_does_not_parse_asks_for_help_rather_than_reaching_the_model(line):
+    """A mistyped command must never be forwarded as conversation.
+
+    Nobody types ``/acccept`` meaning to say it out loud. Sending it would spend
+    a turn and a model call on a typo, and the reply would be a model politely
+    discussing a command that does not exist.
+    """
+    assert isinstance(review.parse_console_line(line), review.ShowHelp)
+
+
+def test_an_unknown_scope_is_refused_rather_than_defaulted():
+    """A misspelt scope must not quietly become the narrow one.
+
+    ``/accept model tone usr`` asking for user scope and silently getting
+    session scope is the failure that looks like it worked: the memory exists,
+    the operator believes it will carry into later conversations, and it will
+    not.
+    """
+    result = review.parse_console_line("/accept model tone usr")
+
+    assert isinstance(result, review.ShowHelp)
+    assert "scope" in result.detail
+
+
+def test_a_doubled_slash_sends_one_slash():
+    """The escape, so a message that begins with a slash is still sendable.
+
+    Without it this is the only thing a user can type that the console refuses
+    to relay, with no way to insist.
+    """
+    assert review.parse_console_line("//proposals") == review.SendMessage("/proposals")
+
+
+# --- Operations --------------------------------------------------------------
+
+
+async def test_a_listing_names_the_scopes_a_key_already_holds(repo, session_id):
+    """Accepting replaces rather than joins, and that must be visible first.
+
+    Proposals are keyed by (source, key) and active memory by key alone, so a
+    second suggestion for a key overwrites the first. A reviewer choosing
+    between two phrasings of one fact needs to know that is the choice.
+    """
+    await repo.remember(session_id, key="tone", value="terse", reason="r", scope=USER_SCOPE)
+    await repo.propose(session_id, key="tone", value="chatty", reason="r", source="model")
+    await repo.propose(session_id, key="unrelated", value="v", reason="r", source="model")
+
+    result = await review.pending(repo, session_id)
+
+    assert isinstance(result, review.Pending)
+    by_key = {entry.key: entry for entry in result.entries}
+    assert by_key["tone"].held_by == (USER_SCOPE,)
+    assert by_key["unrelated"].held_by == ()
+
+
+async def test_an_unknown_session_is_not_reported_as_a_missing_proposal(repo):
+    """The ordering that fails silently: UnknownSessionError subclasses KeyError.
+
+    Catch them the other way round and a session that does not exist is
+    reported as "no such proposal", which sends whoever is debugging to look for
+    a suggestion in a conversation that was never there.
+    """
+    result = await review.accept(repo, "no-such-session", source="model", key="tone")
+
+    assert isinstance(result, review.NoSuchSession)
+
+
+async def test_a_missing_proposal_is_reported_as_one(repo, session_id):
+    result = await review.accept(repo, session_id, source="model", key="never-proposed")
+
+    assert isinstance(result, review.NoSuchProposal)
+
+
+async def test_accepting_activates_at_the_scope_asked_for(repo, session_id):
+    """The scope is the human's choice and must survive the trip.
+
+    Defaulting it here would decide, on someone's behalf, that a fact applies to
+    every future conversation they have -- the escalation the agent's ADR 0021
+    reserves for the person confirming.
+    """
+    await repo.propose(session_id, key="tone", value="terse", reason="r", source="model")
+
+    result = await review.accept(repo, session_id, "model", "tone", USER_SCOPE)
+
+    assert isinstance(result, review.Accepted)
+    assert result.scope == USER_SCOPE
+    state = await repo.get_state(session_id)
+    assert state.user_memory["tone"].value == "terse"
+    assert "tone" not in state.memory
+    assert state.proposals == {}
+
+
+async def test_discarding_says_whether_there_was_anything_there(repo, session_id):
+    """Rejection is idempotent, and the caller is still told which case it was.
+
+    Making an absent proposal an error would break the idempotence the store
+    promises; saying nothing would leave an operator who mistyped a key
+    believing they discarded something.
+    """
+    await repo.propose(session_id, key="tone", value="terse", reason="r", source="model")
+
+    first = await review.discard(repo, session_id, "model", "tone")
+    second = await review.discard(repo, session_id, "model", "tone")
+
+    assert isinstance(first, review.Discarded) and first.present
+    assert isinstance(second, review.Discarded) and not second.present

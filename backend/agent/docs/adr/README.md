@@ -42,6 +42,7 @@ exception in [`../../CLAUDE.md`](../../CLAUDE.md#decision-records).
 | [0021](0021-memory-is-scoped-to-a-session-or-a-user.md) | Scope memory to a session or a user, with the human choosing at activation | Accepted |
 | [0022](0022-memory-selection-is-a-named-strategy.md) | Make memory selection a named strategy that reports what it passed over | Accepted |
 | [0023](0023-write-methods-return-what-the-caller-needs.md) | Write methods return what the caller needs, not the whole session | Accepted |
+| [0024](0024-memory-candidates-are-supplied-not-read-whole.md) | Memory candidates are supplied by the host, not read whole from state | Proposed |
 
 ## Writing a new one
 

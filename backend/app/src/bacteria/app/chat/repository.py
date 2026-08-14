@@ -322,6 +322,31 @@ class SqlSessionRepository:
             await self._db.commit()
         # Absent key is a no-op: the caller wanted it gone, and it is.
 
+    async def count_proposals(self, session_id: str) -> int:
+        """How many suggestions are waiting for a decision.
+
+        Deliberately not on ``SessionRepository``. The agent has no use for it —
+        proposals reach no model, so nothing in a turn depends on how many there
+        are — and the protocol is one a second host has to satisfy in full, so
+        widening it for a convenience this host wants would charge everyone for
+        it. A structural protocol lets an implementation carry extra methods.
+
+        A count rather than ``get_state``, which is what the caller would
+        otherwise reach for: that loads the entire transcript to answer a
+        question about one small table, and it would do it on every turn.
+
+        Raises nothing on an unknown session. Zero is the honest answer to "how
+        many are waiting" for a session that holds none, and the callers that
+        must distinguish absent from empty already do so through ``get_state``.
+        """
+        return (
+            await self._db.exec(
+                select(func.count())
+                .select_from(ChatMemoryProposal)
+                .where(ChatMemoryProposal.session_id == session_id)
+            )
+        ).one()
+
     async def propose(
         self, session_id: str, key: str, value: Any, reason: str, source: str
     ) -> None:

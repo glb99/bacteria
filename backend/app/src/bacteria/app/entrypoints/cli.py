@@ -163,7 +163,26 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
             print("  extraction: off")
         print("(empty line or Ctrl+C to quit)")
 
+        # Printed when it changes rather than every turn. A count repeated
+        # before every prompt is noise, and a nudge people scroll past is the
+        # thing this is trying to prevent rather than an acceptable version of
+        # it. `None` so the first prompt reports even when nothing is waiting is
+        # false -- zero is not worth announcing.
+        announced: int | None = None
+
         while True:
+            waiting = await repository.count_proposals(session_id)
+            if waiting and waiting != announced:
+                # The gap the README lists: proposals accumulate, nothing says
+                # so, and the feature looks broken while behaving exactly as
+                # designed. The count lags by a turn because extraction is
+                # deferred -- what shows before turn N is what the worker
+                # finished from turn N-1 -- which is why this sits above the
+                # prompt rather than under the reply, where it would read as
+                # that turn's result.
+                print(f"[{waiting} waiting: bacteria-admin list-proposals {session_id}]")
+            announced = waiting
+
             try:
                 # Blocking `input` on the event loop, knowingly, and for the
                 # same reason the agent's own CLI does it: this process runs one

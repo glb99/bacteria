@@ -14,6 +14,7 @@ from bacteria.agent.model.protocol import ModelResponse
 from bacteria.app.auth.service import issue_key
 from bacteria.app.chat import service
 from bacteria.app.core.db import session_scope
+from bacteria.app.core.settings import get_settings
 from bacteria.app.views import create_app
 
 
@@ -434,3 +435,54 @@ async def test_the_owners_write_stays_immediate(client, token):
         client.get(f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)).json()
         == []
     )
+
+
+def _capture_deferrals(monkeypatch, enabled: bool) -> list[dict]:
+    """Intercept the enqueue and set the flag that drives it.
+
+    Only ``defer_async`` is replaced. The queue itself is procrastinate's and
+    already has tests; what is worth checking here is whether a turn asks it for
+    anything, which is a decision this application makes.
+    """
+    queued: list[dict] = []
+
+    async def _record(**kwargs):
+        queued.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(service.extract_memories_task, "defer_async", _record)
+    monkeypatch.setenv("BACTERIA_MEMORY_EXTRACTION_ENABLED", "true" if enabled else "false")
+    # Settings are cached for the process and the client fixture has already
+    # built them, so the variable above reaches nothing without this.
+    get_settings.cache_clear()
+    return queued
+
+
+async def test_a_turn_queues_extraction_for_its_own_session(client, token, monkeypatch):
+    """With extraction on, a turn queues exactly one job, naming its own session.
+
+    Breaking this is silent in both directions: no job means proposals never
+    appear and the agent looks like it has no memory, and a job naming the wrong
+    session would extract one person's conversation into another's review queue.
+    """
+    queued = _capture_deferrals(monkeypatch, enabled=True)
+    session_id = new_session(client, token)
+
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    assert queued == [{"session_id": session_id}]
+
+
+async def test_a_turn_queues_nothing_when_extraction_is_off(client, token, monkeypatch):
+    """The default costs no model call, and the setting is what decides.
+
+    Extraction is a second model call on every turn. A gate that failed open
+    would roughly double the model spend of every deployment that never asked
+    for the feature, and nothing in a response would say so.
+    """
+    queued = _capture_deferrals(monkeypatch, enabled=False)
+    session_id = new_session(client, token)
+
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    assert queued == []

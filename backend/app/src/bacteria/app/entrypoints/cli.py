@@ -1,4 +1,4 @@
-"""Operator command line: issuing and revoking credentials.
+"""Operator command line: credentials, evaluation, and a conversation.
 
 Configuration and wiring only, like every entrypoint. It opens a session, calls
 into `bacteria.app.auth.service`, and prints the result; the decisions live there.
@@ -19,9 +19,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, revoke_key
+from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.chat.service import run_turn
 from bacteria.app.core import platform
 from bacteria.app.core.db import get_engine
-from bacteria.app.core.settings import load_env_file
+from bacteria.app.core.settings import get_settings, load_env_file
 from bacteria.app.evaluation.checks import Policy, evaluate
 from bacteria.app.evaluation.runs import load_runs
 
@@ -85,6 +87,77 @@ async def _evaluate(
     return 1
 
 
+async def _chat(principal_id: str, session_id: str | None) -> int:
+    """Hold a conversation against the real database, from a terminal.
+
+    Composition only, like everything here: it opens a session, builds the same
+    :class:`~bacteria.app.chat.repository.SqlSessionRepository` the API builds,
+    and calls the same :func:`~bacteria.app.chat.service.run_turn`. There is no
+    second turn implementation and there must not be — the reply, the
+    transcript rows, and the extraction trigger are whatever the HTTP path
+    produces, because it is the same function.
+
+    Not the same as ``bacteria-agent``, and the difference is the point. That
+    command runs the agent standalone against its in-memory store: a fresh
+    session per invocation, nothing persisted, nothing for a job to read
+    afterwards. This one writes to Postgres, so conversations survive, resume,
+    and can be extracted from.
+
+    Extraction follows ``BACTERIA_MEMORY_EXTRACTION_ENABLED``, exactly as the
+    route does. It only *enqueues*, so a worker has to be running for anything
+    to come of it — ``just worker``, or ``BACTERIA_RUN_WORKER_IN_API`` on a
+    server, neither of which this command is.
+
+    Ownership is not checked when resuming a session. Running this needs the
+    database, which is already more access than any ownership rule protects
+    against; the equivalent check on the HTTP path exists because a request
+    arrives from someone who has only a bearer token.
+    """
+    settings = get_settings()
+
+    async with AsyncSession(get_engine()) as db:
+        repository = SqlSessionRepository(db)
+
+        if session_id is None:
+            session = await repository.create_session(principal_id)
+            session_id = session.session_id
+            print(f"new session: {session_id}")
+        else:
+            # Fails loudly on an id that does not resolve, rather than creating
+            # one: a session id that is wrong usually means it was copied
+            # wrong, and silently opening an empty conversation instead would
+            # look like the transcript had been lost.
+            await repository.get_state(session_id)
+            print(f"resuming: {session_id}")
+
+        print(f"provider: {settings.model_provider}", end="")
+        print("  extraction: on" if settings.memory_extraction_enabled else "  extraction: off")
+        print("(empty line or Ctrl+C to quit)")
+
+        while True:
+            try:
+                # Blocking `input` on the event loop, knowingly, and for the
+                # same reason the agent's own CLI does it: this process runs one
+                # turn at a time and has nothing else to schedule. A surface
+                # serving more than one caller must not read its input this way.
+                user_text = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not user_text:
+                break
+
+            result = await run_turn(
+                repository=repository,
+                provider=settings.model_provider,
+                session_id=session_id,
+                user_text=user_text,
+                extract=settings.memory_extraction_enabled,
+            )
+            print(result.response.text)
+
+    return 0
+
+
 async def _revoke(key_id: str) -> int:
     if keys.split(key_id) is not None:
         # A whole key was passed where an id belongs. Refused rather than
@@ -123,6 +196,17 @@ def main() -> int:
         help="the key id shown at issue -- the middle segment of fp_<key id>_<secret>, not the whole key",
     )
 
+    chat = commands.add_parser("chat", help="hold a conversation against the real database")
+    chat.add_argument(
+        "principal_id",
+        help="who owns the session; the same identifier a key authenticates as",
+    )
+    chat.add_argument(
+        "--session",
+        default=None,
+        help="resume this session id instead of opening a new one",
+    )
+
     evaluate_cmd = commands.add_parser("eval", help="judge recorded runs against a policy")
     evaluate_cmd.add_argument(
         "--session", default=None, help="restrict to one session; omit to judge every run"
@@ -149,6 +233,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "issue-key":
         return platform.run(_issue(args.principal_id, args.label or args.principal_id))
+    if args.command == "chat":
+        return platform.run(_chat(args.principal_id, args.session))
     if args.command == "eval":
         return platform.run(_evaluate(args.session, args.model, args.tool, args.max_failure_rate))
     return platform.run(_revoke(args.key_id))

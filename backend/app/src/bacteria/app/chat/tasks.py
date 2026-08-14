@@ -23,7 +23,6 @@ import logging
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.chat.extraction import extract_memories
-from bacteria.app.chat.service import build_model_client
 from bacteria.app.core.db import get_engine
 from bacteria.app.core.jobs import get_app
 from bacteria.app.core.settings import get_settings
@@ -48,6 +47,14 @@ async def extract_memories_task(session_id: str) -> dict[str, int]:
     stored in the jobs table, and putting the facts there would copy them into a
     second place that nothing reads and nothing expires.
     """
+    # Imported inside the function, which is the one place in this feature that
+    # needs explaining. `chat.service` enqueues this task and this task builds a
+    # client from `chat.service`'s provider table, so a module-level import in
+    # both directions closes a cycle. Deferring it on this side is the cheaper
+    # break: a task needs its client when it runs, where a route needs the task
+    # at import, so only one of the two can be late without being wrong.
+    from bacteria.app.chat.service import build_model_client
+
     settings = get_settings()
     client = build_model_client(settings.model_provider, model=settings.memory_extraction_model)
 

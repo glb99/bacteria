@@ -58,7 +58,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.model.protocol import SendsMessages
 from bacteria.app.chat.models import ChatMemoryExtraction, ChatTranscriptItem
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.chat.repository import KnownKeys, SqlSessionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,9 @@ Return ONLY a JSON array, with no prose and no code fence. Each element:
 Rules on keys, which matter more than they look:
 - REUSE AN EXISTING KEY whenever the fact is about the same thing. A corrected
   or updated fact keeps the key it corrects; only the value changes.
+- CONFIRMED keys win. If a confirmed key and a suggested one mean the same
+  thing, use the confirmed one — a person chose it, and it is the name this
+  fact already has.
 - Never emit two elements with the same key. Choose the better one.
 - Never emit two keys meaning the same thing. "name", "first_name" and
   "preferred_name" are one key, not three. Pick one and keep picking it.
@@ -120,7 +123,7 @@ Rules on facts:
 _NO_KEYS_YET = "No keys are in use yet. Choose ones a later extraction can reuse."
 
 
-def _system_prompt(known: set[str]) -> str:
+def _system_prompt(known: KnownKeys) -> str:
     """The instructions, plus the keys this conversation already uses.
 
     The key list is the fix for the failure this extractor actually had. Left to
@@ -136,8 +139,15 @@ def _system_prompt(known: set[str]) -> str:
     validation pass could reject unknown keys instead, and would be worse — it
     would silently drop every genuinely new fact, which is most of them early on.
     """
-    listing = ", ".join(sorted(known)) if known else _NO_KEYS_YET
-    return f"{_PROMPT}\nKeys already in use for this user:\n{listing}\n"
+    if not known:
+        return f"{_PROMPT}\n{_NO_KEYS_YET}\n"
+
+    lines = [""]
+    if known.active:
+        lines.append(f"Confirmed keys (prefer these): {', '.join(sorted(known.active))}")
+    if known.proposed:
+        lines.append(f"Suggested, not yet confirmed: {', '.join(sorted(known.proposed))}")
+    return _PROMPT + "\n".join(lines) + "\n"
 
 
 @dataclass(frozen=True)
@@ -256,7 +266,7 @@ async def _propose_from(
     client: SendsMessages,
     messages: list[ChatTranscriptItem],
     max_proposals: int,
-    known: set[str],
+    known: KnownKeys,
 ) -> tuple[list[dict[str, str]], int]:
     """Ask the model for facts, and return only the ones that survive checking.
 

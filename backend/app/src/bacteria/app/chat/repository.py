@@ -32,6 +32,7 @@ Not built:
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
@@ -58,6 +59,27 @@ from bacteria.app.chat.models import (
     ChatTranscriptItem,
     ChatUserMemoryEntry,
 )
+
+
+@dataclass(frozen=True)
+class KnownKeys:
+    """The key vocabulary a conversation has, split by whether a human confirmed it.
+
+    Two sets rather than one, because they carry different authority. ``active``
+    keys were chosen by a person activating a proposal, which makes them the
+    canonical name for a fact as far as this system knows. ``proposed`` keys are
+    guesses nobody has ruled on yet — useful for consistency across runs and no
+    evidence of anything.
+
+    Disjoint: a key that is both is reported as active only. See
+    :meth:`SqlSessionRepository.known_keys` for why the distinction exists.
+    """
+
+    active: frozenset[str] = frozenset()
+    proposed: frozenset[str] = frozenset()
+
+    def __bool__(self) -> bool:
+        return bool(self.active or self.proposed)
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -322,8 +344,8 @@ class SqlSessionRepository:
             await self._db.commit()
         # Absent key is a no-op: the caller wanted it gone, and it is.
 
-    async def known_keys(self, session_id: str) -> set[str]:
-        """Every key this conversation's memory already uses, active or proposed.
+    async def known_keys(self, session_id: str) -> KnownKeys:
+        """Every key this conversation's memory already uses, split by standing.
 
         Exists for the extractor, and for one specific failure. A key is chosen
         by a model, and left to itself the model chooses a new one every run: the
@@ -337,9 +359,19 @@ class SqlSessionRepository:
         reuse it. That is a better fix than a fixed vocabulary, which would have
         to guess in advance every fact anyone might want to keep.
 
-        All three collections, because all three are keys a later write could
-        collide with -- and the user-scoped ones especially, since those are the
-        facts most likely to be re-observed in a new conversation.
+        **Split rather than merged, and that split was learned the hard way.**
+        Offered one flat list, four live runs stopped inventing keys and started
+        *rotating* between the synonyms already in it -- which is bounded drift
+        instead of unbounded, and still not one row per fact. The list contained
+        synonyms because it included the extractor's own unreviewed proposals, so
+        it was being handed its previous guesses as though they were vocabulary
+        and its noise fed back into itself.
+
+        An active key is one a person chose. That is the closest thing this
+        system has to a canonical name for a fact, and it is the set worth
+        preferring. Proposals are still offered, because leaving them out brings
+        back the cross-run invention this exists to prevent -- a session whose
+        suggestions are all unreviewed would otherwise offer nothing at all.
 
         Not on ``SessionRepository``, for the reason ``count_proposals`` gives.
         """
@@ -361,7 +393,11 @@ class SqlSessionRepository:
             )
         ).all()
 
-        return set(session_keys) | set(user_keys) | set(proposed)
+        active = frozenset(session_keys) | frozenset(user_keys)
+        # A key that is both active and proposed counts as active: the standing
+        # of a name is the strongest claim anything makes about it, and listing
+        # it twice would suggest the two are competing when one is settled.
+        return KnownKeys(active=active, proposed=frozenset(proposed) - active)
 
     async def count_proposals(self, session_id: str) -> int:
         """How many suggestions are waiting for a decision.

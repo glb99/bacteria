@@ -244,6 +244,33 @@ async def test_the_keys_already_in_use_are_shown_to_the_model(engine, session_id
     assert "pending" in system, "an existing proposal was not offered for reuse"
 
 
+async def test_confirmed_keys_are_told_apart_from_merely_suggested_ones(engine, session_id):
+    """A key a person chose must outrank one the extractor guessed.
+
+    Offered a single flat list, four live runs stopped inventing keys and began
+    rotating between the synonyms already in it — because the list included the
+    extractor's own unreviewed proposals, so its noise was fed back to it as
+    though it were vocabulary. Only an activated key carries a human decision,
+    and it is the one a later run should settle on.
+    """
+    client = _FakeClient()
+
+    async with AsyncSession(engine) as db:
+        repository = SqlSessionRepository(db)
+        await repository.remember(session_id, key="tone", value="terse", reason="r")
+        await repository.propose(session_id, key="guessed", value="v", reason="r", source="model")
+        # Both active and proposed: standing is the stronger claim, so this must
+        # not also appear among the unconfirmed ones as though it were disputed.
+        await repository.propose(session_id, key="tone", value="chatty", reason="r", source="model")
+
+        await extract_memories(db, client, session_id, max_proposals=5)
+
+    confirmed, suggested = client.system.split("Suggested, not yet confirmed:")
+    assert "tone" in confirmed.split("Confirmed keys (prefer these):")[1]
+    assert "guessed" in suggested
+    assert "tone" not in suggested, "an activated key was also listed as unconfirmed"
+
+
 async def test_two_facts_under_one_key_keep_the_first_and_count_the_rest(engine, session_id):
     """A key repeated inside one run must not silently overwrite itself.
 

@@ -8,12 +8,15 @@ mocked the repository would be asserting its own wiring.
 
 import pytest
 from fastapi.testclient import TestClient
+from procrastinate.exceptions import AppNotOpen
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.model.protocol import ModelResponse
 from bacteria.app.auth.service import issue_key
 from bacteria.app.chat import service
+from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.core.db import session_scope
+from bacteria.app.core.settings import get_settings
 from bacteria.app.views import create_app
 
 
@@ -434,3 +437,96 @@ async def test_the_owners_write_stays_immediate(client, token):
         client.get(f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)).json()
         == []
     )
+
+
+def _capture_deferrals(monkeypatch, enabled: bool) -> list[dict]:
+    """Intercept the enqueue and set the flag that drives it.
+
+    Two things are stubbed and both belong to "a queue is available": the
+    deferral itself, and the precondition check in front of it. Nothing in this
+    suite opens procrastinate, so without the second stub these tests would
+    assert the pool is closed — which is
+    ``test_a_turn_refuses_before_the_model_when_it_cannot_enqueue``'s job, not
+    theirs. What is being checked here is whether a turn *decides* to enqueue,
+    which is this application's decision rather than procrastinate's.
+    """
+    queued: list[dict] = []
+
+    async def _record(**kwargs):
+        queued.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(service, "_require_open_queue", lambda: None)
+    monkeypatch.setattr(service.extract_memories_task, "defer_async", _record)
+    monkeypatch.setenv("BACTERIA_MEMORY_EXTRACTION_ENABLED", "true" if enabled else "false")
+    # Settings are cached for the process and the client fixture has already
+    # built them, so the variable above reaches nothing without this.
+    get_settings.cache_clear()
+    return queued
+
+
+async def test_a_turn_queues_extraction_for_its_own_session(client, token, monkeypatch):
+    """With extraction on, a turn queues exactly one job, naming its own session.
+
+    Breaking this is silent in both directions: no job means proposals never
+    appear and the agent looks like it has no memory, and a job naming the wrong
+    session would extract one person's conversation into another's review queue.
+    """
+    queued = _capture_deferrals(monkeypatch, enabled=True)
+    session_id = new_session(client, token)
+
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    assert queued == [{"session_id": session_id}]
+
+
+async def test_a_turn_queues_nothing_when_extraction_is_off(client, token, monkeypatch):
+    """The default costs no model call, and the setting is what decides.
+
+    Extraction is a second model call on every turn. A gate that failed open
+    would roughly double the model spend of every deployment that never asked
+    for the feature, and nothing in a response would say so.
+    """
+    queued = _capture_deferrals(monkeypatch, enabled=False)
+    session_id = new_session(client, token)
+
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    assert queued == []
+
+
+async def test_a_turn_refuses_before_the_model_when_it_cannot_enqueue(engine, monkeypatch):
+    """Forgetting to open the queue must cost nothing, not a whole turn.
+
+    ``AppNotOpen`` used to arrive at the deferral, which happens after the model
+    has answered and the transcript has been written — so the turn was paid for,
+    stored, and lost, and every retry paid again. `bacteria-admin chat` shipped
+    with exactly that bug. The assertion that matters is not that it raises but
+    that the client was never called.
+    """
+    called = False
+
+    class MustNotBeCalled:
+        async def send(self, messages, **kwargs):
+            nonlocal called
+            called = True
+            raise AssertionError("the model was called despite the queue being closed")
+
+    monkeypatch.setitem(service.PROVIDERS, "fake", MustNotBeCalled)
+
+    async with AsyncSession(engine) as db:
+        repository = SqlSessionRepository(db)
+        session = await repository.create_session("tester")
+
+        # Nothing in this suite opens the job queue, which is the state a
+        # caller that forgot to open it is in.
+        with pytest.raises(AppNotOpen):
+            await service.run_turn(
+                repository=repository,
+                provider="fake",
+                session_id=session.session_id,
+                user_text="hi",
+                extract=True,
+            )
+
+    assert not called

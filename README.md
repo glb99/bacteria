@@ -80,6 +80,20 @@ curl -sX POST localhost:8000/chat/sessions -H "Authorization: Bearer $BACTERIA_K
 curl -sX POST localhost:8000/chat/sessions/$SESSION/turns -H "Authorization: Bearer $BACTERIA_KEY" -H 'Content-Type: application/json' -d '{"text":"hello"}'
 ```
 
+Or hold the same conversation without a server, against the same database and
+the same code path:
+
+```bash
+uv run bacteria-admin chat acme-corp
+```
+
+It prints the session id and how many suggested memories are waiting. Inside it,
+`/proposals` lists them, `/accept <source> <key> [user]` makes one active, and
+`/reject <source> <key>` discards one — the same operations the routes below
+expose, and the same ones `bacteria-admin list-proposals` offers outside a
+conversation. Not to be confused with `just agent`, which runs the agent
+standalone against an in-memory store and persists nothing.
+
 `just --list` shows the rest. Interactive API docs are at `/docs` while the
 server runs.
 
@@ -274,6 +288,16 @@ agent turns against durably stored sessions, each owned by the principal that
 created it. `ingestion/` takes batches of records through a handler chain and
 records what happened to every one of them.
 
+Memory has two proposers and one reviewer. A `remember` tool lets the model
+suggest a fact mid-turn; a deferred job reads the transcript afterwards and
+suggests more, reading forward from a watermark so its cost tracks new turns
+rather than conversation length. Neither writes memory — both write proposals,
+which reach no model until a person activates one, at a scope that person
+chooses. Extraction is off by default (`BACTERIA_MEMORY_EXTRACTION_ENABLED`); it
+is a second model call on every turn. See
+[ADR 0002](docs/adr/0002-the-memory-graph-is-postgres-tables.md), whose first
+phase this is.
+
 Deliberately absent, each recorded in the code at the place it would be filled
 rather than only here:
 
@@ -285,8 +309,9 @@ rather than only here:
 | Key scopes and expiry | Every key grants identity and therefore everything; there is no read-only key to hand a script. |
 | Tenancy for ingested records | Submitting requires authentication, but a batch is not owned by its submitter. Urgent the moment a read route exists. |
 | Cross-batch duplicates | A repeated `external_id` in a later batch is stored twice. Needs someone to choose between "update" and "reject". |
-| A nudge to review proposals | The model can suggest memories and a human must accept them, but nothing surfaces how many are waiting. A queue nobody reads looks exactly like an agent with no memory. |
-| Memory that follows a user | Memory is keyed by session, so a new conversation starts with none. Cross-session memory would change `SessionRepository`, which is a boundary change with its own record. |
+| A ceiling on pending proposals | Each extraction run is capped, and the total is not. A long conversation accumulates suggestions until a person drains them, which costs nothing in the prompt and everything in the review surface. |
+| Review across sessions | Proposals are listed one conversation at a time, so answering "what is waiting anywhere" means already knowing every session id. The nudge tells you a count for the session you are in and nothing about the rest. |
+| A graph over memory | Extraction produces flat keyed facts. Nodes, edges and vector retrieval are phase two of [ADR 0002](docs/adr/0002-the-memory-graph-is-postgres-tables.md), and the agent-side seam they need is [its ADR 0024](backend/agent/docs/adr/0024-memory-candidates-are-supplied-not-read-whole.md). |
 | Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
 
 What is planned, in what order, and why, is in

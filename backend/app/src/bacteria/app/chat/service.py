@@ -33,6 +33,8 @@ from bacteria.agent.runtime.runtime import RunResult, Runtime
 from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.tools.memory import build_remember_tool
 from bacteria.agent.tools.registry import ToolRegistry
+from bacteria.app.chat.tasks import extract_memories_task
+from bacteria.app.core.jobs import get_app
 
 # Suppressed for the same reason as bacteria's own table: the annotation is the
 # contract, and a checker inferring the concrete classes from the literal
@@ -51,8 +53,16 @@ smaller cost than that dependency.
 """
 
 
-def build_model_client(provider: str) -> SendsMessages:
+def build_model_client(provider: str, model: str | None = None) -> SendsMessages:
     """Construct the configured client.
+
+    Args:
+        model: Which model the client should use, or ``None`` for the client's
+            own default. Present because not every model call in this
+            application is a conversation — memory extraction fills a small JSON
+            schema and wants the cheapest model a provider offers, while sharing
+            the provider and its credential. Passed only when set, so the
+            clients' defaults stay the single place a default model is named.
 
     Raises:
         ValueError: Unrecognized provider. Rejected rather than falling back to a
@@ -63,7 +73,14 @@ def build_model_client(provider: str) -> SendsMessages:
     except KeyError:
         known = ", ".join(sorted(PROVIDERS))
         raise ValueError(f"unknown model provider {provider!r}; expected one of: {known}") from None
-    return client_cls()
+    # Suppressed because `SendsMessages` describes `send` and deliberately says
+    # nothing about construction -- the agent's ADR 0005 keeps that protocol to
+    # one method, so a checker resolving `client_cls(...)` sees `object.__init__`
+    # and no `model` parameter. Both concrete clients take one, with their own
+    # defaults, which is why this passes the argument only when it is set.
+    # Widening the protocol to describe a constructor would trade a suppression
+    # here for the provider abstraction layer that ADR rejects.
+    return client_cls(model=model) if model else client_cls()  # ty: ignore[unknown-argument]
 
 
 def build_registry(repository: SessionRepository, session_id: str) -> ToolRegistry:
@@ -89,19 +106,84 @@ def _allow(_tool_call) -> bool:
     return True
 
 
+def _require_open_queue() -> None:
+    """Raise now if this turn will not be able to enqueue when it finishes.
+
+    Procrastinate's ``pool`` property raises :class:`AppNotOpen` when nothing has
+    opened the app, and it is touched here purely for that. The check earns its
+    place by *when* it runs rather than by what it detects: without it the same
+    error arrives after the model has answered and the transcript has been
+    written, so a caller that forgot to open the queue pays for a turn, stores
+    it, and loses it — and pays again on every retry. Here it costs nothing.
+
+    This is the enforcement half of what ``run_turn``'s ``extract`` argument
+    documents. It cannot make a caller open the queue; it can make forgetting
+    cheap and immediate instead of expensive and late.
+    """
+    # Suppressed because `App.connector` is declared as the base type, while
+    # `core.jobs.get_app` always constructs a `PsycopgConnector` -- and `pool`,
+    # which is where the `AppNotOpen` signal lives, is that subclass's. Narrowing
+    # with an `isinstance` would add a branch that cannot be taken and would
+    # silently skip the check if it ever were.
+    _ = get_app().connector.pool  # ty: ignore[unresolved-attribute]
+
+
 async def run_turn(
-    repository: SessionRepository, provider: str, session_id: str, user_text: str
+    repository: SessionRepository,
+    provider: str,
+    session_id: str,
+    user_text: str,
+    extract: bool = False,
 ) -> RunResult:
     """Advance one turn of a conversation.
 
     The runtime is constructed per call. It holds no state between turns by
     design — everything that survives is in the repository — so a long-lived one
     would buy nothing but the risk of it acquiring some.
+
+    Args:
+        extract: Whether to queue memory extraction over what this turn wrote.
+
+            An argument rather than a settings lookup, so configuration stays at
+            the edge and a caller can always be read to see what it asked for.
+
+            It lives *here* rather than in the route, and that is the point of
+            the parameter existing at all. The enqueue was in
+            ``views.take_turn`` first, which made extraction a property of one
+            entrance: a second way to run a turn — this repository's admin CLI,
+            the planned audio path, a bot — would write a transcript and
+            silently never extract from it, with nothing failing and no
+            proposals ever appearing. That is the drift
+            :mod:`bacteria.app.ingestion.tasks` avoids by having the deferred
+            path call the same ``ingest`` the inline one does, and the same
+            reasoning applies to a trigger.
+
+            **Passing ``True`` obliges the caller to have opened the job queue**
+            — ``async with register_tasks().open_async()`` — because enqueueing
+            needs a pool and this function does not own one. Nothing here can
+            check it, and the failure is late and expensive: the model has
+            answered and the transcript is written before ``AppNotOpen`` is
+            raised, so the turn is charged for and lost. The API opens it in its
+            lifespan and the admin CLI in its command; a third caller has to do
+            the same. This obligation is the cost of the trigger living here
+            rather than at each entrance, and it is the smaller cost.
     """
+    if extract:
+        _require_open_queue()
+
     runtime = Runtime(model_client=build_model_client(provider), session_store=repository)
-    return await runtime.run_turn(
+    result = await runtime.run_turn(
         session_id,
         user_text,
         tool_registry=build_registry(repository, session_id),
         approve=_allow,
     )
+
+    if extract:
+        # After the turn, so the job sees the transcript this turn wrote rather
+        # than the one before it. A turn that raised never reaches here and
+        # never enqueues, which loses nothing: the watermark did not move, so
+        # the next successful turn extracts from that turn's messages too.
+        await extract_memories_task.defer_async(session_id=session_id)
+
+    return result

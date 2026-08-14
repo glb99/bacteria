@@ -127,6 +127,7 @@ async def take_turn(
         provider=settings.model_provider,
         session_id=session_id,
         user_text=body.text,
+        extract=settings.memory_extraction_enabled,
     )
     return TurnResult(run_id=result.run_id, reply=result.response.text)
 

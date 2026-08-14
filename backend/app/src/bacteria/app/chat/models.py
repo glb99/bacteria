@@ -165,6 +165,47 @@ class ChatUserMemoryEntry(MemoryContent, table=True):
     source: str
 
 
+class ChatMemoryExtraction(SQLModel, table=True):
+    """How far the memory extractor has read this session's transcript.
+
+    Not a ``MemoryContent`` subclass: this holds no memory. It is bookkeeping for
+    the job that *produces* memory, and it lives here rather than as a column on
+    ``chat_session`` because a session is not the extractor's business — a second
+    reader of the transcript would want its own watermark, and a column named for
+    one of them would be the wrong shape immediately.
+
+    ``through_seq`` is the highest transcript ``seq`` already examined, so the
+    extractor reads ``seq > through_seq`` and its cost stays proportional to new
+    turns rather than to conversation length. Initialized to ``-1`` rather than
+    ``0``, matching the ``coalesce(max(seq), -1)`` in ``commit``: position ``0``
+    is a real item, so ``0`` would silently skip the first message of every
+    session.
+
+    Deliberately *not* locked across a run, unlike the session row in ``commit``.
+    A run holds a model call in the middle of it, and a row lock spanning a
+    multi-second network round trip is a lock held for as long as a vendor feels
+    like taking. Two mechanisms replace it, and both are properties of data
+    rather than of timing:
+
+    - the watermark only ever moves forward (``GREATEST`` on write), so a slow
+      run cannot rewind a fast one;
+    - proposals are keyed by ``(source, key)`` and overwrite, so a duplicated run
+      rewrites its own suggestions instead of accumulating them — which is
+      exactly the idempotence the agent's ADR 0017 said would make a background
+      proposer safe to retry where ingestion is not.
+
+    What this costs is that two concurrent runs may both pay for a model call and
+    reach the same answer. That is money, not correctness, and it is the cheaper
+    of the two mistakes available here.
+    """
+
+    __tablename__ = "chat_memory_extraction"
+
+    session_id: str = Field(foreign_key="chat_session.session_id", primary_key=True)
+    through_seq: int = Field(default=-1)
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
+
+
 class ChatMemoryProposal(MemoryContent, table=True):
     """One suggested fact, which no model can see until a human activates it.
 

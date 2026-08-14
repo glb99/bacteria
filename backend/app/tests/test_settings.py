@@ -55,7 +55,11 @@ def test_provider_credentials_in_the_env_file_do_not_break_settings(tmp_path, mo
     )
     monkeypatch.chdir(tmp_path)
 
-    settings = Settings()
+    # Named explicitly rather than left to the class default. The suite disables
+    # `.env` reading for every other test -- `conftest` says why -- and this is
+    # the one test whose subject *is* that file, so it asks for the one it just
+    # wrote instead of relying on what the working directory happens to hold.
+    settings = Settings(_env_file=env)
 
     assert settings.log_level == "DEBUG"
     # The agent's own variable is not adopted: this application names its

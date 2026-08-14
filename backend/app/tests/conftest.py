@@ -22,6 +22,7 @@ same thing.
 """
 
 import asyncio
+import os
 import sys
 import uuid
 
@@ -37,7 +38,7 @@ from sqlmodel import Session, SQLModel
 from bacteria.app import models as _root_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
 from bacteria.app.chat import models as _chat_models  # noqa: F401
-from bacteria.app.core.settings import get_settings
+from bacteria.app.core.settings import ENV_PREFIX, Settings, get_settings
 from bacteria.app.ingestion import models as _ingestion_models  # noqa: F401
 
 LOOP_FACTORY = asyncio.SelectorEventLoop if sys.platform == "win32" else None
@@ -67,6 +68,90 @@ def pytest_asyncio_loop_factories(config, item):
     non-Windows branch names the default explicitly.
     """
     return {"loop": LOOP_FACTORY or asyncio.new_event_loop}
+
+
+KEPT_FROM_THE_AMBIENT_ENVIRONMENT = frozenset({f"{ENV_PREFIX}DATABASE_URL"})
+"""The only ``BACTERIA_*`` variable a test run inherits from outside.
+
+Kept because the suite genuinely reads it: :func:`database_url` derives the
+throwaway database's name from whatever this deployment is configured with, so
+pointing a run at a different Postgres has to keep working.
+"""
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _ignore_ambient_configuration():
+    """Start the run without the developer's own ``BACTERIA_*`` settings.
+
+    The Justfile's first line is ``set dotenv-load``, so ``just test-app`` hands
+    pytest the contents of `.env` before Python starts. That is right for
+    ``just serve`` and wrong for a test suite: a developer who configures the
+    project — ``BACTERIA_MODEL_PROVIDER=gemini``, extraction enabled — then runs
+    the supported command and watches fifteen tests fail on settings they never
+    set and jobs they never queued.
+
+    It also fails asymmetrically, which is the worst part. `.env` is gitignored,
+    so CI has none and stays green; the suite breaks only for people who have
+    configured the project, and passes for the machine that has not. A gate that
+    cannot fail where it is enforced is a gate that teaches people to distrust it
+    locally.
+
+    Session-scoped and before everything, so :func:`database_url` and the rest
+    build on a known environment rather than on whatever happened to be exported.
+    A test that wants one of these settings sets it itself, which is also what
+    makes the dependency visible at the point it matters.
+    """
+    patch = pytest.MonkeyPatch()
+
+    # Two doors, and closing one is not enough -- which is what made this
+    # confusing to diagnose. `just` exports `.env` into the recipe's environment,
+    # and `Settings` *separately* reads the same file into its own fields,
+    # relative to the working directory. So a run from the repository root was
+    # configured twice over, and a run from `backend/app` -- where there is no
+    # `.env` -- was configured not at all, which is why the suite looked green
+    # from one directory and failed from another.
+    patch.setitem(Settings.model_config, "env_file", None)
+
+    for name in list(os.environ):
+        if (
+            name.upper().startswith(ENV_PREFIX)
+            and name.upper() not in KEPT_FROM_THE_AMBIENT_ENVIRONMENT
+        ):
+            patch.delenv(name, raising=False)
+
+    yield
+    patch.undo()
+
+
+@pytest.fixture(autouse=True)
+def _restore_environment():
+    """Undo whatever a test did to ``os.environ``, for every test.
+
+    One test's environment must not reach the next one, and the path from A to B
+    is shorter than it looks. ``load_env_file`` writes a developer's real `.env`
+    into the process environment, and it is *correct* for it to do that — the
+    provider SDKs read unprefixed names from there and nothing else puts them in.
+    Any test that starts the ASGI lifespan therefore loads it, legitimately, and
+    every test after that inherits the result.
+
+    That was not hypothetical. A `.env` carrying ``BACTERIA_MODEL_PROVIDER`` and
+    ``BACTERIA_MEMORY_EXTRACTION_ENABLED`` made fifteen tests fail: settings
+    tests read a provider they never set, and chat tests inherited an extraction
+    flag and tried to enqueue with no queue open. None of the failures were about
+    the code under test, and none of them happened in CI, where `.env` does not
+    exist — so the suite failed for exactly the people who had configured the
+    project and passed for the machine that had not.
+
+    A snapshot rather than a list of variables to unset, because the next
+    variable to leak is by definition one nobody has thought of. Restoring in
+    place rather than rebinding ``os.environ``: it is a special mapping that
+    writes through to the real process environment, and replacing the object
+    would leave that untouched.
+    """
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
 
 
 @pytest.fixture(scope="session", name="backend_options")

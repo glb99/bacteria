@@ -189,7 +189,11 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
                 # finished from turn N-1 -- which is why this sits above the
                 # prompt rather than under the reply, where it would read as
                 # that turn's result.
-                print(f"[{waiting} waiting: bacteria-admin list-proposals {session_id}]")
+                # Points at `/review` rather than the one-shot command it used
+                # to name: the decision can now be made without leaving the
+                # conversation, and a nudge that sends someone to another
+                # terminal is one they postpone.
+                print(f"[{waiting} waiting: /review]")
             announced = waiting
 
             try:
@@ -226,6 +230,20 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
     return 0
 
 
+def _print_entry(entry: review.PendingEntry) -> None:
+    """The body of one proposal, shared by the listing and the walk.
+
+    Shared so the two cannot come to describe the same proposal differently --
+    in particular the `note:` line, which is the one piece of a listing that
+    changes what a reasonable person decides.
+    """
+    print(f"  value:  {entry.value}")
+    print(f"  reason: {entry.reason}")
+    if entry.held_by:
+        replaced = " and ".join(entry.held_by)
+        print(f"  note:   accepting replaces the active {replaced} memory for this key")
+
+
 def _print_pending(result: review.Pending | review.NoSuchSession) -> int:
     """Render a listing. The decisions it renders were made in `chat.review`."""
     if isinstance(result, review.NoSuchSession):
@@ -238,11 +256,7 @@ def _print_pending(result: review.Pending | review.NoSuchSession) -> int:
 
     for entry in result.entries:
         print(f"{entry.source}/{entry.key}")
-        print(f"  value:  {entry.value}")
-        print(f"  reason: {entry.reason}")
-        if entry.held_by:
-            replaced = " and ".join(entry.held_by)
-            print(f"  note:   accepting replaces the active {replaced} memory for this key")
+        _print_entry(entry)
 
     print()
     print(f"{len(result)} waiting. Accept or reject one by source and key.")
@@ -251,6 +265,90 @@ def _print_pending(result: review.Pending | review.NoSuchSession) -> int:
 
 async def _list_proposals(repository: SqlSessionRepository, session_id: str) -> int:
     return _print_pending(await review.pending(repository, session_id))
+
+
+_REVIEW_KEYS = "  ".join(f"[{key}] {label}" for key, (label, _) in review.REVIEW_CHOICES.items())
+"""The legend, built from the table that also does the parsing.
+
+Written out by hand it would be a second list of keys, free to disagree with the
+one that decides what they do -- which is the failure `_SLASH_HELP` is still
+exposed to and this is not.
+"""
+
+
+def _ask_review_key() -> review.ReviewDecision:
+    """Read one decision, asking again until the answer means something.
+
+    EOF and interrupt end the walk and nothing else. The outer loop reads them as
+    "quit", which is right at a conversation prompt and wrong here: someone
+    pressing Ctrl+C to get out of a review they opened by mistake should not also
+    lose the session they were in the middle of.
+    """
+    while True:
+        try:
+            answer = input("> ")
+        except (EOFError, KeyboardInterrupt):
+            # The interrupt leaves the cursor mid-line; without this the summary
+            # prints onto the prompt.
+            print()
+            return review.StopReview()
+
+        decision = review.parse_review_key(answer)
+        if not isinstance(decision, review.Unclear):
+            return decision
+        print(_REVIEW_KEYS)
+
+
+async def _review_each(repository: SqlSessionRepository, session_id: str) -> int:
+    """Walk the queue, deciding one proposal at a time.
+
+    Exists because a listing is not a workflow. `/proposals` prints a source and
+    a key for each entry so they can be typed back onto `/accept` -- six copied
+    identifiers to clear three proposals -- and it shows `held_by`, the thing
+    accepting would replace, one decision before the decision it bears on. This
+    shows one, asks, and applies the answer where it was given.
+
+    Re-reads nothing as it goes. The listing is taken once and walked, which is
+    correct here because this process is the only writer and runs one turn at a
+    time; a surface with concurrent reviewers would have to re-check each entry
+    before applying a decision to it.
+    """
+    result = await review.pending(repository, session_id)
+    if isinstance(result, review.NoSuchSession):
+        print(f"no session {result.session_id}")
+        return 1
+    if not result.entries:
+        print("no proposals waiting")
+        return 0
+
+    total = len(result)
+    accepted = 0
+    rejected = 0
+    stopped = False
+
+    for position, entry in enumerate(result.entries, start=1):
+        print(f"{position}/{total}  {entry.source}/{entry.key}")
+        _print_entry(entry)
+        print(_REVIEW_KEYS)
+
+        decision = _ask_review_key()
+        if isinstance(decision, review.StopReview):
+            stopped = True
+            break
+        if isinstance(decision, review.AcceptThis):
+            await _accept_proposal(repository, session_id, entry.source, entry.key, decision.scope)
+            accepted += 1
+        elif isinstance(decision, review.RejectThis):
+            await _reject_proposal(repository, session_id, entry.source, entry.key)
+            rejected += 1
+
+    # Always, including when nothing was decided. Someone who skipped every
+    # proposal and someone who stopped at the first are in different situations,
+    # and both need to know the queue is still there.
+    waiting = total - accepted - rejected
+    summary = f"{accepted} accepted, {rejected} rejected, {waiting} still waiting"
+    print(f"stopped -- {summary}" if stopped else summary)
+    return 0
 
 
 async def _accept_proposal(
@@ -283,7 +381,8 @@ async def _reject_proposal(
     return 0
 
 
-_SLASH_HELP = """  /proposals                    what is waiting for a decision
+_SLASH_HELP = """  /review                       decide on each one in turn
+  /proposals                    what is waiting for a decision
   /accept <source> <key> [user] make one active; `user` carries it to later sessions
   /reject <source> <key>        discard one
   /help                         this
@@ -304,6 +403,8 @@ async def _run_console_command(
     """
     if isinstance(command, review.ListPending):
         await _list_proposals(repository, session_id)
+    elif isinstance(command, review.ReviewEach):
+        await _review_each(repository, session_id)
     elif isinstance(command, review.AcceptOne):
         await _accept_proposal(repository, session_id, command.source, command.key, command.scope)
     elif isinstance(command, review.DiscardOne):

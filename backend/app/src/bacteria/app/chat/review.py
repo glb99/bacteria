@@ -193,6 +193,11 @@ class ListPending:
 
 
 @dataclass(frozen=True)
+class ReviewEach:
+    """Walk the queue, deciding one proposal at a time."""
+
+
+@dataclass(frozen=True)
 class AcceptOne:
     source: str
     key: str
@@ -212,7 +217,7 @@ class ShowHelp:
     detail: str = ""
 
 
-ConsoleCommand = SendMessage | ListPending | AcceptOne | DiscardOne | ShowHelp
+ConsoleCommand = SendMessage | ListPending | ReviewEach | AcceptOne | DiscardOne | ShowHelp
 
 
 def parse_console_line(line: str) -> ConsoleCommand:
@@ -240,6 +245,9 @@ def parse_console_line(line: str) -> ConsoleCommand:
     if name == "/proposals" and not rest:
         return ListPending()
 
+    if name == "/review" and not rest:
+        return ReviewEach()
+
     if name == "/accept" and len(rest) in (2, 3):
         scope = rest[2] if len(rest) == 3 else SESSION_SCOPE
         if scope not in SCOPES:
@@ -256,3 +264,82 @@ def parse_console_line(line: str) -> ConsoleCommand:
         return ShowHelp()
 
     return ShowHelp(f"unrecognized: {line}")
+
+
+# --- Deciding one proposal at a time -----------------------------------------
+
+
+@dataclass(frozen=True)
+class AcceptThis:
+    """Activate the proposal in hand, at this scope."""
+
+    scope: MemoryScope
+
+
+@dataclass(frozen=True)
+class RejectThis:
+    """Discard the proposal in hand."""
+
+
+@dataclass(frozen=True)
+class SkipThis:
+    """Leave it pending and move to the next one."""
+
+
+@dataclass(frozen=True)
+class StopReview:
+    """Leave the walk. Everything not yet decided stays pending."""
+
+
+@dataclass(frozen=True)
+class Unclear:
+    """The keystroke means nothing here.
+
+    Deliberately not the same value as :class:`SkipThis`, so a surface can ask
+    again instead of advancing. Silently skipping the proposal someone meant to
+    accept, because they fumbled one key, is the failure this distinction
+    prevents -- and asking again costs nothing, since by definition nothing has
+    happened yet.
+    """
+
+
+ReviewDecision = AcceptThis | RejectThis | SkipThis | StopReview | Unclear
+
+REVIEW_CHOICES: dict[str, tuple[str, ReviewDecision]] = {
+    "y": ("accept (session)", AcceptThis(SESSION_SCOPE)),
+    "u": ("accept (user)", AcceptThis(USER_SCOPE)),
+    "n": ("reject", RejectThis()),
+    "s": ("skip", SkipThis()),
+    "q": ("stop", StopReview()),
+}
+"""Every key the walk honours, what it is called, and what it means.
+
+One table rather than a parser here and a legend written out somewhere else: the
+keys a surface advertises and the keys it accepts are then the same set by
+construction. ``_SLASH_HELP`` in the entrypoint is the arrangement that can
+drift, and this is deliberately not that.
+
+Accepting appears twice because the scope is the reviewer's choice and never the
+model's (the agent's ADR 0021). Giving ``user`` its own key means the wider blast
+radius costs a different keystroke, rather than an extra argument that is easy to
+leave off and never notice.
+"""
+
+
+def parse_review_key(line: str) -> ReviewDecision:
+    """Read one keystroke from someone walking the queue.
+
+    Ambiguity does nothing irreversible. That is the principle
+    :func:`bacteria.agent.tools.approval.cli_approve` uses and this reaches the
+    opposite key by applying it: there, anything short of an explicit yes denies,
+    because a call that does not run costs nothing. Here the destructive answer
+    is *reject* -- it throws away something extraction produced and no later turn
+    will offer again -- so only an explicit ``n`` does it. An empty line skips,
+    which is the ordinary "next" gesture, and everything else is
+    :class:`Unclear`.
+    """
+    choice = line.strip().lower()
+    if not choice:
+        return SkipThis()
+    known = REVIEW_CHOICES.get(choice)
+    return known[1] if known else Unclear()

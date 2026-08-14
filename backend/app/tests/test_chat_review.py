@@ -34,6 +34,7 @@ async def _session_id(repo):
     ("line", "expected"),
     [
         ("/proposals", review.ListPending()),
+        ("/review", review.ReviewEach()),
         ("/help", review.ShowHelp()),
         ("/accept model tone", review.AcceptOne("model", "tone", SESSION_SCOPE)),
         ("/accept model tone user", review.AcceptOne("model", "tone", USER_SCOPE)),
@@ -80,6 +81,51 @@ def test_a_doubled_slash_sends_one_slash():
     to relay, with no way to insist.
     """
     assert review.parse_console_line("//proposals") == review.SendMessage("/proposals")
+
+
+# --- Deciding one at a time --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("keystroke", "expected"),
+    [
+        ("y", review.AcceptThis(SESSION_SCOPE)),
+        ("u", review.AcceptThis(USER_SCOPE)),
+        ("n", review.RejectThis()),
+        ("s", review.SkipThis()),
+        ("q", review.StopReview()),
+        ("  Y  ", review.AcceptThis(SESSION_SCOPE)),
+    ],
+)
+def test_a_keystroke_means_what_the_walk_offers(keystroke, expected):
+    """Every advertised key does the thing it is labelled with.
+
+    ``y`` and ``u`` differ only in blast radius, and confusing them is not
+    visible afterwards: both produce a memory that exists and looks right, but
+    one of them applies to every later conversation that person has.
+    """
+    assert review.parse_review_key(keystroke) == expected
+
+
+def test_an_empty_line_skips_rather_than_rejecting():
+    """Pressing enter must never discard a proposal.
+
+    The reflex at a prompt is to hit enter, and rejection is the one answer here
+    that cannot be undone -- the proposal is gone and the turn that produced it
+    will not come round again. Skipping leaves the same decision available a
+    moment later.
+    """
+    assert review.parse_review_key("") == review.SkipThis()
+
+
+def test_an_unrecognized_key_is_not_a_skip():
+    """A fumbled key asks again instead of advancing.
+
+    If this returned ``SkipThis`` the walk would move past the proposal silently,
+    and the person would learn they had missed the one they meant to accept only
+    when it was still waiting at the end.
+    """
+    assert review.parse_review_key("x") == review.Unclear()
 
 
 # --- Operations --------------------------------------------------------------

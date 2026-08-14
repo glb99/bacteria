@@ -23,6 +23,7 @@ from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
 from bacteria.app.core import platform
 from bacteria.app.core.db import get_engine
+from bacteria.app.core.jobs import register_tasks
 from bacteria.app.core.settings import get_settings, load_env_file
 from bacteria.app.evaluation.checks import Policy, evaluate
 from bacteria.app.evaluation.runs import load_runs
@@ -115,7 +116,19 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
     """
     settings = get_settings()
 
-    async with AsyncSession(get_engine()) as db:
+    # Procrastinate has to be open before anything can enqueue, and a turn
+    # enqueues whenever extraction is on -- without this, the first turn fails
+    # with `AppNotOpen` after the model has already answered and the transcript
+    # has already been written. The ASGI lifespan does the same thing for the
+    # API, and this is the obligation that moving the trigger into `run_turn`
+    # put on every entrypoint that runs a turn.
+    #
+    # Opened unconditionally rather than only when extraction is enabled. The
+    # pool costs one connection for the life of an interactive command, and
+    # acquiring a resource conditionally on a flag is how a process ends up
+    # working in one configuration and failing in the other at the worst moment.
+    queue = register_tasks()
+    async with queue.open_async(), AsyncSession(get_engine()) as db:
         repository = SqlSessionRepository(db)
 
         if session_id is None:

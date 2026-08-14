@@ -134,6 +134,16 @@ async def run_turn(
             :mod:`bacteria.app.ingestion.tasks` avoids by having the deferred
             path call the same ``ingest`` the inline one does, and the same
             reasoning applies to a trigger.
+
+            **Passing ``True`` obliges the caller to have opened the job queue**
+            — ``async with register_tasks().open_async()`` — because enqueueing
+            needs a pool and this function does not own one. Nothing here can
+            check it, and the failure is late and expensive: the model has
+            answered and the transcript is written before ``AppNotOpen`` is
+            raised, so the turn is charged for and lost. The API opens it in its
+            lifespan and the admin CLI in its command; a third caller has to do
+            the same. This obligation is the cost of the trigger living here
+            rather than at each entrance, and it is the smaller cost.
     """
     runtime = Runtime(model_client=build_model_client(provider), session_store=repository)
     result = await runtime.run_turn(

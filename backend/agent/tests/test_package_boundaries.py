@@ -1,9 +1,10 @@
-"""What this package is allowed to import.
+"""What this package is allowed to import, and where it may read configuration.
 
 The rule these protect is the one that makes `bacteria.agent` a library rather than a
 layer: it depends on nothing from whatever hosts it, and on nothing it has not
-declared. Break that and the agent stops being vendorable — which is the entire
-premise of the layering.
+declared, and it learns how it is configured from its caller rather than from the
+environment. Break any of that and the agent stops being vendorable — which is the
+entire premise of the layering.
 
 Static analysis, not an import attempt, and that distinction is the reason this
 file exists. In the workspace this package currently lives in, the application
@@ -114,6 +115,77 @@ def _imported_roots(directory: pathlib.Path) -> dict[str, set[str]]:
             for root in roots:
                 found.setdefault(root, set()).add(str(path.relative_to(PACKAGE_ROOT)))
     return found
+
+
+COMPOSITION_ROOT = "interfaces"
+"""The one layer allowed to read configuration. See `interfaces/__init__.py`."""
+
+ENVIRONMENT_READERS = frozenset({"getenv", "environ"})
+"""Names on `os` that reach the process environment."""
+
+DOTENV = "dotenv"
+"""Loading a `.env` file is a configuration read too, and an easier one to miss."""
+
+
+def _configuration_read(node: ast.AST) -> str | None:
+    """Name the configuration read this node performs, if it performs one.
+
+    Four spellings of the same mistake: ``os.getenv``, ``os.environ``, the same
+    two borrowed with ``from os import``, and any use of ``dotenv``. Matching on
+    the attribute rather than resolving names means ``os`` rebound to something
+    else would be missed -- accepted, because this guards against the ordinary
+    version of the mistake, not a determined one.
+    """
+    if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_READERS:
+        if isinstance(node.value, ast.Name) and node.value.id == "os":
+            return f"os.{node.attr}"
+        return None
+    if isinstance(node, ast.ImportFrom):
+        if node.module == "os":
+            borrowed = sorted(a.name for a in node.names if a.name in ENVIRONMENT_READERS)
+            return ", ".join(f"os.{name}" for name in borrowed) or None
+        return DOTENV if node.module and node.module.split(".")[0] == DOTENV else None
+    if isinstance(node, ast.Import):
+        return DOTENV if any(a.name.split(".")[0] == DOTENV for a in node.names) else None
+    return None
+
+
+def _configuration_reads_below_the_composition_root() -> dict[str, set[str]]:
+    """Map each configuration read outside `interfaces/` to the files doing it."""
+    found: dict[str, set[str]] = {}
+    for path in sorted(SOURCE.rglob("*.py")):
+        if COMPOSITION_ROOT in path.relative_to(SOURCE).parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            read = _configuration_read(node)
+            if read is not None:
+                found.setdefault(read, set()).add(str(path.relative_to(PACKAGE_ROOT)))
+    return found
+
+
+def test_only_the_composition_root_reads_configuration():
+    """Nothing below `interfaces/` learns anything from the environment.
+
+    The property that lets a host compose this agent at all. `bacteria.app`
+    builds its clients from its own `Settings`, so a module below the
+    composition root reading `MODEL_PROVIDER` for itself would ignore the
+    host's configuration entirely -- and do it silently, since the variable is
+    usually also set in development. The same read at import time freezes the
+    value for the process, which is how a test that patches the environment ends
+    up calling a live vendor API.
+
+    Static, and for the reason the module docstring gives: an environment read
+    below this line does not fail here, where `.env` is loaded and every variable
+    is present. It fails in the host.
+    """
+    offenders = _configuration_reads_below_the_composition_root()
+
+    assert offenders == {}, (
+        f"only `{COMPOSITION_ROOT}/` may read configuration; these modules read it directly.\n"
+        "Take the value as an argument instead -- the composition root is what knows it.\n"
+        f"{offenders}"
+    )
 
 
 def test_the_source_imports_only_what_this_package_declares():

@@ -178,6 +178,13 @@ def main() -> None:
     library that starts its own loop cannot be embedded in a process that
     already has one — which is the entire situation this agent is heading into.
     """
+    # Taking the default loop is safe *because this command has no database
+    # driver*, not because the default is generally fine. On Windows that is
+    # `ProactorEventLoop`, which psycopg's async mode cannot use -- so a
+    # Postgres-backed `SessionRepository` wired into this CLI would work
+    # everywhere else and fail at the first query here. The host application
+    # chooses its loop in its own entrypoints for exactly this reason; this
+    # package cannot reuse that without depending on the thing it is embedded in.
     anyio.run(_run)
 
 

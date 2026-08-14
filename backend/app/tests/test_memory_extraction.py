@@ -41,6 +41,7 @@ class _FakeClient:
     async def send(self, messages: list[dict[str, Any]], **kwargs: Any) -> ModelResponse:
         self.calls += 1
         self.seen = messages
+        self.system = kwargs.get("system", "")
         return ModelResponse(
             text=self.text, tool_calls=[], stop_reason="end_turn", raw=None, model="fake-model"
         )
@@ -216,6 +217,52 @@ async def test_new_messages_after_a_run_are_picked_up(engine, session_id):
 
     assert client.calls == 2
     assert second.examined == 1, "the second run did not see the message the turn added"
+
+
+async def test_the_keys_already_in_use_are_shown_to_the_model(engine, session_id):
+    """Without this the model renames one fact on every run.
+
+    Observed, not theoretical: one conversation produced `name`, `first_name`,
+    `preferred_name` and `nickname` for a single fact across four extractions.
+    Proposals are keyed by (source, key), so those accumulate rather than
+    overwrite — the idempotence this design leans on is real in the store and
+    worthless when the key is chosen fresh each time.
+    """
+    client = _FakeClient()
+
+    async with AsyncSession(engine) as db:
+        repository = SqlSessionRepository(db)
+        await repository.remember(session_id, key="tone", value="terse", reason="r")
+        await repository.remember(session_id, key="timezone", value="CET", reason="r", scope="user")
+        await repository.propose(session_id, key="pending", value="v", reason="r", source="model")
+
+        await extract_memories(db, client, session_id, max_proposals=5)
+
+    system = client.system
+    assert "tone" in system, "an active session memory was not offered for reuse"
+    assert "timezone" in system, "an active user memory was not offered for reuse"
+    assert "pending" in system, "an existing proposal was not offered for reuse"
+
+
+async def test_two_facts_under_one_key_keep_the_first_and_count_the_rest(engine, session_id):
+    """A key repeated inside one run must not silently overwrite itself.
+
+    ``propose`` upserts on (source, key), so writing both would leave whichever
+    the model generated last, chosen by generation order rather than by anything
+    a reviewer could see or predict.
+    """
+    client = _FakeClient(
+        text='[{"key": "name", "value": "Guillermo", "reason": "said so"}, '
+        '{"key": "name", "value": "Juan", "reason": "also said so"}]'
+    )
+
+    async with AsyncSession(engine) as db:
+        result = await extract_memories(db, client, session_id, max_proposals=5)
+        state = await SqlSessionRepository(db).get_state(session_id)
+
+    assert result.proposed == 1
+    assert result.dropped == 1
+    assert state.proposals[(EXTRACTOR_SOURCE, "name")].value == "Guillermo"
 
 
 async def test_new_items_with_no_conversation_in_them_cost_no_model_call(engine, session_id):

@@ -322,6 +322,47 @@ class SqlSessionRepository:
             await self._db.commit()
         # Absent key is a no-op: the caller wanted it gone, and it is.
 
+    async def known_keys(self, session_id: str) -> set[str]:
+        """Every key this conversation's memory already uses, active or proposed.
+
+        Exists for the extractor, and for one specific failure. A key is chosen
+        by a model, and left to itself the model chooses a new one every run: the
+        same fact arrived as ``name``, ``first_name``, ``preferred_name`` and
+        ``nickname`` across four extractions of one conversation. Proposals are
+        keyed by ``(source, key)``, so those do not overwrite each other -- they
+        accumulate, and a review queue fills with one fact wearing four names.
+
+        Showing the model what already exists makes the namespace settle on its
+        own: the first run invents a key, later runs are told it is there and
+        reuse it. That is a better fix than a fixed vocabulary, which would have
+        to guess in advance every fact anyone might want to keep.
+
+        All three collections, because all three are keys a later write could
+        collide with -- and the user-scoped ones especially, since those are the
+        facts most likely to be re-observed in a new conversation.
+
+        Not on ``SessionRepository``, for the reason ``count_proposals`` gives.
+        """
+        row = await self._require(session_id)
+
+        session_keys = (
+            await self._db.exec(
+                select(ChatMemoryEntry.key).where(ChatMemoryEntry.session_id == session_id)
+            )
+        ).all()
+        user_keys = (
+            await self._db.exec(
+                select(ChatUserMemoryEntry.key).where(ChatUserMemoryEntry.user_id == row.user_id)
+            )
+        ).all()
+        proposed = (
+            await self._db.exec(
+                select(ChatMemoryProposal.key).where(ChatMemoryProposal.session_id == session_id)
+            )
+        ).all()
+
+        return set(session_keys) | set(user_keys) | set(proposed)
+
     async def count_proposals(self, session_id: str) -> int:
         """How many suggestions are waiting for a decision.
 

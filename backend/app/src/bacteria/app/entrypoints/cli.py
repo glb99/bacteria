@@ -131,7 +131,16 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
             print(f"resuming: {session_id}")
 
         print(f"provider: {settings.model_provider}", end="")
-        print("  extraction: on" if settings.memory_extraction_enabled else "  extraction: off")
+        if settings.memory_extraction_enabled:
+            # The worker is named in the output rather than only in the
+            # docstring because this command is the one most likely to be run
+            # *in order to* see what extraction produces, and it enqueues
+            # without performing. Turning it on and seeing no proposals is the
+            # expected result of forgetting `just worker`, and nothing else
+            # here would say so.
+            print("  extraction: on (needs a running worker: `just worker`)")
+        else:
+            print("  extraction: off")
         print("(empty line or Ctrl+C to quit)")
 
         while True:

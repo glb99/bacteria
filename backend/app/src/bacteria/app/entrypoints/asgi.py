@@ -68,6 +68,30 @@ async def lifespan(_app: FastAPI):
     queue = register_tasks()
     async with queue.open_async():
         if not settings.run_worker_in_api:
+            if settings.memory_extraction_enabled:
+                # INFO rather than WARNING, and that is the decision. This is
+                # the *correct* configuration anywhere two processes are
+                # possible, so warning here would fire on every properly run
+                # deployment -- and a warning that fires when nothing is wrong
+                # is one people learn to scroll past, taking the real ones with
+                # it.
+                #
+                # It is said at all because extraction moved the cost of
+                # forgetting a worker onto the main path. Before it, only
+                # `:defer` enqueued, and a caller opts into that explicitly and
+                # is answered 202. Now every chat turn queues a job, so a
+                # deployment with no worker anywhere converses perfectly while
+                # no proposal ever appears -- which looks like a broken feature
+                # rather than a missing process.
+                #
+                # This cannot detect the mistake: from in here, "a separate
+                # bacteria-worker is running" and "nobody started one" are
+                # indistinguishable. So it states the dependency instead of
+                # diagnosing it.
+                logger.info(
+                    "memory extraction is enabled and no worker runs in this process; "
+                    "a separate bacteria-worker must be running or proposals will never appear"
+                )
             yield
             return
 

@@ -1,4 +1,4 @@
-"""Operator command line: credentials, evaluation, and a conversation.
+"""Operator command line: credentials, evaluation, a conversation, and its review.
 
 Configuration and wiring only, like every entrypoint. It opens a session, calls
 into `bacteria.app.auth.service`, and prints the result; the decisions live there.
@@ -14,9 +14,16 @@ will eventually be pointed at the wrong one and build it there. Run
 """
 
 import argparse
+from typing import cast
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from bacteria.agent.session.store import (
+    SESSION_SCOPE,
+    USER_SCOPE,
+    MemoryScope,
+    UnknownSessionError,
+)
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, revoke_key
 from bacteria.app.chat.repository import SqlSessionRepository
@@ -180,6 +187,104 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
     return 0
 
 
+async def _list_proposals(session_id: str) -> int:
+    """Show what is waiting for a decision, and what accepting it would replace.
+
+    The review surface the agent's ADR 0017 requires a host to supply. It
+    existed over HTTP only, which meant a conversation held in this same CLI
+    could not be reviewed without starting a server — and a queue nobody reads
+    is the failure that record warned about.
+
+    The replacement note is the part worth having. Proposals are keyed by
+    ``(source, key)`` and active memory by ``key`` alone, so two proposers may
+    both suggest ``nickname`` and accepting the second silently overwrites the
+    first. That collapse is correct (ADR 0017 puts it at activation, where a
+    human is) and invisible unless something says so before the choice.
+    """
+    async with AsyncSession(get_engine()) as db:
+        try:
+            state = await SqlSessionRepository(db).get_state(session_id)
+        except UnknownSessionError:
+            print(f"no session {session_id}")
+            return 1
+
+    if not state.proposals:
+        print("no proposals waiting")
+        return 0
+
+    for (source, key), entry in sorted(state.proposals.items()):
+        print(f"{source}/{key}")
+        print(f"  value:  {entry.value}")
+        print(f"  reason: {entry.reason}")
+        held = [
+            name
+            for name, collection in ((SESSION_SCOPE, state.memory), (USER_SCOPE, state.user_memory))
+            if key in collection
+        ]
+        if held:
+            print(
+                f"  note:   accepting replaces the active {' and '.join(held)} memory for this key"
+            )
+
+    print(f"\n{len(state.proposals)} waiting.")
+    print(f"accept: bacteria-admin accept-proposal {session_id} <source> <key> [--scope user]")
+    return 0
+
+
+async def _accept_proposal(session_id: str, source: str, key: str, scope: str) -> int:
+    """Promote one proposal into memory the model will be told about.
+
+    Scope is the caller's to choose and defaults to the session, matching the
+    protocol. ``user`` is the one that makes a fact outlive the conversation,
+    which is what memory is for and also the wider blast radius — hence the
+    narrow default, per the agent's ADR 0021.
+
+    Ownership is not checked, for the reason ``_chat`` gives: running this needs
+    the database, which is more access than any ownership rule protects against.
+    """
+    async with AsyncSession(get_engine()) as db:
+        try:
+            entry = await SqlSessionRepository(db).activate(
+                session_id, source=source, key=key, scope=cast(MemoryScope, scope)
+            )
+        # Before the bare KeyError, and not interchangeable with it:
+        # `UnknownSessionError` *subclasses* KeyError, so catching that first
+        # would report a missing proposal for a session that does not exist.
+        except UnknownSessionError:
+            print(f"no session {session_id}")
+            return 1
+        except KeyError:
+            print(f"no proposal {source}/{key} in that session")
+            return 1
+
+    print(f"activated {key!r} at {scope} scope: {entry.value}")
+    return 0
+
+
+async def _reject_proposal(session_id: str, source: str, key: str) -> int:
+    """Discard a proposal so it stops appearing for review.
+
+    Reports whether there was anything there while still succeeding either way.
+    Rejection is idempotent by design — "the caller wanted it gone, and it is" —
+    so this deliberately differs from ``revoke-key``, which exits non-zero on a
+    missing target because revoking a key that does not exist means the key you
+    meant is still live somewhere.
+    """
+    async with AsyncSession(get_engine()) as db:
+        repository = SqlSessionRepository(db)
+        try:
+            state = await repository.get_state(session_id)
+        except UnknownSessionError:
+            print(f"no session {session_id}")
+            return 1
+
+        present = (source, key) in state.proposals
+        await repository.reject(session_id, source=source, key=key)
+
+    print(f"discarded {source}/{key}" if present else f"nothing to discard: no {source}/{key}")
+    return 0
+
+
 async def _revoke(key_id: str) -> int:
     if keys.split(key_id) is not None:
         # A whole key was passed where an id belongs. Refused rather than
@@ -229,6 +334,25 @@ def main() -> int:
         help="resume this session id instead of opening a new one",
     )
 
+    listing = commands.add_parser("list-proposals", help="show memories awaiting a decision")
+    listing.add_argument("session_id", help="the conversation whose proposals to review")
+
+    accept = commands.add_parser("accept-proposal", help="make a suggested memory active")
+    accept.add_argument("session_id")
+    accept.add_argument("source", help="who proposed it; half of a proposal's identity")
+    accept.add_argument("key", help="the other half -- two sources may suggest the same key")
+    accept.add_argument(
+        "--scope",
+        choices=[SESSION_SCOPE, USER_SCOPE],
+        default=SESSION_SCOPE,
+        help="`user` carries the fact into every later conversation; defaults to this session",
+    )
+
+    reject = commands.add_parser("reject-proposal", help="discard a suggested memory")
+    reject.add_argument("session_id")
+    reject.add_argument("source")
+    reject.add_argument("key")
+
     evaluate_cmd = commands.add_parser("eval", help="judge recorded runs against a policy")
     evaluate_cmd.add_argument(
         "--session", default=None, help="restrict to one session; omit to judge every run"
@@ -257,6 +381,12 @@ def main() -> int:
         return platform.run(_issue(args.principal_id, args.label or args.principal_id))
     if args.command == "chat":
         return platform.run(_chat(args.principal_id, args.session))
+    if args.command == "list-proposals":
+        return platform.run(_list_proposals(args.session_id))
+    if args.command == "accept-proposal":
+        return platform.run(_accept_proposal(args.session_id, args.source, args.key, args.scope))
+    if args.command == "reject-proposal":
+        return platform.run(_reject_proposal(args.session_id, args.source, args.key))
     if args.command == "eval":
         return platform.run(_evaluate(args.session, args.model, args.tool, args.max_failure_rate))
     return platform.run(_revoke(args.key_id))

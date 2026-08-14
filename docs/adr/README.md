@@ -18,4 +18,4 @@ conventions do not qualify.
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-run-the-worker-in-the-api-process.md) | Run the job worker inside the API process on single-process platforms | Accepted |
-| [0002](0002-the-memory-graph-is-postgres-tables.md) | Build the memory graph as tables in the application's Postgres, not in a graph database | Proposed |
+| [0002](0002-the-memory-graph-is-postgres-tables.md) | Build the memory graph as tables in the application's Postgres, not in a graph database | Accepted |

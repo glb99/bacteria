@@ -2,10 +2,24 @@
 
 ## Status
 
-Proposed — 2026-08-14
+Accepted — 2026-08-14
+
+Accepted after phase one shipped rather than before, which is the order this
+particular bet deserved. The record's central claim is that the extractor is the
+half worth having, and that was testable: run live, it first renamed one fact on
+every pass — `name`, `first_name`, `preferred_name`, `nickname` — which would
+have become four node identities for one person had the graph been built on it
+first. Showing it the keys already in use, split into confirmed and
+merely-suggested, settled it: three consecutive runs over the same transcript
+proposed one fact under the confirmed key.
+
+Phase two — nodes, edges, vectors, traversal — remains unbuilt and is the part
+still taken on faith. The Consequences below are unchanged by acceptance,
+including the one to dislike.
 
 Depends on the agent's ADR 0024, which decides the shape this reaches the agent
-in. This record decides where the data lives and what writes it.
+in and stays Proposed until something implements it. This record decides where
+the data lives and what writes it.
 
 ## Context
 

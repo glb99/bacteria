@@ -99,6 +99,7 @@ def register_tasks() -> App:
     Doing it in one named place means the failure is impossible rather than
     dependent on which entrypoint happened to import what.
     """
+    from bacteria.app.chat import tasks as _chat_tasks  # noqa: F401
     from bacteria.app.ingestion import tasks as _ingestion_tasks  # noqa: F401
 
     return get_app()

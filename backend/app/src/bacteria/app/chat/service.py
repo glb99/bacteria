@@ -51,8 +51,16 @@ smaller cost than that dependency.
 """
 
 
-def build_model_client(provider: str) -> SendsMessages:
+def build_model_client(provider: str, model: str | None = None) -> SendsMessages:
     """Construct the configured client.
+
+    Args:
+        model: Which model the client should use, or ``None`` for the client's
+            own default. Present because not every model call in this
+            application is a conversation — memory extraction fills a small JSON
+            schema and wants the cheapest model a provider offers, while sharing
+            the provider and its credential. Passed only when set, so the
+            clients' defaults stay the single place a default model is named.
 
     Raises:
         ValueError: Unrecognized provider. Rejected rather than falling back to a
@@ -63,7 +71,14 @@ def build_model_client(provider: str) -> SendsMessages:
     except KeyError:
         known = ", ".join(sorted(PROVIDERS))
         raise ValueError(f"unknown model provider {provider!r}; expected one of: {known}") from None
-    return client_cls()
+    # Suppressed because `SendsMessages` describes `send` and deliberately says
+    # nothing about construction -- the agent's ADR 0005 keeps that protocol to
+    # one method, so a checker resolving `client_cls(...)` sees `object.__init__`
+    # and no `model` parameter. Both concrete clients take one, with their own
+    # defaults, which is why this passes the argument only when it is set.
+    # Widening the protocol to describe a constructor would trade a suppression
+    # here for the provider abstraction layer that ADR rejects.
+    return client_cls(model=model) if model else client_cls()  # ty: ignore[unknown-argument]
 
 
 def build_registry(repository: SessionRepository, session_id: str) -> ToolRegistry:

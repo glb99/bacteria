@@ -17,6 +17,7 @@ from bacteria.app.auth.dependencies import CurrentPrincipal
 from bacteria.app.chat.access import load_owned_session
 from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
+from bacteria.app.chat.tasks import extract_memories_task
 from bacteria.app.core.dependencies import AppSettings, DbSession
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -128,6 +129,14 @@ async def take_turn(
         session_id=session_id,
         user_text=body.text,
     )
+
+    if settings.memory_extraction_enabled:
+        # After the turn, so the job sees the transcript this turn wrote rather
+        # than the one before it. A turn that raised never reaches here and
+        # never enqueues, which loses nothing: the watermark did not move, so
+        # the next successful turn extracts from that turn's messages too.
+        await extract_memories_task.defer_async(session_id=session_id)
+
     return TurnResult(run_id=result.run_id, reply=result.response.text)
 
 

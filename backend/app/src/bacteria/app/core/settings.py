@@ -94,6 +94,33 @@ class Settings(BaseSettings):
             Ignored unless ``run_worker_in_api`` is set. Lower than the standalone
             worker's default would be defensible, since here it competes with
             request handling for one event loop.
+        memory_extraction_enabled: Whether a turn queues a job to read the new
+            transcript items and *propose* memories from them.
+
+            **Off by default**, and for the same kind of reason as
+            ``run_worker_in_api``: it costs a model call per turn, roughly
+            doubling per-turn spend, for a feature whose output nothing surfaces
+            yet. A deployment should turn this on having decided to pay for it,
+            not discover it on a bill. Nothing it produces can reach a model
+            without a human activating it, so the risk of leaving it on is
+            expense and review backlog rather than behaviour.
+        memory_extraction_model: Which model performs the extraction, or ``None``
+            for the provider's default.
+
+            Separate from ``model_provider``'s default model because these are
+            different jobs: the agent's is conversational, this one fills a small
+            JSON schema from a bounded transcript slice, which the cheapest model
+            a provider offers does well. The provider is shared; only the model
+            differs.
+        memory_extraction_max_proposals: The most proposals one extraction run
+            may write.
+
+            A bound the agent's ADR 0017 named and did not build: proposals cost
+            nothing in the prompt and everything in the review surface, and a
+            session accumulating thousands of them makes the queue useless
+            without anything looking broken. Applied to the model's output rather
+            than to the table, so the excess is dropped and counted at the point
+            something can say it happened.
     """
 
     model_config = SettingsConfigDict(
@@ -120,6 +147,9 @@ class Settings(BaseSettings):
     model_provider: str = "anthropic"
     run_worker_in_api: bool = False
     worker_concurrency: int = 4
+    memory_extraction_enabled: bool = False
+    memory_extraction_model: str | None = None
+    memory_extraction_max_proposals: int = 5
 
     @model_validator(mode="after")
     def _reject_unknown_prefixed_variables(self) -> "Settings":

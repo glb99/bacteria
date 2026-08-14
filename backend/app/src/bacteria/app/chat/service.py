@@ -34,6 +34,7 @@ from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.tools.memory import build_remember_tool
 from bacteria.agent.tools.registry import ToolRegistry
 from bacteria.app.chat.tasks import extract_memories_task
+from bacteria.app.core.jobs import get_app
 
 # Suppressed for the same reason as bacteria's own table: the annotation is the
 # contract, and a checker inferring the concrete classes from the literal
@@ -105,6 +106,28 @@ def _allow(_tool_call) -> bool:
     return True
 
 
+def _require_open_queue() -> None:
+    """Raise now if this turn will not be able to enqueue when it finishes.
+
+    Procrastinate's ``pool`` property raises :class:`AppNotOpen` when nothing has
+    opened the app, and it is touched here purely for that. The check earns its
+    place by *when* it runs rather than by what it detects: without it the same
+    error arrives after the model has answered and the transcript has been
+    written, so a caller that forgot to open the queue pays for a turn, stores
+    it, and loses it — and pays again on every retry. Here it costs nothing.
+
+    This is the enforcement half of what ``run_turn``'s ``extract`` argument
+    documents. It cannot make a caller open the queue; it can make forgetting
+    cheap and immediate instead of expensive and late.
+    """
+    # Suppressed because `App.connector` is declared as the base type, while
+    # `core.jobs.get_app` always constructs a `PsycopgConnector` -- and `pool`,
+    # which is where the `AppNotOpen` signal lives, is that subclass's. Narrowing
+    # with an `isinstance` would add a branch that cannot be taken and would
+    # silently skip the check if it ever were.
+    _ = get_app().connector.pool  # ty: ignore[unresolved-attribute]
+
+
 async def run_turn(
     repository: SessionRepository,
     provider: str,
@@ -145,6 +168,9 @@ async def run_turn(
             the same. This obligation is the cost of the trigger living here
             rather than at each entrance, and it is the smaller cost.
     """
+    if extract:
+        _require_open_queue()
+
     runtime = Runtime(model_client=build_model_client(provider), session_store=repository)
     result = await runtime.run_turn(
         session_id,

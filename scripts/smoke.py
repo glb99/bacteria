@@ -269,6 +269,66 @@ def check_deferred_ingestion(base_url: str, key: str, database_url: str) -> None
     check(status == "succeeded", f"job {job_id} was drained by the worker", status)
 
 
+def check_chat_cli(database_url: str) -> None:
+    """Start the chat command as its own process and let it reach EOF.
+
+    The suite cannot run a console script at all, so nothing else in this
+    project proves this entrypoint composes: that its settings resolve, that it
+    reaches the database, that it opens procrastinate's pool, and that it writes
+    a session row. Each of those is wiring rather than logic, which is precisely
+    the category `entrypoints/` is exempt from unit-testing and therefore the
+    category only this script can defend.
+
+    **This does not cover a turn**, for the reason in the module docstring — a
+    turn needs a model provider. So it would not have caught the bug that
+    prompted it: `bacteria-admin chat` shipped without opening the queue, and
+    that fails at the deferral, which is after the model has answered. The guard
+    for *that* is `test_a_turn_refuses_before_the_model_when_it_cannot_enqueue`,
+    which moved the failure in front of the model call where a test can reach
+    it. This check is the weaker, complementary half: it proves the process
+    starts at all.
+
+    Extraction is turned on for the run so the header states the worker
+    requirement. A person running this command to see what extraction produces
+    and getting no proposals is the expected result of forgetting `just worker`,
+    and nothing else would tell them.
+    """
+    print("\n[cli] the chat command starts, connects, and opens the job queue")
+    result = subprocess.run(
+        [sys.executable, "-m", "bacteria.app.entrypoints.cli", "chat", "smoke-cli"],
+        input="",
+        capture_output=True,
+        text=True,
+        env={**os.environ, "BACTERIA_MEMORY_EXTRACTION_ENABLED": "true"},
+    )
+    check(
+        result.returncode == 0,
+        "the chat command started and exited cleanly",
+        (result.returncode, result.stderr[-400:]),
+    )
+    check(
+        "extraction: on" in result.stdout,
+        "extraction being on says a worker is needed",
+        result.stdout,
+    )
+
+    session_id = ""
+    for line in result.stdout.splitlines():
+        if line.startswith("new session:"):
+            session_id = line.split(":", 1)[1].strip()
+    check(bool(session_id), "the command reported a session id", result.stdout)
+
+    # Read back rather than trusting stdout: printing an id and storing one are
+    # different things, and this entrypoint is new enough that the difference is
+    # worth an assertion rather than an assumption.
+    with psycopg.connect(psycopg_dsn(database_url)) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT user_id FROM chat_session WHERE session_id = %s", (session_id,))
+        row = cursor.fetchone()
+    check(
+        row is not None and row[0] == "smoke-cli", "the session was written, not just printed", row
+    )
+
+
 def run_checks(base_url: str, database_url: str) -> None:
     key = issue_key("smoke-principal")
     other_key = issue_key("smoke-stranger")
@@ -277,6 +337,7 @@ def run_checks(base_url: str, database_url: str) -> None:
     check_memory(base_url, key, session_id)
     check_inline_ingestion(base_url, key)
     check_deferred_ingestion(base_url, key, database_url)
+    check_chat_cli(database_url)
 
 
 def main() -> int:

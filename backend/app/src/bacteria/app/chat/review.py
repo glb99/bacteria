@@ -26,7 +26,7 @@ how a terminal is drawn.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from bacteria.agent.session.store import (
     SESSION_SCOPE,
@@ -50,22 +50,40 @@ of memory and also the wider blast radius (the agent's ADR 0021).
 
 
 @dataclass(frozen=True)
+class Held:
+    """An active memory a proposal would displace, and what it currently says.
+
+    The value is carried, not just the scope, and that was learned from a walk
+    that went wrong. Told only *that* something would be replaced, a reviewer
+    accepted the extractor's ``dad_name = "Pedro"`` at user scope and then, two
+    entries later, the model's ``dad_name = "Your dad's name is Pedro."`` — a
+    strictly worse phrasing of the same fact, silently promoted over the good
+    one. The note was correct and useless: replacement is only a cost if you can
+    see what is being lost, and nothing else recovers it once the write lands.
+    """
+
+    scope: MemoryScope
+    value: Any
+
+
+@dataclass(frozen=True)
 class PendingEntry:
     """One suggestion, with what accepting it would cost.
 
-    ``held_by`` names the scopes whose *active* memory already claims this key.
-    It is the part of a listing worth computing: proposals are keyed by
-    ``(source, key)`` and active memory by ``key`` alone, so accepting a second
-    suggestion for a key replaces the first rather than joining it. That collapse
-    is deliberate — ADR 0017 puts it at activation, where a human is — and it is
-    invisible unless something says so *before* the choice instead of after.
+    ``held_by`` names the scopes whose *active* memory already claims this key,
+    and what each holds. It is the part of a listing worth computing: proposals
+    are keyed by ``(source, key)`` and active memory by ``key`` alone, so
+    accepting a second suggestion for a key replaces the first rather than
+    joining it. That collapse is deliberate — ADR 0017 puts it at activation,
+    where a human is — and it is invisible unless something says so *before* the
+    choice instead of after.
     """
 
     source: str
     key: str
     value: Any
     reason: str
-    held_by: tuple[MemoryScope, ...] = ()
+    held_by: tuple[Held, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -76,6 +94,33 @@ class Pending:
 
     def __len__(self) -> int:
         return len(self.entries)
+
+
+def held_now(entry: PendingEntry, activated: Mapping[str, Held]) -> tuple[Held, ...]:
+    """What holds this entry's key, counting decisions taken since the listing.
+
+    A walk reads the queue once and then asks about each entry in turn, so its
+    `held_by` is a snapshot from before the reviewer answered anything. Two
+    proposals for one key in the same walk is the ordinary case rather than a
+    corner one — two proposers finding the same fact is what ADR 0017 expects —
+    and by the second one the first has already been activated. Shown the stale
+    snapshot, the reviewer is told nothing will be replaced at the exact moment
+    something will be.
+
+    ``activated`` maps a key to what the walk just put there. Only additions:
+    activating adds a scope and rejecting removes none, so nothing here has to
+    model a decision being undone. A scope already in ``held_by`` is *replaced*
+    rather than kept — the walk's own write is the newer of the two, and showing
+    the snapshot's value would name something that is already gone.
+
+    Pure, and separate from the walk that calls it, because "what would this
+    replace" is what a person decides on rather than how a terminal draws it.
+    """
+    by_scope = {held.scope: held.value for held in entry.held_by}
+    just_activated = activated.get(entry.key)
+    if just_activated is not None:
+        by_scope[just_activated.scope] = just_activated.value
+    return tuple(Held(scope, by_scope[scope]) for scope in SCOPES if scope in by_scope)
 
 
 @dataclass(frozen=True)
@@ -135,7 +180,11 @@ async def pending(repository: SqlSessionRepository, session_id: str) -> Pending 
                 key=key,
                 value=entry.value,
                 reason=entry.reason,
-                held_by=tuple(scope for scope in SCOPES if key in active[scope]),
+                held_by=tuple(
+                    Held(scope, active[scope][key].value)
+                    for scope in SCOPES
+                    if key in active[scope]
+                ),
             )
             for (source, key), entry in sorted(state.proposals.items())
         )

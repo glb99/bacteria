@@ -128,6 +128,79 @@ def test_an_unrecognized_key_is_not_a_skip():
     assert review.parse_review_key("x") == review.Unclear()
 
 
+def test_the_replacement_note_counts_decisions_made_since_the_listing():
+    """A walk must not tell you nothing will be replaced while something will.
+
+    Two proposers finding the same fact is the ordinary case -- ADR 0017 expects
+    it, and it is why proposals are keyed by (source, key). So the second entry
+    in a walk is routinely a second suggestion for a key the first just
+    activated, and the listing that walk is iterating was taken before either
+    decision. Shown that snapshot, the reviewer is told the choice is free at
+    exactly the moment it is not.
+    """
+    entry = review.PendingEntry(source="model", key="dog_name", value="v", reason="r")
+    just_accepted = review.Held(USER_SCOPE, "Pipin")
+
+    assert review.held_now(entry, {}) == ()
+    assert review.held_now(entry, {"dog_name": just_accepted}) == (just_accepted,)
+    assert review.held_now(entry, {"other": just_accepted}) == ()
+
+
+def test_a_scope_already_held_is_not_reported_twice():
+    """Accepting into a scope the key already holds is still one replacement."""
+    held = review.Held(SESSION_SCOPE, "terse")
+    entry = review.PendingEntry(source="model", key="tone", value="v", reason="r", held_by=(held,))
+
+    assert review.held_now(entry, {"tone": review.Held(SESSION_SCOPE, "terse")}) == (held,)
+    assert review.held_now(entry, {"tone": review.Held(USER_SCOPE, "chatty")}) == (
+        held,
+        review.Held(USER_SCOPE, "chatty"),
+    )
+
+
+def test_the_note_names_the_value_a_decision_would_destroy():
+    """Warning that something will be replaced, without saying what, cost a value.
+
+    Live: the extractor's `dad_name = "Pedro"` was accepted at user scope, and
+    two entries later the model's `dad_name = "Your dad's name is Pedro."` was
+    accepted over it -- a worse phrasing of the same fact, promoted because the
+    note said only that a replacement would happen. Overwriting is destructive
+    and there is no history table, so the good value was unrecoverable the
+    instant the second keystroke landed.
+    """
+    entry = review.PendingEntry(
+        source="model",
+        key="dad_name",
+        value="Your dad's name is Pedro.",
+        reason="r",
+        held_by=(review.Held(USER_SCOPE, "Pedro"),),
+    )
+
+    assert review.held_now(entry, {})[0].value == "Pedro"
+
+
+def test_a_walks_own_decision_supersedes_the_listings_value():
+    """The newer of two values is the one the walk just wrote, not the snapshot.
+
+    Accepting twice into one scope during a walk is how a reviewer works through
+    competing suggestions for a key. Showing the value the listing recorded would
+    name something already overwritten -- a note that is stale in its value while
+    being right about its scope, which is the harder version of the bug this
+    tracking exists to prevent.
+    """
+    entry = review.PendingEntry(
+        source="model",
+        key="tone",
+        value="chatty",
+        reason="r",
+        held_by=(review.Held(USER_SCOPE, "stale"),),
+    )
+
+    assert review.held_now(entry, {"tone": review.Held(USER_SCOPE, "terse")}) == (
+        review.Held(USER_SCOPE, "terse"),
+    )
+
+
 # --- Operations --------------------------------------------------------------
 
 
@@ -136,7 +209,8 @@ async def test_a_listing_names_the_scopes_a_key_already_holds(repo, session_id):
 
     Proposals are keyed by (source, key) and active memory by key alone, so a
     second suggestion for a key overwrites the first. A reviewer choosing
-    between two phrasings of one fact needs to know that is the choice.
+    between two phrasings of one fact needs to know that is the choice, and
+    needs the phrasing they would be discarding in order to make it.
     """
     await repo.remember(session_id, key="tone", value="terse", reason="r", scope=USER_SCOPE)
     await repo.propose(session_id, key="tone", value="chatty", reason="r", source="model")
@@ -146,7 +220,7 @@ async def test_a_listing_names_the_scopes_a_key_already_holds(repo, session_id):
 
     assert isinstance(result, review.Pending)
     by_key = {entry.key: entry for entry in result.entries}
-    assert by_key["tone"].held_by == (USER_SCOPE,)
+    assert by_key["tone"].held_by == (review.Held(USER_SCOPE, "terse"),)
     assert by_key["unrelated"].held_by == ()
 
 

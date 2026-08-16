@@ -26,7 +26,7 @@ how a terminal is drawn.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from bacteria.agent.session.store import (
     SESSION_SCOPE,
@@ -76,6 +76,32 @@ class Pending:
 
     def __len__(self) -> int:
         return len(self.entries)
+
+
+def scopes_held(
+    entry: PendingEntry, activated: Mapping[str, MemoryScope]
+) -> tuple[MemoryScope, ...]:
+    """Which scopes hold this entry's key, counting decisions taken since the listing.
+
+    A walk reads the queue once and then asks about each entry in turn, so its
+    `held_by` is a snapshot from before the reviewer answered anything. Two
+    proposals for one key in the same walk is the ordinary case rather than a
+    corner one — two proposers finding the same fact is what ADR 0017 expects —
+    and by the second one the first has already been activated. Shown the stale
+    snapshot, the reviewer is told nothing will be replaced at the exact moment
+    something will be.
+
+    ``activated`` maps a key to the scope it was just accepted into. Only
+    additions: activating adds a scope and rejecting removes none, so nothing
+    here has to model a decision being undone.
+
+    Pure, and separate from the walk that calls it, because "what would this
+    replace" is what a person decides on rather than how a terminal draws it.
+    """
+    held = set(entry.held_by)
+    if entry.key in activated:
+        held.add(activated[entry.key])
+    return tuple(scope for scope in SCOPES if scope in held)
 
 
 @dataclass(frozen=True)

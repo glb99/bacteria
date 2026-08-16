@@ -128,6 +128,33 @@ def test_an_unrecognized_key_is_not_a_skip():
     assert review.parse_review_key("x") == review.Unclear()
 
 
+def test_the_replacement_note_counts_decisions_made_since_the_listing():
+    """A walk must not tell you nothing will be replaced while something will.
+
+    Two proposers finding the same fact is the ordinary case -- ADR 0017 expects
+    it, and it is why proposals are keyed by (source, key). So the second entry
+    in a walk is routinely a second suggestion for a key the first just
+    activated, and the listing that walk is iterating was taken before either
+    decision. Shown that snapshot, the reviewer is told the choice is free at
+    exactly the moment it is not.
+    """
+    entry = review.PendingEntry(source="model", key="dog_name", value="v", reason="r")
+
+    assert review.scopes_held(entry, {}) == ()
+    assert review.scopes_held(entry, {"dog_name": USER_SCOPE}) == (USER_SCOPE,)
+    assert review.scopes_held(entry, {"other": USER_SCOPE}) == ()
+
+
+def test_a_scope_already_held_is_not_reported_twice():
+    """Accepting into a scope the key already holds is still one replacement."""
+    entry = review.PendingEntry(
+        source="model", key="tone", value="v", reason="r", held_by=(SESSION_SCOPE,)
+    )
+
+    assert review.scopes_held(entry, {"tone": SESSION_SCOPE}) == (SESSION_SCOPE,)
+    assert review.scopes_held(entry, {"tone": USER_SCOPE}) == (SESSION_SCOPE, USER_SCOPE)
+
+
 # --- Operations --------------------------------------------------------------
 
 

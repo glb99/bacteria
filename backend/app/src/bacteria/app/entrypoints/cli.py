@@ -231,7 +231,7 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
 
 
 def _print_entry(
-    entry: review.PendingEntry, activated: Mapping[str, MemoryScope] | None = None
+    entry: review.PendingEntry, activated: Mapping[str, review.Held] | None = None
 ) -> None:
     """The body of one proposal, shared by the listing and the walk.
 
@@ -246,10 +246,11 @@ def _print_entry(
     """
     print(f"  value:  {entry.value}")
     print(f"  reason: {entry.reason}")
-    held = review.scopes_held(entry, activated or {})
-    if held:
-        replaced = " and ".join(held)
-        print(f"  note:   accepting replaces the active {replaced} memory for this key")
+    # One line per scope, naming the scope's own keystroke. The single line this
+    # replaced joined the scopes with "and" -- which read as though accepting
+    # replaced both, when a keystroke chooses one and leaves the other standing.
+    for held in review.held_now(entry, activated or {}):
+        print(f"  note:   accepting at {held.scope} replaces: {held.value}")
 
 
 def _print_pending(result: review.Pending | review.NoSuchSession) -> int:
@@ -336,7 +337,7 @@ async def _review_each(repository: SqlSessionRepository, session_id: str) -> int
 
     # What this walk has activated, so the `note:` line reflects the reviewer's
     # own answers rather than the listing taken before they gave any.
-    activated: dict[str, MemoryScope] = {}
+    activated: dict[str, review.Held] = {}
 
     for position, entry in enumerate(result.entries, start=1):
         print(f"{position}/{total}  {entry.source}/{entry.key}")
@@ -348,8 +349,15 @@ async def _review_each(repository: SqlSessionRepository, session_id: str) -> int
             stopped = True
             break
         if isinstance(decision, review.AcceptThis):
-            await _accept_proposal(repository, session_id, entry.source, entry.key, decision.scope)
-            activated[entry.key] = decision.scope
+            # Recorded only when the write succeeded. A failed accept that still
+            # updated `activated` would make every later note name a value that
+            # was never stored -- the stale note this tracking exists to prevent,
+            # reintroduced from the other direction.
+            if await _accept_proposal(
+                repository, session_id, entry.source, entry.key, decision.scope
+            ):
+                continue
+            activated[entry.key] = review.Held(decision.scope, entry.value)
             accepted += 1
         elif isinstance(decision, review.RejectThis):
             await _reject_proposal(repository, session_id, entry.source, entry.key)

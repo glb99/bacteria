@@ -12,3 +12,8 @@ dist/
 
 # Local database created by create_tables()
 *.db
+
+# Editor state. `.vscode/settings.json` here only sets the test runner,
+# which `just test` already does correctly; committing it would make one
+# person's IDE layout everyone else's problem.
+.vscode/

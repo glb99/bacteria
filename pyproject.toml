@@ -95,3 +95,17 @@ skip_covered = true
 # something worth testing, that is the signal it contains logic belonging
 # somewhere else.
 omit = ["**/entrypoints/*"]
+
+[tool.pytest.ini_options]
+# Only ever reached by an invocation that would otherwise have no configuration
+# at all -- an IDE running `pytest backend`, or a bare `pytest` from here. Both
+# packages' own `[tool.pytest.ini_options]` win for `just test-agent` and
+# `just test-app`, because pytest walks up from the paths it was given and stops
+# at the first config it finds.
+#
+# Without this, those invocations get `asyncio_mode` at its default of strict,
+# and every unmarked `async def test_` fails with "async def functions are not
+# natively supported" -- a message that names a missing plugin when the plugin
+# is installed and the suite is fine. The reported symptom was exactly that,
+# from `.vscode/settings.json` pointing the test runner at `backend`.
+asyncio_mode = "auto"

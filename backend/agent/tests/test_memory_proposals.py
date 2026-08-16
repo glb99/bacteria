@@ -258,3 +258,73 @@ async def test_the_tools_description_matches_what_it_does():
     assert "do not tell them it has been saved" in proposing
     assert "do not tell them it has been saved" not in activating
     assert "you may say so" in activating
+
+
+async def test_the_key_description_offers_the_names_a_fact_already_has():
+    """A key the model invents for a fact that has one duplicates the fact.
+
+    Left to name things freely a model renames them: one fact reached the
+    extractor's queue as `name`, `first_name`, `preferred_name` and `nickname`,
+    and this tool — which never got that fix — filed a person under `mother_name`
+    while the extractor was using `user_mom_name`. Both rows then exist, both
+    reach the model, and nothing later merges them, because a key is the only
+    identity a memory has.
+    """
+    store, sid = await a_session()
+
+    described = build_remember_tool(
+        store, sid, confirmed_keys=("tone",), suggested_keys=("timezone",)
+    ).input_schema["properties"]["key"]["description"]
+
+    assert "Confirmed keys, prefer these: tone." in described
+    assert "Suggested, not yet confirmed: timezone." in described
+    assert "keeps the key it corrects" in described
+
+
+async def test_confirmed_and_suggested_keys_are_not_offered_as_one_list():
+    """Merging them brings back rotation, which is the bug's second form.
+
+    Offered one flat list the extractor stopped inventing keys and started
+    cycling between the synonyms already in it — its own unreviewed guesses,
+    handed back as though they were vocabulary. A confirmed key is one a person
+    activated, and that is the only name in the list with any standing.
+    """
+    store, sid = await a_session()
+
+    described = build_remember_tool(
+        store, sid, confirmed_keys=("tone",), suggested_keys=("mood",)
+    ).input_schema["properties"]["key"]["description"]
+
+    assert described.index("tone") < described.index("mood")
+    assert "prefer these" in described
+
+
+async def test_a_session_with_no_keys_yet_is_offered_none():
+    """An empty list is not the same as no list, and would read as a constraint.
+
+    "Confirmed keys, prefer these:" followed by nothing invites the model to
+    conclude there is a vocabulary and it is empty. The first extraction of a
+    conversation has to invent, and saying nothing is what asks it to.
+    """
+    store, sid = await a_session()
+
+    described = build_remember_tool(store, sid).input_schema["properties"]["key"]["description"]
+
+    assert "Confirmed keys" not in described
+    assert "Suggested" not in described
+
+
+async def test_a_value_is_asked_for_as_a_fact_rather_than_a_sentence():
+    """A value becomes a node label later, and a sentence is not an entity.
+
+    "As a short sentence" was the wording, and it produced them: `dad_name` was
+    stored as "Your dad's name is Pedro." beside the extractor's "Pedro". The two
+    proposers must ask for the same shape or the review queue offers a choice
+    between phrasings of one fact, and whichever is accepted last wins.
+    """
+    store, sid = await a_session()
+
+    described = build_remember_tool(store, sid).input_schema["properties"]["value"]["description"]
+
+    assert "as briefly as it can be stated" in described
+    assert "Never address the user" in described

@@ -34,7 +34,7 @@ A module-level definition would have nowhere to put either.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.tools.registry import ToolDefinition
@@ -49,12 +49,60 @@ deployment decided to call it.
 """
 
 
+_KEY_DESCRIPTION = (
+    "Short stable identifier for the fact, such as 'tone' or 'timezone'. "
+    "Reusing a key replaces your earlier suggestion for it."
+)
+
+_KEY_REUSE = (
+    "Reuse one of these whenever the fact is the same kind; a corrected fact "
+    "keeps the key it corrects, and only the value changes. Invent a new key "
+    "only when none of them fits."
+)
+
+
+def _key_description(confirmed: Sequence[str], suggested: Sequence[str]) -> str:
+    """The ``key`` description, plus the keys this conversation already uses.
+
+    A model left to name a fact freely renames it on every occasion. The
+    extractor demonstrated this at length -- one fact arrived as ``name``,
+    ``first_name``, ``preferred_name`` and ``nickname`` -- and it was fixed there
+    by showing the names already in use. This tool is the *other* proposer and
+    never got the same treatment, so it went on inventing: a live store held
+    ``mother_name`` from here beside ``user_mom_name`` from the extractor, one
+    person filed twice.
+
+    Split into confirmed and merely-suggested for the reason the extractor
+    learned the hard way. A flat list stopped the invention and started
+    *rotation* between synonyms already in it, because unreviewed suggestions
+    were being offered back as though they were vocabulary. A confirmed key is
+    one a person activated, which is the closest thing here to a fact's real
+    name.
+
+    A key that duplicates a fact costs more than a clumsy one, and it is why this
+    is worth a dynamic description rather than a fixed string: the two proposers
+    have to converge on one name or the same fact is stored twice, forever.
+    """
+    if not confirmed and not suggested:
+        return _KEY_DESCRIPTION
+
+    lines = [_KEY_DESCRIPTION]
+    if confirmed:
+        lines.append(f"Confirmed keys, prefer these: {', '.join(sorted(confirmed))}.")
+    if suggested:
+        lines.append(f"Suggested, not yet confirmed: {', '.join(sorted(suggested))}.")
+    lines.append(_KEY_REUSE)
+    return " ".join(lines)
+
+
 def build_remember_tool(
     store: SessionRepository,
     session_id: str,
     source: str = MODEL_SOURCE,
     *,
     activate_immediately: bool = False,
+    confirmed_keys: Sequence[str] = (),
+    suggested_keys: Sequence[str] = (),
 ) -> ToolDefinition:
     """Build a ``remember`` tool that proposes into ``session_id``.
 
@@ -67,6 +115,12 @@ def build_remember_tool(
         source: Attribution for the proposal. Defaults to
             :data:`MODEL_SOURCE`; a host running several distinguishable agents
             may override it.
+        confirmed_keys: Keys this session's active memory already uses, in
+            either scope. Rendered into the ``key`` description so the model
+            reuses a name instead of coining a synonym for it; see
+            :func:`_key_description` for what happens without them.
+        suggested_keys: Keys only *proposed* so far, kept separate from the
+            confirmed ones rather than merged into one list.
         activate_immediately: Whether the proposal becomes active memory in the
             same call.
 
@@ -143,15 +197,22 @@ def build_remember_tool(
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": (
-                        "Short stable identifier for the fact, such as 'tone' or "
-                        "'timezone'. Reusing a key replaces your earlier suggestion "
-                        "for it."
-                    ),
+                    "description": _key_description(confirmed_keys, suggested_keys),
                 },
                 "value": {
                     "type": "string",
-                    "description": "The fact itself, as a short sentence.",
+                    # "As a short sentence" was the wording here, and it produced
+                    # sentences: `dad_name` was stored as "Your dad's name is
+                    # Pedro." beside the extractor's "Pedro". A value is read back
+                    # into a later system prompt and, later still, becomes a node
+                    # label -- and a second-person sentence is not an entity.
+                    "description": (
+                        "The fact itself, as briefly as it can be stated. A name is "
+                        "just the name ('Pedro'), not a sentence about it ('Your "
+                        "dad's name is Pedro.'); a preference is just the preference "
+                        "('vegetarian', not 'Is vegetarian.'). No leading verb, no "
+                        "trailing period. Never address the user in it."
+                    ),
                 },
                 "reason": {
                     "type": "string",

@@ -33,6 +33,7 @@ from bacteria.agent.runtime.runtime import RunResult, Runtime
 from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.tools.memory import build_remember_tool
 from bacteria.agent.tools.registry import ToolRegistry
+from bacteria.app.chat.repository import KnownKeys, SqlSessionRepository
 from bacteria.app.chat.tasks import extract_memories_task
 from bacteria.app.core.jobs import get_app
 
@@ -83,15 +84,29 @@ def build_model_client(provider: str, model: str | None = None) -> SendsMessages
     return client_cls(model=model) if model else client_cls()  # ty: ignore[unknown-argument]
 
 
-def build_registry(repository: SessionRepository, session_id: str) -> ToolRegistry:
+def build_registry(
+    repository: SessionRepository, session_id: str, known: KnownKeys | None = None
+) -> ToolRegistry:
     """Build the tools offered for one turn of one session.
 
     Per turn, not per process, because ``remember`` is bound to the session it
     proposes into. The model supplies the fact; it never supplies the session,
     so it cannot write into a conversation it was not invoked for.
+
+    ``known`` is the vocabulary the tool's ``key`` description is built from.
+    Optional so this stays callable without a store that can answer for it, and
+    fetched by ``run_turn`` rather than by each entrance, for the reason
+    ``run_turn``'s ``extract`` argument gives at length.
     """
     registry = ToolRegistry()
-    registry.register(build_remember_tool(repository, session_id))
+    registry.register(
+        build_remember_tool(
+            repository,
+            session_id,
+            confirmed_keys=tuple(known.active) if known else (),
+            suggested_keys=tuple(known.proposed) if known else (),
+        )
+    )
     return registry
 
 
@@ -129,7 +144,7 @@ def _require_open_queue() -> None:
 
 
 async def run_turn(
-    repository: SessionRepository,
+    repository: SqlSessionRepository,
     provider: str,
     session_id: str,
     user_text: str,
@@ -171,11 +186,19 @@ async def run_turn(
     if extract:
         _require_open_queue()
 
+    # Fetched here rather than by each entrance, and the concrete repository is
+    # in the signature for it. `known_keys` is deliberately off the agent's
+    # protocol -- no turn depends on it, and a second host should not owe it --
+    # but both proposers converging on one name for a fact is a property of this
+    # application, so the one function every turn goes through is where it
+    # belongs. At an entrance it would be a step the next entrance forgets.
+    known = await repository.known_keys(session_id)
+
     runtime = Runtime(model_client=build_model_client(provider), session_store=repository)
     result = await runtime.run_turn(
         session_id,
         user_text,
-        tool_registry=build_registry(repository, session_id),
+        tool_registry=build_registry(repository, session_id, known),
         approve=_allow,
     )
 

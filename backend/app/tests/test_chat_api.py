@@ -495,6 +495,47 @@ async def test_a_turn_queues_nothing_when_extraction_is_off(client, token, monke
     assert queued == []
 
 
+async def test_a_turn_offers_the_model_the_keys_memory_already_uses(engine, monkeypatch):
+    """Both proposers must converge on one name for a fact, or it is stored twice.
+
+    The extractor is shown the keys in use and the ``remember`` tool was not, so
+    it went on coining: a live store held ``mother_name`` from the tool beside
+    ``user_mom_name`` from the extractor, one person filed under two keys with
+    nothing able to merge them afterwards.
+
+    Fetched in ``run_turn`` rather than at each entrance, for the reason the
+    ``extract`` trigger is: an entrance that forgets is an entrance whose
+    conversations quietly invent a fresh vocabulary, and nothing fails.
+    """
+    seen: dict[str, object] = {}
+
+    class Capturing:
+        async def send(self, messages, **kwargs):
+            tools = kwargs.get("tools") or []
+            seen["key"] = tools[0]["input_schema"]["properties"]["key"]["description"]
+            return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
+
+    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+
+    async with AsyncSession(engine) as db:
+        repository = SqlSessionRepository(db)
+        session = await repository.create_session("tester")
+        await repository.remember(session.session_id, key="tone", value="terse", reason="r")
+        await repository.propose(
+            session.session_id, key="timezone", value="CET", reason="r", source="model"
+        )
+
+        await service.run_turn(
+            repository=repository,
+            provider="fake",
+            session_id=session.session_id,
+            user_text="hi",
+        )
+
+    assert "Confirmed keys, prefer these: tone." in seen["key"]
+    assert "Suggested, not yet confirmed: timezone." in seen["key"]
+
+
 async def test_a_turn_refuses_before_the_model_when_it_cannot_enqueue(engine, monkeypatch):
     """Forgetting to open the queue must cost nothing, not a whole turn.
 

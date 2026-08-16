@@ -96,7 +96,11 @@ Return ONLY a JSON array, with no prose and no code fence. Each element:
 
   key    - short snake_case identifier naming the *kind* of fact, such as
            "name", "tone" or "timezone". Not the fact itself.
-  value  - the fact, as one short sentence.
+  value  - the fact itself and nothing else, as briefly as it can be stated.
+           A name is just the name: "Pedro", not "Your dad's name is Pedro."
+           A preference is just the preference: "vegetarian", not "Is
+           vegetarian." No leading verb, no trailing period, and never
+           addressed to the user.
   reason - what in the conversation supports it, quoted or closely paraphrased,
            so a human reviewer can check the claim against the transcript.
 

@@ -316,6 +316,10 @@ class SqlSessionRepository:
             # timestamp would let a memory the owner just rewrote age out and
             # stay invisible -- the one outcome nobody could explain.
             existing.created_at = now
+            # Cleared, because this write did not come from a prompt. Leaving the
+            # previous value would attribute an owner's sentence to the extractor
+            # wording that proposed the fact it replaced.
+            existing.prompt_version = None
             self._db.add(existing)
         else:
             self._db.add(
@@ -425,9 +429,22 @@ class SqlSessionRepository:
         ).one()
 
     async def propose(
-        self, session_id: str, key: str, value: Any, reason: str, source: str
+        self,
+        session_id: str,
+        key: str,
+        value: Any,
+        reason: str,
+        source: str,
+        prompt_version: str | None = None,
     ) -> None:
-        """Write a suggestion into the proposals table. Reaches no model."""
+        """Write a suggestion into the proposals table. Reaches no model.
+
+        ``prompt_version`` is an optional extra this implementation accepts and
+        the agent's ``SessionRepository`` does not declare — the same latitude
+        ``known_keys`` and ``count_proposals`` take. A proposer that has a
+        version supplies it; one that does not is unaffected, and a second host
+        implementing the protocol owes nothing.
+        """
         await self._require(session_id)
 
         existing = await self._db.get(ChatMemoryProposal, (session_id, source, key))
@@ -438,6 +455,12 @@ class SqlSessionRepository:
             existing.value = {"value": value}
             existing.reason = reason
             existing.created_at = datetime.now(timezone.utc)
+            # Overwritten with the caller's value including when that value is
+            # None, because this row is now the newer proposer's. Keeping a
+            # previous version would attribute a re-proposal to wording that did
+            # not produce it -- which is the one thing this column exists to
+            # prevent.
+            existing.prompt_version = prompt_version
             self._db.add(existing)
         else:
             self._db.add(
@@ -447,13 +470,20 @@ class SqlSessionRepository:
                     key=key,
                     value={"value": value},
                     reason=reason,
+                    prompt_version=prompt_version,
                 )
             )
 
         await self._db.commit()
 
     async def _write_user_memory(
-        self, user_id: str, key: str, value: Any, reason: str, source: str
+        self,
+        user_id: str,
+        key: str,
+        value: Any,
+        reason: str,
+        source: str,
+        prompt_version: str | None = None,
     ) -> MemoryEntry:
         """Upsert one user-scoped entry. Does not commit.
 
@@ -462,6 +492,11 @@ class SqlSessionRepository:
         drifted on ``created_at`` once already. Refreshing the timestamp is the
         behaviour the assembly bound needs: it shows the most recent entries, so
         a memory the owner just rewrote must not be at risk of ageing out.
+
+        ``prompt_version`` travels with the value it describes and is therefore
+        overwritten unconditionally, ``None`` included: an owner rewriting a fact
+        an extractor proposed is not still that extractor's wording, and keeping
+        the old version would attribute a human's sentence to a prompt.
         """
         now = datetime.now(timezone.utc)
         existing = await self._db.get(ChatUserMemoryEntry, (user_id, key))
@@ -470,6 +505,7 @@ class SqlSessionRepository:
             existing.reason = reason
             existing.source = source
             existing.created_at = now
+            existing.prompt_version = prompt_version
             self._db.add(existing)
         else:
             self._db.add(
@@ -480,6 +516,7 @@ class SqlSessionRepository:
                     reason=reason,
                     source=source,
                     created_at=now,
+                    prompt_version=prompt_version,
                 )
             )
         return MemoryEntry(value=value, reason=reason, source=source, created_at=now)
@@ -513,6 +550,7 @@ class SqlSessionRepository:
                 value=proposal.value["value"],
                 reason=proposal.reason,
                 source=proposal.source,
+                prompt_version=proposal.prompt_version,
             )
             await self._db.delete(proposal)
             await self._db.commit()
@@ -532,6 +570,12 @@ class SqlSessionRepository:
             existing.reason = proposal.reason
             existing.source = proposal.source
             existing.created_at = activated.created_at
+            # Carried across activation, which is the whole reason this column is
+            # on the shared base rather than on the proposal table: "which wording
+            # produced the memories people actually accepted" is the question that
+            # says whether changing a prompt helped, and discarding the version at
+            # the moment of acceptance is precisely where it would be lost.
+            existing.prompt_version = proposal.prompt_version
             self._db.add(existing)
         else:
             self._db.add(
@@ -542,6 +586,7 @@ class SqlSessionRepository:
                     reason=proposal.reason,
                     source=proposal.source,
                     created_at=activated.created_at,
+                    prompt_version=proposal.prompt_version,
                 )
             )
         await self._db.delete(proposal)

@@ -30,9 +30,10 @@ Not built:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import warnings
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Iterator
 
 import logfire
 
@@ -41,6 +42,30 @@ from bacteria.app.core.settings import get_settings
 logger = logging.getLogger(__name__)
 
 _configured = False
+
+
+_KEPT_FROM_SCRUBBING = frozenset({"session_id"})
+"""Attribute names this application means literally, whatever they look like.
+
+``session_id`` here is a conversation's primary key -- it is in the URL, in the
+transcript, and printed by ``bacteria-admin chat`` on its first line. It is not a
+session *token*, which is what a scrubber assumes when it sees the word.
+"""
+
+
+def _keep_identifiers(match: Any) -> Any:
+    """Exempt this application's own identifiers from Logfire's scrubber.
+
+    Found by reading a real trace, and it is the exact failure the scrubber's
+    caution is supposed to prevent in reverse: the turn span's ``session_id``
+    arrived as ``[Scrubbed due to 'session']``, which silently removed the one
+    attribute the span exists to carry. A correlation identifier that is redacted
+    by default is worse than no identifier, because the span still looks correct.
+
+    Narrow on purpose. Returning ``None`` for anything else keeps every other
+    default -- passwords, tokens, keys -- exactly as they were.
+    """
+    return match.value if match.path and str(match.path[-1]) in _KEPT_FROM_SCRUBBING else None
 
 
 def configure(service_name: str, *, console: bool = True) -> None:
@@ -85,10 +110,11 @@ def configure(service_name: str, *, console: bool = True) -> None:
         send_to_logfire="if-token-present",
         token=settings.logfire_token or None,
         environment=settings.logfire_environment,
-        # Scrubbing stays at its default, which is on. What keeps conversation
-        # text out of the exporter is that nothing here creates a span carrying
-        # it -- see the module docstring. Scrubbing is the second line, for the
-        # attributes the integrations add on their own.
+        # Scrubbing stays on. What keeps conversation text out of the exporter
+        # is that nothing here creates a span carrying it -- see the module
+        # docstring. Scrubbing is the second line, for the attributes the
+        # integrations add on their own.
+        scrubbing=logfire.ScrubbingOptions(callback=_keep_identifiers),
     )
 
     # Instrumented at the driver rather than at the repository, so it covers
@@ -147,6 +173,78 @@ def instrument_app(app: Any) -> None:
             "ignore", message="Instrumentation will have no effect", category=UserWarning
         )
         logfire.instrument_fastapi(app)
+
+
+class Turn:
+    """One turn's root span, and the handle a caller records onto it.
+
+    Wraps the span rather than handing it out, so a feature module names this
+    application's vocabulary instead of a vendor's. The same reason
+    ``core/jobs.py`` exposes a queue rather than a procrastinate app.
+    """
+
+    def __init__(self, span: Any | None) -> None:
+        self._span = span
+
+    def records(self, run_id: str) -> None:
+        """Attach the run this turn produced.
+
+        Late, because a ``run_id`` is generated inside the agent and only reaches
+        a host on the ``RunResult`` — which is also why it cannot be an argument
+        to :func:`turn_span`. A turn that raises therefore has a span with no
+        ``run_id``, and that absence is honest: the evidence is still in the
+        transcript under an id nothing outside the agent ever saw.
+        """
+        if self._span is not None:
+            self._span.set_attribute("run_id", run_id)
+
+    def approval(self, tool: str, allowed: bool) -> None:
+        """Record that a tool call was allowed or refused, and which it was.
+
+        **This makes the decision visible, not evidential**, and the difference
+        matters. The agent's ADR 0019 records refusals structurally and leaves a
+        *grant* indistinguishable from never having asked — that gap is in
+        ``run_meta``, and closing it is a change to the agent, with a record of
+        its own. A span says what happened here today; it does not survive the
+        way a transcript item does.
+        """
+        if self._span is None:
+            return
+        logfire.info(
+            "approval {decision} {tool}",
+            tool=tool,
+            decision="allowed" if allowed else "refused",
+            allowed=allowed,
+        )
+
+
+@contextlib.contextmanager
+def turn_span(session_id: str, principal: str) -> Iterator[Turn]:
+    """Wrap one turn in a root span carrying who it was for and which session.
+
+    **This is the span that makes a trace and the transcript the same story.**
+    Without it there is no root: over HTTP the request span happens to be one,
+    and in the admin CLI a turn fragmented into twenty-three unrelated traces,
+    one per query. More importantly, spans carried no identifier the transcript
+    also has — so a slow span could not be traced to the run that produced it,
+    nor a bad run to its latency. Two records of one event with no join.
+
+    ``principal`` is the other half. The agent's ADR 0019 lists "the identity the
+    run acted under" as unrecorded and says it belongs to the host, "which is the
+    only layer that knows it". This is that layer.
+
+    **A process that never configured observability produces no span at all**,
+    rather than a no-op one. Logfire tolerates the second and warns about it once
+    per call, which turned the test suite -- where ``configure`` is patched out
+    on purpose -- into a stream of complaints about a mode that is supported.
+    Branching here is also the honest shape: not configured means not traced.
+    """
+    if not _configured:
+        yield Turn(None)
+        return
+
+    with logfire.span("turn", session_id=session_id, principal=principal) as span:
+        yield Turn(span)
 
 
 async def job_span(

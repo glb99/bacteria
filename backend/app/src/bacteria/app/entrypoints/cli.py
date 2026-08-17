@@ -223,6 +223,7 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
                 provider=settings.model_provider,
                 session_id=session_id,
                 user_text=user_text,
+                principal=principal_id,
                 extract=settings.memory_extraction_enabled,
             )
             print(result.response.text)

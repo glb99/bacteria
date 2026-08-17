@@ -35,6 +35,7 @@ from bacteria.agent.tools.memory import build_remember_tool
 from bacteria.agent.tools.registry import ToolRegistry
 from bacteria.app.chat.repository import KnownKeys, SqlSessionRepository
 from bacteria.app.chat.tasks import extract_memories_task
+from bacteria.app.core import observability
 from bacteria.app.core.jobs import get_app
 
 # Suppressed for the same reason as bacteria's own table: the annotation is the
@@ -110,15 +111,28 @@ def build_registry(
     return registry
 
 
-def _allow(_tool_call) -> bool:
-    """Approve every proposed call.
+def _approver(turn: observability.Turn):
+    """Approve every proposed call, and say so where someone can see it.
 
     Correct *only* because the sole registered tool cannot do anything a human
     would want to stop — it records a suggestion that reaches no model until
     someone activates it. This is a statement about the current registry, not a
     policy. See the module docstring before registering anything else.
+
+    Recording the decision is new and does not close the gap it looks like it
+    closes. The agent's ADR 0019 makes a *refusal* structural evidence and leaves
+    a *grant* indistinguishable from never having asked; that is a property of
+    ``run_meta``, and fixing it is a change to the agent with its own record.
+    What this adds is that a gate which currently says yes to everything says so
+    out loud, once per call, instead of being invisible because it never
+    objects.
     """
-    return True
+
+    def approve(tool_call) -> bool:
+        turn.approval(tool=tool_call.get("name", "unknown"), allowed=True)
+        return True
+
+    return approve
 
 
 def _require_open_queue() -> None:
@@ -148,6 +162,7 @@ async def run_turn(
     provider: str,
     session_id: str,
     user_text: str,
+    principal: str,
     extract: bool = False,
 ) -> RunResult:
     """Advance one turn of a conversation.
@@ -157,6 +172,16 @@ async def run_turn(
     would buy nothing but the risk of it acquiring some.
 
     Args:
+        principal: Who this turn acts for. Required rather than defaulted, and
+            required *here* rather than resolved at each entrance, because the
+            agent's ADR 0019 lists the identity a run acted under as unrecorded
+            and says it belongs to the host. A default would let an entrance
+            omit it and produce runs attributed to nobody, which is the failure
+            the ``extract`` argument below describes in its own terms.
+
+            It reaches the trace and not yet ``run_meta``. Putting it in the
+            transcript means widening what the agent stores, which is that
+            package's decision to make.
         extract: Whether to queue memory extraction over what this turn wrote.
 
             An argument rather than a settings lookup, so configuration stays at
@@ -194,13 +219,19 @@ async def run_turn(
     # belongs. At an entrance it would be a step the next entrance forgets.
     known = await repository.known_keys(session_id)
 
-    runtime = Runtime(model_client=build_model_client(provider), session_store=repository)
-    result = await runtime.run_turn(
-        session_id,
-        user_text,
-        tool_registry=build_registry(repository, session_id, known),
-        approve=_allow,
-    )
+    # The root every other span in this turn hangs from, and the only place a
+    # trace and the transcript name the same thing. Around the whole turn rather
+    # than the model call, so a turn that raised is still a span -- the failure
+    # path is where "how long before it gave up" is asked most.
+    with observability.turn_span(session_id=session_id, principal=principal) as turn:
+        runtime = Runtime(model_client=build_model_client(provider), session_store=repository)
+        result = await runtime.run_turn(
+            session_id,
+            user_text,
+            tool_registry=build_registry(repository, session_id, known),
+            approve=_approver(turn),
+        )
+        turn.records(result.run_id)
 
     if extract:
         # After the turn, so the job sees the transcript this turn wrote rather

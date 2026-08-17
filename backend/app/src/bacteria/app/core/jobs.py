@@ -44,6 +44,7 @@ from typing import Any
 import psycopg_pool
 from procrastinate import App, PsycopgConnector
 
+from bacteria.app.core import observability
 from bacteria.app.core.settings import get_settings
 
 
@@ -86,8 +87,22 @@ def get_app() -> App:
 
     Constructing this touches no configuration and opens no connection; both
     happen when the pool is first opened.
+
+    The worker middleware is registered here rather than on each task, so a task
+    added later cannot escape measurement by forgetting a decorator. It produces
+    no spans in a process that never called
+    :func:`bacteria.app.core.observability.configure` -- which is why declaring
+    it costs a test nothing.
     """
-    return App(connector=PsycopgConnector(pool_factory=_pool_factory))
+    return App(
+        connector=PsycopgConnector(pool_factory=_pool_factory),
+        # Through `worker_defaults` rather than a constructor argument, which is
+        # where procrastinate puts anything a `run_worker_async` call could also
+        # pass. A default rather than an argument at the call site: there are two
+        # of those -- `bacteria-worker` and the in-API lifespan -- and they must
+        # not be able to differ on whether jobs are measured.
+        worker_defaults={"worker_middleware": [observability.job_span]},
+    )
 
 
 def register_tasks() -> App:

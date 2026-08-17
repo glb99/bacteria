@@ -31,7 +31,7 @@ from bacteria.app.auth.service import issue_key, revoke_key
 from bacteria.app.chat import review
 from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
-from bacteria.app.core import platform
+from bacteria.app.core import observability, platform
 from bacteria.app.core.db import get_engine
 from bacteria.app.core.jobs import register_tasks
 from bacteria.app.core.settings import get_settings, load_env_file
@@ -489,6 +489,17 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     load_env_file()
+    # The third entrypoint, and it gets the same treatment as the other two for
+    # the reason `run_turn`'s `extract` argument gives about entrances: this one
+    # holds real conversations, so a deployment where two processes are traced
+    # and the third is not is a gap nothing announces. `chat` is also the only
+    # surface that reaches the model without HTTP, which makes it the one place
+    # a provider's spans can be seen on their own.
+    #
+    # Silently, though. Instrumented with the console on, this printed nine query
+    # spans between a typed question and the model's answer -- telemetry in the
+    # one stream that exists to relay what a model said.
+    observability.configure(service_name="bacteria-admin", console=False)
 
     parser = argparse.ArgumentParser(prog="bacteria-admin", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)

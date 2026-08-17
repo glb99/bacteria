@@ -19,3 +19,4 @@ conventions do not qualify.
 |---|---|---|
 | [0001](0001-run-the-worker-in-the-api-process.md) | Run the job worker inside the API process on single-process platforms | Accepted |
 | [0002](0002-the-memory-graph-is-postgres-tables.md) | Build the memory graph as tables in the application's Postgres, not in a graph database | Accepted |
+| [0003](0003-observability-is-opentelemetry-exported-to-logfire.md) | Instrument with OpenTelemetry, export to Logfire, and keep both out of the agent | Accepted |

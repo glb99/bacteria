@@ -27,6 +27,12 @@ dependencies = [
     # day the agent stops needing it, this breaks in a way that points at the
     # wrong package.
     "python-dotenv",
+    # Declared by *this* package and never by `bacteria-agent`, which is the whole
+    # point rather than an oversight -- see ADR 0003. The agent is vendorable and
+    # must not carry a host's observability vendor into a host that never chose
+    # one. The extras are the two instrumentations this application actually
+    # composes; adding a third is a decision, not a convenience.
+    "logfire[fastapi,psycopg,google-genai]",
 ]
 
 [project.scripts]

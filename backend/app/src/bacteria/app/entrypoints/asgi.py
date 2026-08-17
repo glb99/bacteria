@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from bacteria.app.core import platform
+from bacteria.app.core import observability, platform
 from bacteria.app.core.jobs import register_tasks
 from bacteria.app.core.settings import get_settings, load_env_file
 from bacteria.app.views import create_app
@@ -65,6 +65,10 @@ def _configure() -> None:
     """
     load_env_file()
     logging.basicConfig(level=get_settings().log_level)
+    # After the log level and after `.env`, because it reads settings -- and in
+    # here rather than at module scope for every reason this function's docstring
+    # gives. `instrument_app` is separate and runs once, below.
+    observability.configure(service_name="bacteria-api")
 
 
 @asynccontextmanager
@@ -147,6 +151,22 @@ async def lifespan(_app: FastAPI):
 
 
 app = create_app(lifespan=lifespan)
+
+# At module scope, which is the exception this module otherwise argues against,
+# and it was learned from a spike that produced no request spans at all.
+#
+# Starlette builds its middleware stack on the first call it receives, and the
+# lifespan *is* a call -- so instrumenting from inside the lifespan adds
+# middleware to a stack that has already been built, silently and with the
+# server working perfectly. There is no later hook either: production imports
+# this `app` rather than calling `main`, so the lifespan is the last of our code
+# to run before requests arrive.
+#
+# It is safe here in the way `_configure` was not. This reads no settings and
+# mutates no environment; it registers instrumentation against Logfire's proxy
+# tracer provider, which is designed to be configured afterwards. The test suite
+# patches it out regardless -- see `_no_observability_in_tests`.
+observability.instrument_app(app)
 
 
 def main() -> int:

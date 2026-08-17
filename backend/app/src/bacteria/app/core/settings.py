@@ -112,6 +112,16 @@ class Settings(BaseSettings):
             JSON schema from a bounded transcript slice, which the cheapest model
             a provider offers does well. The provider is shared; only the model
             differs.
+        logfire_token: Where traces go. **Empty is not an error**, and that is
+            the one exception to this class's "an unrecognised ``BACTERIA_``
+            variable refuses to boot" strictness. Absent, the process prints
+            spans to the console instead of exporting them — a development
+            machine with no observability vendor is the ordinary case, and
+            refusing to start there would make every contributor configure one
+            before running anything. See ADR 0003.
+        logfire_environment: Which deployment produced a trace. Kept separate
+            from the token so that two deployments sharing one project stay
+            distinguishable.
         memory_extraction_max_proposals: The most proposals one extraction run
             may write.
 
@@ -150,6 +160,8 @@ class Settings(BaseSettings):
     memory_extraction_enabled: bool = False
     memory_extraction_model: str | None = None
     memory_extraction_max_proposals: int = 5
+    logfire_token: str = ""
+    logfire_environment: str = "local"
 
     @model_validator(mode="after")
     def _reject_unknown_prefixed_variables(self) -> "Settings":

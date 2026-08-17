@@ -38,6 +38,7 @@ from sqlmodel import Session, SQLModel
 from bacteria.app import models as _root_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
 from bacteria.app.chat import models as _chat_models  # noqa: F401
+from bacteria.app.core import observability
 from bacteria.app.core.settings import ENV_PREFIX, Settings, get_settings
 from bacteria.app.ingestion import models as _ingestion_models  # noqa: F401
 
@@ -119,6 +120,29 @@ def _ignore_ambient_configuration():
         ):
             patch.delenv(name, raising=False)
 
+    yield
+    patch.undo()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_observability_in_tests():
+    """The suite does not acquire an exporter, and ADR 0003 says so in as many words.
+
+    Instrumentation is installed by entrypoints, and the ASGI lifespan is an
+    entrypoint the tests drive on purpose — so without this every ``TestClient``
+    configures Logfire, patches the psycopg driver and the provider SDK, and
+    instruments a fresh FastAPI application. Nothing is exported, because no
+    token is set. What it does produce is console spans in the middle of test
+    output and OpenTelemetry's "attempting to instrument while already
+    instrumented" warning once per application built, which is once per test.
+
+    Patched here rather than guarded in the module, because "am I under test" is
+    not a question production code should be able to ask. The suite is the thing
+    that knows, so the suite is what says so.
+    """
+    patch = pytest.MonkeyPatch()
+    patch.setattr(observability, "configure", lambda service_name: None)
+    patch.setattr(observability, "instrument_app", lambda app: None)
     yield
     patch.undo()
 

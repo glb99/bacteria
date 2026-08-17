@@ -66,6 +66,12 @@ In the FastAPI Cloud dashboard:
 | `BACTERIA_LOG_LEVEL` | `INFO` | |
 | `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` | provider credential | **secret**, unprefixed — the SDKs read these exact names |
 | `BACTERIA_WORKER_CONCURRENCY` | `4` | optional; competes with request handling on one loop |
+| `BACTERIA_LOGFIRE_TOKEN` | Logfire write token | **secret**; optional — absent means the process prints spans instead of exporting them |
+| `BACTERIA_LOGFIRE_ENVIRONMENT` | `production` | defaults to `local`, which is what makes one Logfire project serve both |
+
+Use a **separate write token for this deployment from the one on a laptop**, against
+the same project. Same destination, and either can be revoked without disturbing
+the other — which matters because the laptop's is the one that leaks.
 
 Anything starting with `BACTERIA_` that is not a setting **fails startup on
 purpose**. A typo is a refusal to boot, not a service running on defaults.
@@ -124,6 +130,27 @@ Leave `BACTERIA_RUN_WORKER_IN_API` **unset** anywhere you can run two processes.
 `just stack` does, and so does any host with a worker service.
 
 ---
+
+## Where this sends data
+
+Two places, and both are worth knowing before the first deploy.
+
+- **The model provider**, for every turn and every extraction — the conversation
+  itself.
+- **Logfire**, when a token is set: timings, SQL shapes, model name, token counts,
+  job names. **Not conversation text.** The provider instrumentation elides message
+  content, which was checked rather than assumed — a span carrying a system prompt
+  with a name in it recorded `content: <elided>`. It is a default and can be turned
+  off, so it stays a property to keep rather than one you are given.
+
+Instrumentation is OpenTelemetry and Logfire is one OTLP endpoint, so
+`OTEL_EXPORTER_OTLP_ENDPOINT` redirects everything to a collector you host, with no
+code change. A local Jaeger — `docker run -d -p 16686:16686 -p 4318:4318
+jaegertracing/all-in-one` — receives the same spans, including the model call, and
+is the way to look at a trace with nothing leaving the machine. It takes traces but
+not metrics, and its all-in-one storage is in memory, so it is a debugging tool
+rather than a second deployment. See
+[ADR 0003](adr/0003-observability-is-opentelemetry-exported-to-logfire.md).
 
 ## Still missing
 

@@ -27,7 +27,7 @@ error either of them can detect.
 import argparse
 import logging
 
-from bacteria.app.core import platform
+from bacteria.app.core import observability, platform
 from bacteria.app.core.jobs import register_tasks
 from bacteria.app.core.settings import get_settings, load_env_file
 
@@ -59,6 +59,13 @@ def main() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=get_settings().log_level)
+    # A different service name from the API's, which is the point: ADR 0001's
+    # open question is whether a job and a request contended, and that is only
+    # askable once the two are labelled apart on one timeline. A deployment
+    # running the worker in-process reports `bacteria-api` for both, and the job
+    # spans are still distinguishable by name -- which is the shape of the
+    # answer there.
+    observability.configure(service_name="bacteria-worker")
     try:
         platform.run(_run(args.queues, args.concurrency))
     except KeyboardInterrupt:

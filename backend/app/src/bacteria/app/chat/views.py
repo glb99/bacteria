@@ -127,6 +127,11 @@ async def take_turn(
         provider=settings.model_provider,
         session_id=session_id,
         user_text=body.text,
+        # `.id`, not the whole principal: it is what resources are owned by and
+        # what outlives a credential, so it is the identifier a later reader can
+        # still resolve. Passing the object would put a credential's details one
+        # attribute away from a span.
+        principal=principal.id,
         extract=settings.memory_extraction_enabled,
     )
     return TurnResult(run_id=result.run_id, reply=result.response.text)

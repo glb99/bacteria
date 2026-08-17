@@ -530,6 +530,7 @@ async def test_a_turn_offers_the_model_the_keys_memory_already_uses(engine, monk
             provider="fake",
             session_id=session.session_id,
             user_text="hi",
+            principal="tester",
         )
 
     assert "Confirmed keys, prefer these: tone." in seen["key"]
@@ -567,6 +568,7 @@ async def test_a_turn_refuses_before_the_model_when_it_cannot_enqueue(engine, mo
                 provider="fake",
                 session_id=session.session_id,
                 user_text="hi",
+                principal="tester",
                 extract=True,
             )
 

@@ -61,6 +61,28 @@ class MemoryContent(SQLModel):
         default_factory=_utcnow,
         sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
     )
+    prompt_version: Optional[str] = Field(default=None)
+    """Which wording produced this, for the proposers that have one.
+
+    Here rather than on the proposal table alone, and the test that enforces
+    this base is what said so. The first attempt put it on proposals only, on the
+    grounds that an activated memory is a human's decision rather than an
+    extractor's suggestion — and ``source`` is on all three for the opposite
+    reason, stated in :class:`ChatMemoryEntry`: provenance "survives activation
+    rather than being discarded once the entry is live, because 'the extractor
+    has been noisy' is a question someone will ask".
+
+    The same argument is stronger here. "Which wording produced the memories a
+    person actually accepted" is the acceptance-rate question, and it is the one
+    that decides whether changing a prompt helped — which cannot be asked at all
+    if the version is discarded at the moment of acceptance.
+
+    Nullable, and it means two things: written before this column existed, or
+    written by a proposer that has no version. The ``remember`` tool is the
+    second — its schema is built in ``bacteria.agent``, so attributing its
+    proposals means that package exposing a version, which is its decision.
+    ``source`` tells the two cases apart.
+    """
 
 
 class ChatSession(SQLModel, table=True):

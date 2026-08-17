@@ -21,8 +21,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.model.protocol import ModelResponse
 from bacteria.agent.session.store import TranscriptItem
-from bacteria.app.chat.extraction import EXTRACTOR_SOURCE, extract_memories
-from bacteria.app.chat.models import ChatMemoryExtraction
+from bacteria.app.chat.extraction import EXTRACTOR_SOURCE, PROMPT_VERSION, extract_memories
+from bacteria.app.chat.models import ChatMemoryEntry, ChatMemoryExtraction, ChatMemoryProposal
 from bacteria.app.chat.repository import SqlSessionRepository
 
 
@@ -101,6 +101,89 @@ async def test_extraction_writes_proposals_and_never_active_memory(engine, sessi
     assert state.memory == {}, "extraction wrote active memory"
     assert state.user_memory == {}, "extraction wrote user-scoped memory"
     assert state.proposals[(EXTRACTOR_SOURCE, "name")].value == "Prefers Gui"
+
+
+async def test_a_proposal_records_the_wording_that_produced_it(engine, session_id):
+    """A proposal is evidence about an extractor and has to say which extractor.
+
+    Both prompts in this system changed twice in one afternoon and behaviour
+    changed with them — keys stopped being invented, then values stopped being
+    sentences. Rows written on either side of that are indistinguishable without
+    this, which matters most when the queue is being read as evidence for whether
+    extraction is worth keeping.
+
+    Asserted against the module's own constant rather than a literal, because a
+    hash pinned in a test is one someone updates to match whatever the code now
+    produces — which tests that a hash exists and nothing else.
+    """
+    client = _FakeClient(text='[{"key": "tone", "value": "terse", "reason": "said so"}]')
+
+    async with AsyncSession(engine) as db:
+        await extract_memories(db, client, session_id, max_proposals=5)
+        row = await db.get(ChatMemoryProposal, (session_id, EXTRACTOR_SOURCE, "tone"))
+
+    assert row is not None
+    assert row.prompt_version == PROMPT_VERSION
+
+
+async def test_the_version_survives_activation(engine, session_id):
+    """Discarding it when a human accepts is where it would actually be lost.
+
+    Acceptance rate per wording is the question this column exists for — did
+    changing the prompt produce suggestions people kept? A version held only
+    while a proposal is pending answers the opposite question: which wording
+    produced the ones nobody has looked at yet.
+    """
+    client = _FakeClient(text='[{"key": "tone", "value": "terse", "reason": "said so"}]')
+
+    async with AsyncSession(engine) as db:
+        await extract_memories(db, client, session_id, max_proposals=5)
+        repo = SqlSessionRepository(db)
+        await repo.activate(session_id, source=EXTRACTOR_SOURCE, key="tone")
+        row = await db.get(ChatMemoryEntry, (session_id, "tone"))
+
+    assert row is not None
+    assert row.prompt_version == PROMPT_VERSION
+
+
+async def test_an_owners_rewrite_does_not_inherit_the_extractors_version(engine, session_id):
+    """A human's sentence must not be attributed to the prompt it replaced.
+
+    The overwrite path is the one that gets this wrong quietly: everything else
+    about the row is replaced, and a version left behind would make the record
+    claim an extractor produced text a person typed.
+    """
+    client = _FakeClient(text='[{"key": "tone", "value": "terse", "reason": "said so"}]')
+
+    async with AsyncSession(engine) as db:
+        await extract_memories(db, client, session_id, max_proposals=5)
+        repo = SqlSessionRepository(db)
+        await repo.activate(session_id, source=EXTRACTOR_SOURCE, key="tone")
+        await repo.remember(session_id, key="tone", value="chatty", reason="changed my mind")
+        row = await db.get(ChatMemoryEntry, (session_id, "tone"))
+
+    assert row is not None
+    assert row.value == {"value": "chatty"}
+    assert row.prompt_version is None
+
+
+async def test_the_key_list_does_not_change_the_prompt_version(engine, session_id):
+    """A version that changed per conversation would identify nothing.
+
+    ``_system_prompt`` appends the keys already in use, so the string sent to the
+    model differs between almost any two sessions. Hashing that would give nearly
+    every proposal its own version, and grouping by it — the entire point — would
+    return one row per row.
+    """
+    async with AsyncSession(engine) as db:
+        repo = SqlSessionRepository(db)
+        await repo.remember(session_id, key="tone", value="terse", reason="r")
+        client = _FakeClient(text='[{"key": "name", "value": "Gui", "reason": "said so"}]')
+        await extract_memories(db, client, session_id, max_proposals=5)
+        row = await db.get(ChatMemoryProposal, (session_id, EXTRACTOR_SOURCE, "name"))
+
+    assert row is not None
+    assert row.prompt_version == PROMPT_VERSION
 
 
 async def test_a_re_run_overwrites_its_own_proposals(engine, session_id):

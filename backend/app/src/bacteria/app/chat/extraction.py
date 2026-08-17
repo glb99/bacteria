@@ -46,6 +46,7 @@ Not built:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -125,6 +126,32 @@ Rules on facts:
 """
 
 _NO_KEYS_YET = "No keys are in use yet. Choose ones a later extraction can reuse."
+
+PROMPT_VERSION = hashlib.sha256(f"{_PROMPT}{_NO_KEYS_YET}".encode()).hexdigest()[:12]
+"""Which wording produced a proposal, derived rather than maintained by hand.
+
+**A proposal is evidence about an extractor, and until now it did not say which
+extractor.** Both prompts in this system changed twice in one afternoon and
+behaviour changed with them -- keys stopped being invented, then values stopped
+being sentences -- and nothing in the database distinguishes a row written before
+from one written after. That matters most exactly when the queue is being used as
+evidence, which is what it is about to be used as.
+
+Computed from the static wording and *not* from the key list
+:func:`_system_prompt` appends. Those keys are this session's data; including
+them would give almost every conversation its own version and make the field say
+nothing. The version answers "which instructions", not "which prompt string".
+
+Derived from the text rather than a number someone bumps, because a hand-kept
+version is one that eventually disagrees with the prompt above it, and the
+disagreement is invisible. Twelve hex characters is not a collision risk for a
+string that changes a handful of times a year, and it stays short enough to read
+in a query result.
+
+**Not the model.** ``memory_extraction_model`` also shapes what comes back, and a
+proposal does not record it either. That gap is real and left open: it belongs
+with the wider question of what a run records, which the agent's ADR 0019 owns.
+"""
 
 
 def _system_prompt(known: KnownKeys) -> str:
@@ -249,6 +276,7 @@ async def extract_memories(
             value=fact["value"],
             reason=fact["reason"],
             source=EXTRACTOR_SOURCE,
+            prompt_version=PROMPT_VERSION,
         )
 
     # Last, and deliberately after the proposals rather than before. `propose`

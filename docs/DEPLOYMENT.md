@@ -98,12 +98,14 @@ keeping one prefix rule; the alternative was a second name for one setting.
 **On Supabase, take the session pooler and not the transaction pooler.** The
 dashboard offers both under one heading and the difference is not cosmetic:
 
-- **Transaction pooler** (port `6543`) hands out a connection per transaction and
-  does not carry `LISTEN`/`NOTIFY`. The queue is
-  [`PsycopgConnector`](../backend/app/src/bacteria/app/core/jobs.py), and that
-  notification is how a worker learns a job exists. Deferred work stops arriving,
-  while every other query keeps working — so the symptom is memory proposals that
-  never appear, not an error.
+- **Transaction pooler** (port `6543`) hands out a connection per transaction, so
+  it does not carry `LISTEN`/`NOTIFY` and breaks the prepared statements psycopg
+  makes on its own after a query repeats. The queue is
+  [`PsycopgConnector`](../backend/app/src/bacteria/app/core/jobs.py), which uses
+  that notification to pick a job up promptly. It also polls, so the honest
+  symptom is latency and intermittent statement errors rather than silence —
+  which means **"jobs do eventually run" does not clear the pooler**. Session
+  mode avoids the question instead of surviving it.
 - **Session pooler** (port `5432`) holds the connection for the session and is
   reachable over IPv4. The *direct* connection is IPv6-only on current Supabase
   projects, and GitHub-hosted runners are IPv4-only — so the migration step in
@@ -119,7 +121,8 @@ In the FastAPI Cloud dashboard:
 | Variable | Value | |
 |---|---|---|
 | `BACTERIA_DATABASE_URL` | the connection string | **secret** |
-| `BACTERIA_RUN_WORKER_IN_API` | `true` | required here, and only here |
+| `BACTERIA_RUN_WORKER_IN_API` | `true` | required here, and only here. Defaults to `false` |
+| `BACTERIA_MEMORY_EXTRACTION_ENABLED` | `true` | defaults to `false`, so without it no turn ever enqueues and no proposal is ever produced |
 | `BACTERIA_MODEL_PROVIDER` | `anthropic` or `gemini` | |
 | `BACTERIA_LOG_LEVEL` | `INFO` | |
 | `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` | provider credential | **secret**, unprefixed — the SDKs read these exact names |
@@ -169,6 +172,36 @@ BACTERIA_DATABASE_URL='postgresql+psycopg://…' uv run bacteria-admin issue-key
 ```
 
 Printed once. Only a hash is stored.
+
+### 6. Check that deferred work is actually running
+
+The conversation works long before the queue does, so this needs checking
+deliberately rather than being noticed. Exactly one of these appears at boot,
+and it says which branch the lifespan took:
+
+| Line | Level | Means |
+|---|---|---|
+| `running the job worker inside the API process` | WARNING | the worker started — expected here, and [ADR 0001](adr/0001-run-the-worker-in-the-api-process.md)'s tradeoff said out loud |
+| `memory extraction is enabled and no worker runs in this process` | INFO | it did not |
+
+Then take a turn containing a fact worth remembering and look at what the
+proposals carry:
+
+```sql
+select source, count(*) from chat_memory_proposal group by source;
+```
+
+**`source` is what makes this answerable**, and reading the count alone will
+mislead you. There are two proposers and only one of them uses the queue:
+
+- `model` — the `remember` tool, written inline inside the turn's own
+  transaction. It works whether or not a worker exists, so its rows prove
+  nothing about deferred execution.
+- `extractor` — the background job. These rows, and only these, mean the whole
+  path is alive.
+
+An empty queue after a `"hello"` turn is correct behaviour rather than a fault:
+the extractor proposes what it finds, and there was nothing there.
 
 ---
 

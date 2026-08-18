@@ -39,7 +39,19 @@ from bacteria.app.ingestion import models as _ingestion_models  # noqa: F401
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False`, and it is not a preference. `fileConfig`
+    # defaults it to True, which switches off every logger that already exists
+    # rather than merely reconfiguring the ones named in `alembic.ini` -- so
+    # every `bacteria.*` logger created before this import goes permanently
+    # silent, having logged nothing wrong and reported nothing about it.
+    #
+    # Alembic's generated template ships the defaulted call and it is harmless
+    # there, because `alembic` is its own process. Here `migrations/env.py` is
+    # imported by the drift test inside the pytest process, so the damage
+    # outlives the migration: any later test asserting on a log record sees an
+    # empty capture, and whether it does depends on test *ordering*. That is how
+    # this was found -- a settings test passing alone and failing in the suite.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # The URL is used as-is. `postgresql+psycopg://` is psycopg 3's dialect and it
 # serves both modes: `create_engine` gives a synchronous engine from it,

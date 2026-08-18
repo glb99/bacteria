@@ -196,6 +196,23 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
                 print(f"[{waiting} waiting: /review]")
             announced = waiting
 
+            # Ends the read transaction the count above opened, before this
+            # process spends minutes doing nothing.
+            #
+            # **This blocked a migration.** `ALTER TABLE chat_memory_proposal ADD
+            # COLUMN` waited behind a session sitting `idle in transaction` at
+            # this prompt, holding a lock taken by `count_proposals`. Nothing
+            # errored: Postgres queued the DDL, and everything queued behind that
+            # in turn. On a deployment whose migration step runs before the
+            # process starts, that is a deploy that hangs with no message.
+            #
+            # A rollback rather than a commit because nothing here wrote
+            # anything, and a rollback that discards nothing says so. Placed
+            # before `input` rather than after the count, so any read added to
+            # this loop later is covered by where it sits rather than by whoever
+            # remembers.
+            await db.rollback()
+
             try:
                 # Blocking `input` on the event loop, knowingly, and for the
                 # same reason the agent's own CLI does it: this process runs one

@@ -108,12 +108,29 @@ jobs:
           BACTERIA_DATABASE_URL: ${{ secrets.BACTERIA_DATABASE_URL }}
         run: uv run just migrate
 
-      # Run from the application directory, which is what FastAPI Cloud is
-      # configured with and what makes `[tool.fastapi] entrypoint` in
-      # backend/app/pyproject.toml resolvable without a --path flag.
+      # Run from the repository root, and no `working-directory:`. This step is
+      # what chooses the build context -- `fastapi deploy` packages its own
+      # working directory and uploads that -- so it, and not the dashboard's
+      # Application Directory, is what has to name the root.
+      #
+      # It said `working-directory: backend/app`, which is where the deployed
+      # application lives and is therefore the natural thing to write. The build
+      # then failed on every attempt, always the same way: `bacteria-app`
+      # declares `bacteria-agent = { workspace = true }`, and a workspace member
+      # does not build without the root declaring `members = ["backend/*"]`.
+      # Uploading only `backend/app` leaves that root behind.
+      #
+      # Two symptoms travelled with it and are worth recognising, because
+      # neither points at the cause: uv resolved CPython 3.14 (no
+      # `.python-version` in that directory), and the platform's own script
+      # reported `cd: can't cd to backend/app` -- having been handed a context
+      # that already was it.
+      #
+      # Moving `[tool.fastapi]` to the root pyproject was necessary and not
+      # sufficient; while this line stood, the root was never uploaded for that
+      # declaration to be found in.
       - name: Deploy
         if: steps.configured.outputs.ready == 'true'
-        working-directory: backend/app
         env:
           FASTAPI_CLOUD_TOKEN: ${{ secrets.FASTAPI_CLOUD_TOKEN }}
           FASTAPI_CLOUD_APP_ID: ${{ secrets.FASTAPI_CLOUD_APP_ID }}

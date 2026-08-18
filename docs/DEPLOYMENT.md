@@ -14,7 +14,7 @@ and the way that is resolved gives up a property the code otherwise protects.
 
 | | |
 |---|---|
-| Application directory | The **repository root**, not `backend/app`. See [§1](#1-the-application). |
+| Build root | The **repository root**, not `backend/app` — set in *both* the workflow's `Deploy` step and the dashboard. See [§1](#1-the-application). |
 | Entrypoint | `bacteria.app.entrypoints.asgi:app`, from `[tool.fastapi]` in the **root** `pyproject.toml` |
 | Schema | Applied by the workflow, before the deploy. Nothing creates or upgrades it at startup. |
 | Worker | **In-process**, via `BACTERIA_RUN_WORKER_IN_API=true`. There is nowhere else to put it. |
@@ -29,8 +29,16 @@ Create an app in FastAPI Cloud and leave its
 [Application Directory](https://fastapicloud.com/docs/builds-and-deployments/application-directory/)
 at the **repository root**.
 
-**Not `backend/app`, which is the obvious answer and fails.** The deployed
-application is that package, so pointing the platform at it reads as correct —
+**Two settings choose the build root, and the workflow is the one that wins.**
+`fastapi deploy` packages *its own working directory* and uploads that, so the
+`Deploy` step in [`deploy.yml`](../.github/workflows/deploy.yml) decides what the
+platform ever sees. It must run from the repository root — with no
+`working-directory:` — and the dashboard setting has to agree with it. Changing
+only the dashboard changes nothing, because the root is never uploaded for it to
+point at.
+
+**Neither may be `backend/app`, which is the obvious answer and fails.** The
+deployed application is that package, so pointing at it reads as correct —
 but the build runs `uv` from whatever directory it is given, and `bacteria-app`
 declares `bacteria-agent = { workspace = true }`. A workspace member does not
 build without the root that declares `members = ["backend/*"]`.

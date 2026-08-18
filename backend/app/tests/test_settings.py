@@ -1,5 +1,6 @@
 """Tests for the one place the environment is read."""
 
+import logging
 import os
 
 import pytest
@@ -117,3 +118,38 @@ def test_the_real_environment_wins_over_the_file(tmp_path, monkeypatch):
     load_env_file()
 
     assert os.environ["ANTHROPIC_API_KEY"] == "from-the-environment"
+
+
+def test_a_setting_without_the_prefix_is_reported(monkeypatch, caplog):
+    """The other half of the typo problem, and the one that stays silent.
+
+    `_reject_unknown_prefixed_variables` only inspects names that already start
+    with `BACTERIA_`, so it catches a misspelled prefix and cannot see a missing
+    one. `RUN_WORKER_IN_API=true` is then never collected, the field keeps its
+    `False` default, and the deployment converses perfectly while no job is ever
+    consumed — which reads as a broken feature rather than a missing variable.
+    It cost an afternoon of production diagnosis exactly once.
+    """
+    monkeypatch.setenv("RUN_WORKER_IN_API", "true")
+
+    with caplog.at_level(logging.WARNING):
+        settings = Settings(_env_file=None)
+
+    assert settings.run_worker_in_api is False, "the unprefixed name must still not be read"
+    assert "RUN_WORKER_IN_API" in caplog.text
+    assert "BACTERIA_RUN_WORKER_IN_API" in caplog.text
+
+
+def test_the_platforms_own_database_url_is_not_complained_about(monkeypatch, caplog):
+    """Neon and Supabase set a bare `DATABASE_URL` on every deployment.
+
+    Warning about it would fire on every correctly configured production boot,
+    which is how a warning stops being read — and it would take this one's real
+    cases with it.
+    """
+    monkeypatch.setenv("DATABASE_URL", "postgresql://set-by-the-integration")
+
+    with caplog.at_level(logging.WARNING):
+        Settings(_env_file=None)
+
+    assert "DATABASE_URL" not in caplog.text

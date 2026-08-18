@@ -30,13 +30,27 @@ Not built:
     variable, which is enough until something needs to differ by *shape*.
 """
 
+import logging
 import os
 from functools import lru_cache
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+logger = logging.getLogger(__name__)
+
 ENV_PREFIX = "BACTERIA_"
+
+UNPREFIXED_AND_NOT_OURS = frozenset({"DATABASE_URL"})
+"""Unprefixed names that belong to someone else and must not be complained about.
+
+``DATABASE_URL`` is set by the Neon and Supabase integrations on every deployment
+that uses one, and `docs/DEPLOYMENT.md` already tells the operator this
+application ignores it in favour of the prefixed copy. Warning about it would
+fire on every correctly configured production boot — the failure the ASGI
+lifespan describes at length, where a warning that fires when nothing is wrong
+teaches people to scroll past the ones that mean something.
+"""
 
 ENV_FILE = ".env"
 """The dotenv file, named once so the two readers of it cannot drift apart.
@@ -188,6 +202,40 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"unrecognized {ENV_PREFIX}* environment variable(s): {', '.join(unknown)}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _warn_about_settings_missing_the_prefix(self) -> "Settings":
+        """Warn when a setting's own name is set *without* ``BACTERIA_``.
+
+        The other direction of the same mistake, and invisible to the check
+        above: that one inspects only names already starting with the prefix, so
+        ``BACTERIA_RUN_WORKER_IN_APII`` refuses to boot in a second while
+        ``RUN_WORKER_IN_API`` is never collected, never mentioned, and leaves the
+        field at its default. The service then runs perfectly with no worker,
+        conversing normally while no proposal ever appears. That is not
+        hypothetical — it cost an afternoon of production diagnosis on
+        2026-08-18, and the log line that finally identified it was about the
+        consequence rather than the cause.
+
+        Warns rather than raising, which is the difference between the two
+        checks and not an inconsistency. A ``BACTERIA_*`` variable matching no
+        field is always a mistake, because nothing else uses that prefix. An
+        unprefixed one is not ours to judge: see :data:`UNPREFIXED_AND_NOT_OURS`.
+        Refusing to start on a name the platform legitimately set would turn a
+        working deployment into a crash loop.
+        """
+        fields = {name.upper() for name in type(self).model_fields}
+        for name in sorted(os.environ):
+            upper = name.upper()
+            if upper in fields and upper not in UNPREFIXED_AND_NOT_OURS:
+                logger.warning(
+                    "%s is set but nothing reads it; every setting here is "
+                    "prefixed — did you mean %s%s?",
+                    name,
+                    ENV_PREFIX,
+                    upper,
+                )
         return self
 
 

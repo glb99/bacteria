@@ -40,12 +40,18 @@ bacteria-admin = "bacteria.app.entrypoints.cli:main"
 bacteria-serve = "bacteria.app.entrypoints.asgi:main"
 bacteria-worker = "bacteria.app.entrypoints.queue_worker:main"
 
-[tool.fastapi]
-# Lets `fastapi deploy` (run from backend/app, the Application Directory
-# set in the FastAPI Cloud dashboard) find the ASGI app without a --path flag.
-# The `app` object itself lives in entrypoints/asgi.py alongside `main`, which
-# only Windows dev needs -- see that module's docstring.
-entrypoint = "bacteria.app.entrypoints.asgi:app"
+# No `[tool.fastapi]` here, and that is deliberate rather than an omission.
+#
+# It lived here once, with the FastAPI Cloud Application Directory set to
+# `backend/app` to match, which reads as the obvious arrangement: the deployed
+# application is this package. It cannot work. This package declares
+# `bacteria-agent = { workspace = true }` a few lines above, and a workspace
+# member does not build without the root that declares it -- so a build rooted
+# here fails on the dependency before it reaches any code.
+#
+# The entrypoint is declared in the root `pyproject.toml`, which is what
+# `fastapi deploy` has to run from. See the comment there for what the failure
+# looked like, since none of its three symptoms named the cause.
 
 [tool.uv.sources]
 # Resolved from backend/agent rather than an index. The agent is developed

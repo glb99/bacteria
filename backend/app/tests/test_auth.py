@@ -11,7 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.auth import keys
 from bacteria.app.auth.models import ApiKey
-from bacteria.app.auth.service import issue_key, revoke_key
+from bacteria.app.auth.service import issue_key, principal_is_known, revoke_key
 
 
 @pytest.fixture(name="db")
@@ -125,3 +125,44 @@ async def test_a_principal_can_hold_several_keys(db):
     assert len(rows) == 2
     assert {r.principal_id for r in rows} == {"acme"}
     assert first != second
+
+
+async def test_an_unknown_principal_is_not_known(db):
+    """The typo guard. Without it, `chat alicce` silently creates an orphan.
+
+    `chat_session.user_id` has no foreign key, deliberately, so a mistyped
+    principal produces a valid session that no key resolves to — unreadable
+    over HTTP forever, and reported by nothing. The operator CLI refuses on
+    this answer, which is the only thing standing between a slip and a row
+    nobody can reach.
+    """
+    await issue_key(db, principal_id="alice", label="demo")
+
+    assert await principal_is_known(db, "alicce") is False
+
+
+async def test_a_principal_holding_a_key_is_known(db):
+    """The other half: issuing a key must be enough to then use the CLI.
+
+    A guard that refuses everything would pass the test above and make the
+    command unusable.
+    """
+    await issue_key(db, principal_id="alice", label="demo")
+
+    assert await principal_is_known(db, "alice") is True
+
+
+async def test_a_principal_whose_only_key_was_revoked_is_still_known(db):
+    """Revocation must not lock an operator out of their own sessions.
+
+    Rotation revokes the old key before or after minting the new one, and a
+    check that counted only live keys would refuse in the window between —
+    turning routine hygiene into "your sessions are unreachable". The principal
+    is real whether or not any credential currently works; whether a *caller*
+    may act as it is a different question, answered by the auth dependency.
+    """
+    token = await issue_key(db, principal_id="alice", label="demo")
+    key_id, _secret = keys.split(token)
+    await revoke_key(db, key_id=key_id)
+
+    assert await principal_is_known(db, "alice") is True

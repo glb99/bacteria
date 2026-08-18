@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.auth.keys import GeneratedKey
@@ -36,6 +37,22 @@ class ApiKeyRepository:
         and are worth telling apart in a log.
         """
         return await self._db.get(ApiKey, key_id)
+
+    async def has_principal(self, principal_id: str) -> bool:
+        """Whether any key has ever been issued to ``principal_id``.
+
+        Revoked keys count, and that is the point rather than an oversight. The
+        question is "is this a real principal or a mistyped one", and a
+        principal whose only key was revoked is still real — excluding those
+        would turn ordinary key rotation into a lockout.
+
+        Selects one key id rather than counting: nothing needs the number, and
+        ``limit(1)`` stops at the first row of a principal holding many.
+        """
+        found = await self._db.exec(
+            select(ApiKey.key_id).where(ApiKey.principal_id == principal_id).limit(1)
+        )
+        return found.first() is not None
 
     async def revoke(self, key_id: str) -> Optional[ApiKey]:
         """Mark a key unusable, keeping the row."""

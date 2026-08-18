@@ -28,6 +28,25 @@ async def issue_key(session: AsyncSession, principal_id: str, label: str) -> str
     return generated.token
 
 
+async def principal_is_known(session: AsyncSession, principal_id: str) -> bool:
+    """Whether ``principal_id`` has ever held a key.
+
+    **Not an authorization check, and must not be used as one.** It says a
+    credential was issued to this principal at some point, not that the caller
+    holds it — every route proves that with :data:`CurrentPrincipal` instead.
+
+    It exists for the operator CLI, where the principal is *typed* rather than
+    proven. ``chat_session.user_id`` has no foreign key, deliberately, so a
+    mistyped principal creates a perfectly valid session owned by nobody: no
+    key resolves to it, so no HTTP caller can ever read it back, and nothing
+    reports the mistake. This is the check that would have caught the typo.
+
+    Returns:
+        Whether any key exists for the principal, revoked ones included.
+    """
+    return await ApiKeyRepository(session).has_principal(principal_id)
+
+
 async def revoke_key(session: AsyncSession, key_id: str) -> Optional[ApiKey]:
     """Make a key unusable, keeping the record of it.
 

@@ -294,6 +294,19 @@ def check_chat_cli(database_url: str) -> None:
     and nothing else would tell them.
     """
     print("\n[cli] the chat command starts, connects, and opens the job queue")
+
+    # A key is issued for this principal first, and the token is thrown away.
+    # `chat` now refuses a principal no key was ever issued to, because a
+    # mistyped one produces a session owned by nobody -- unreachable over HTTP
+    # forever, since no credential resolves to it.
+    #
+    # This script was creating exactly that on every CI run: `smoke-cli` had no
+    # key, only `smoke-principal` and `smoke-stranger` did. So the guard's first
+    # catch was a real orphan rather than a hypothetical one, and the fix is
+    # here rather than in the guard -- issuing before chatting is what an
+    # operator does.
+    issue_key("smoke-cli")
+
     result = subprocess.run(
         [sys.executable, "-m", "bacteria.app.entrypoints.cli", "chat", "smoke-cli"],
         input="",

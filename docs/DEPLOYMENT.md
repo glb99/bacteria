@@ -137,6 +137,12 @@ the other — which matters because the laptop's is the one that leaks.
 Anything starting with `BACTERIA_` that is not a setting **fails startup on
 purpose**. A typo is a refusal to boot, not a service running on defaults.
 
+The other direction — a setting's name *without* the prefix, such as
+`RUN_WORKER_IN_API` — is **warned** about rather than refused, because
+`DATABASE_URL` legitimately belongs to the integration. Read that warning: the
+missing prefix is silent otherwise, and cost an afternoon of production
+diagnosis once.
+
 ### 4. CI secrets
 
 ```bash
@@ -157,6 +163,19 @@ Add `BACTERIA_DATABASE_URL` there too — the workflow migrates before deploying
 so the runner needs it. Put all three in a `production` environment, which is
 what the workflow's `environment:` names.
 
+Set one **variable** as well, under *Variables* rather than *Secrets*:
+
+| Variable | Value |
+|---|---|
+| `SMOKE_BASE_URL` | the deployed URL, e.g. `https://<app>.fastapicloud.dev` |
+
+It drives the post-deploy check in [§6](#6-check-that-deferred-work-is-actually-running),
+which is skipped with a notice while it is unset rather than failing the deploy.
+A variable and not a secret because a public URL is not one, and a masked value
+is unreadable in exactly the log you would be reading to find out which host
+failed. It is deliberately not `BACTERIA_`-prefixed: anything with that prefix
+that is not a setting refuses to boot, and that step runs `bacteria-admin`.
+
 **The database has to be reachable from a GitHub-hosted runner.** Neon and
 Supabase are. One inside a private network is not, and the migration step would
 have to move somewhere that can reach it.
@@ -174,6 +193,15 @@ BACTERIA_DATABASE_URL='postgresql+psycopg://…' uv run bacteria-admin issue-key
 Printed once. Only a hash is stored.
 
 ### 6. Check that deferred work is actually running
+
+**The workflow now does this for you**, once `SMOKE_BASE_URL` is set: after every
+deploy it runs `scripts/smoke.py --deployed`, which asserts the app serves,
+refuses unauthenticated callers, and — the part that matters — that a deferred
+job reaches a worker within a minute. It bills no vendor, because it proves the
+queue with an ingestion job rather than a turn.
+
+What follows is how to check it by hand, which is still what you want when that
+step fails and you need to know which half is wrong.
 
 The conversation works long before the queue does, so this needs checking
 deliberately rather than being noticed. Exactly one of these appears at boot,
@@ -253,7 +281,7 @@ Not oversights; each is recorded where it would be filled.
 | No retries on ingestion jobs | Ingestion is not idempotent across batches, so a retry would store everything twice. |
 | No durable execution | A job interrupted mid-run is not resumed. |
 | No rollback | Redeploy the previous commit. Migrations are not reversed automatically, and `just rollback` is a local command against a URL you supply. |
-| No smoke check against the deployed app | CI smoke-tests a local stack. Nothing verifies the deployment after it lands. |
+| No agent turn is verified anywhere automatic | A turn needs a model provider, and the options are billing a vendor from CI or a test-only seam in production code. Still checked by hand. |
 
 ---
 

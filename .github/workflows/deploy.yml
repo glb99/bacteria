@@ -135,3 +135,38 @@ jobs:
           FASTAPI_CLOUD_TOKEN: ${{ secrets.FASTAPI_CLOUD_TOKEN }}
           FASTAPI_CLOUD_APP_ID: ${{ secrets.FASTAPI_CLOUD_APP_ID }}
         run: uv run fastapi deploy
+
+      # Verifies the deployment that just landed, which nothing did before. Six
+      # failures shipped silently from this workflow -- four packaging, two
+      # configuration -- and every one was found by hand from a pasted log, days
+      # later. The last was `BACTERIA_RUN_WORKER_IN_API` never reaching the
+      # process: the service conversed perfectly while nothing drained the queue.
+      #
+      # `--deployed` runs the narrow subset that says something about a
+      # deployment rather than about the code -- serving, authenticating,
+      # draining the queue. No agent turn, so this bills no vendor from CI; the
+      # queue is proved with a deferred ingestion job instead, which is free.
+      #
+      # `vars.SMOKE_BASE_URL` and not a secret: a public URL is not one, and a
+      # secret would be masked in exactly the log you are reading to find out
+      # which host failed. Deliberately NOT named `BACTERIA_*` -- every variable
+      # with that prefix that is not a setting is a refusal to boot, and this
+      # step runs `bacteria-admin`.
+      - name: Smoke-test what was deployed
+        if: steps.configured.outputs.ready == 'true'
+        env:
+          BACTERIA_DATABASE_URL: ${{ secrets.BACTERIA_DATABASE_URL }}
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SMOKE_BASE_URL}" ]; then
+            echo "::notice title=Deployment not smoke-tested::Set the SMOKE_BASE_URL repository variable to the deployed URL."
+            {
+              echo "### Deployment not verified"
+              echo
+              echo "The deploy succeeded, but nothing checked it. Set the"
+              echo "\`SMOKE_BASE_URL\` repository variable to the deployed URL."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          uv run python scripts/smoke.py --deployed --base-url "${SMOKE_BASE_URL}"

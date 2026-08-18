@@ -24,6 +24,16 @@ Run it against a stack you started yourself:
 or let it start and stop everything itself, which is what CI does:
 
     uv run python scripts/smoke.py --managed
+
+or check a deployment that is already running, after it lands:
+
+    uv run python scripts/smoke.py --deployed --base-url https://...
+
+That last mode starts nothing and runs a narrower set — see
+:func:`run_deployed_checks` for what it leaves out and why. It still needs
+`BACTERIA_DATABASE_URL` for the same database the deployment uses, because the
+one thing worth asserting after a deploy — that a worker is draining the queue —
+has no route that reports it.
 """
 
 from __future__ import annotations
@@ -38,6 +48,8 @@ from typing import Any, Iterator
 
 import httpx
 import psycopg
+
+from bacteria.app.auth import keys
 
 # Long enough to absorb a cold start on a CI runner, short enough that a hung
 # process fails the job rather than burning the timeout.
@@ -128,6 +140,24 @@ def issue_key(principal: str) -> str:
         if token.startswith("fp_"):
             return token
     raise SmokeFailure(f"no key in issue-key output:\n{result.stdout}\n{result.stderr}")
+
+
+def revoke_key(token: str) -> None:
+    """Retire a credential this script minted, by the id inside its token.
+
+    `revoke-key` refuses a whole key on purpose -- it is most often run because
+    one leaked, and taking the token would put the secret in shell history at
+    exactly that moment. So the id is split out here rather than passed through.
+    """
+    key_id = keys.split(token)
+    if key_id is None:
+        raise SmokeFailure(f"could not split a key id out of {token[:12]}...")
+    subprocess.run(
+        [sys.executable, "-m", "bacteria.app.entrypoints.cli", "revoke-key", key_id[0]],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
 
 
 def check_auth(base_url: str, key: str) -> None:
@@ -353,9 +383,49 @@ def run_checks(base_url: str, database_url: str) -> None:
     check_chat_cli(database_url)
 
 
+def run_deployed_checks(base_url: str, database_url: str) -> None:
+    """The subset worth running against a deployment, after it lands.
+
+    Narrower than :func:`run_checks` on purpose, and the omissions are the
+    argument. ``check_chat_cli`` runs a local process and says nothing about
+    what was deployed. ``check_ownership`` and ``check_memory`` write a
+    conversation and its memory into the production database on every deploy,
+    which is a cost with no matching finding — the routes they cover are
+    already covered by the suite against real Postgres.
+
+    What survives is what the suite structurally cannot answer about a
+    *deployment*: that the process is serving, that authentication is on, and
+    that something is draining the queue.
+
+    That last one is the reason this exists. Six failures in a row shipped
+    silently here — four packaging, two configuration — and the last was
+    `BACTERIA_RUN_WORKER_IN_API` never reaching the process, which left the
+    service conversing normally while no job was ever consumed. It was found by
+    hand, days later. `check_deferred_ingestion` fails in sixty seconds on
+    exactly that, and costs no model call, so it can run on every deploy without
+    billing a vendor from CI.
+
+    The credential is minted and then retired. A key per deploy that nobody
+    revokes is a live credential accumulating in production for a principal only
+    CI uses.
+    """
+    key = issue_key("smoke-deploy")
+    try:
+        check_auth(base_url, key)
+        check_deferred_ingestion(base_url, key, database_url)
+    finally:
+        revoke_key(key)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument(
+        "--deployed",
+        action="store_true",
+        help="Check a deployment that is already running. Starts nothing, and skips "
+        "the checks that would write a conversation into production.",
+    )
     parser.add_argument("--key", help="Skip issuing one and use this credential.")
     parser.add_argument(
         "--managed",
@@ -369,7 +439,10 @@ def main() -> int:
     )
 
     try:
-        if not args.managed:
+        if args.deployed:
+            wait_for_health(args.base_url, process=None)
+            run_deployed_checks(args.base_url, database_url)
+        elif not args.managed:
             wait_for_health(args.base_url, process=None)
             run_checks(args.base_url, database_url)
         else:

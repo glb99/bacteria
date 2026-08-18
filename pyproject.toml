@@ -15,6 +15,23 @@ package = false
 # reached the repository root would try to make one of it.
 members = ["backend/*"]
 
+[tool.fastapi]
+# Here at the workspace root rather than in `backend/app`, where the application
+# it names actually lives. `fastapi deploy` builds from the directory holding
+# this file, and `bacteria-app` cannot be built on its own: it declares
+# `bacteria-agent = { workspace = true }`, which resolves only when the root
+# declaring `members = ["backend/*"]` is in the build context.
+#
+# It was in `backend/app/pyproject.toml`, with the FastAPI Cloud Application
+# Directory set to `backend/app` to match. That deploy failed three ways at once
+# and none of the messages named the cause: uv refused the dependency
+# ("`bacteria-agent` references a workspace ... but is not a workspace member"),
+# it resolved CPython 3.14 because no `.python-version` sits in that directory,
+# and the build script could not `cd backend/app` from a root that already was
+# it. The Dockerfile had the right shape all along -- it copies `backend/`,
+# `pyproject.toml` and `uv.lock`, then runs `uv sync --package bacteria-app`.
+entrypoint = "bacteria.app.entrypoints.asgi:app"
+
 [dependency-groups]
 # The toolchain is a dependency of the workspace, not a string in the Justfile.
 # It used to be the latter: `uvx ruff@0.16.2`, pinned by hand because an

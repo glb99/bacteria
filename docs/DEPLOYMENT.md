@@ -14,8 +14,8 @@ and the way that is resolved gives up a property the code otherwise protects.
 
 | | |
 |---|---|
-| Application directory | `backend/app` |
-| Entrypoint | `bacteria.app.entrypoints.asgi:app`, from `[tool.fastapi]` in that package's `pyproject.toml` |
+| Application directory | The **repository root**, not `backend/app`. See [§1](#1-the-application). |
+| Entrypoint | `bacteria.app.entrypoints.asgi:app`, from `[tool.fastapi]` in the **root** `pyproject.toml` |
 | Schema | Applied by the workflow, before the deploy. Nothing creates or upgrades it at startup. |
 | Worker | **In-process**, via `BACTERIA_RUN_WORKER_IN_API=true`. There is nowhere else to put it. |
 
@@ -25,9 +25,33 @@ and the way that is resolved gives up a property the code otherwise protects.
 
 ### 1. The application
 
-Create an app in FastAPI Cloud and set its
+Create an app in FastAPI Cloud and leave its
 [Application Directory](https://fastapicloud.com/docs/builds-and-deployments/application-directory/)
-to `backend/app`.
+at the **repository root**.
+
+**Not `backend/app`, which is the obvious answer and fails.** The deployed
+application is that package, so pointing the platform at it reads as correct —
+but the build runs `uv` from whatever directory it is given, and `bacteria-app`
+declares `bacteria-agent = { workspace = true }`. A workspace member does not
+build without the root that declares `members = ["backend/*"]`.
+
+Rooted at `backend/app`, the build fails three ways at once and none of the
+messages names the cause:
+
+```
+error: Failed to parse entry: `bacteria-agent`
+  Caused by: `bacteria-agent` references a workspace in `tool.uv.sources`, but is
+  not a workspace member
+```
+
+```
+Using CPython 3.14.6          # no .python-version in that directory
+/tmp/install_dependencies.sh: cd: can't cd to backend/app
+```
+
+The [`Dockerfile`](../Dockerfile) has always had the right shape and is the thing
+to compare against: it copies `backend/`, `pyproject.toml` and `uv.lock`, then
+runs `uv sync --package bacteria-app`.
 
 ### 2. The database
 
@@ -53,6 +77,23 @@ Two things about that string:
 
 If the provider rotates the URL, this copy does not follow. That is the cost of
 keeping one prefix rule; the alternative was a second name for one setting.
+
+**On Supabase, take the session pooler and not the transaction pooler.** The
+dashboard offers both under one heading and the difference is not cosmetic:
+
+- **Transaction pooler** (port `6543`) hands out a connection per transaction and
+  does not carry `LISTEN`/`NOTIFY`. The queue is
+  [`PsycopgConnector`](../backend/app/src/bacteria/app/core/jobs.py), and that
+  notification is how a worker learns a job exists. Deferred work stops arriving,
+  while every other query keeps working — so the symptom is memory proposals that
+  never appear, not an error.
+- **Session pooler** (port `5432`) holds the connection for the session and is
+  reachable over IPv4. The *direct* connection is IPv6-only on current Supabase
+  projects, and GitHub-hosted runners are IPv4-only — so the migration step in
+  the workflow cannot reach it either.
+
+One URL serves both halves of the application: `core/jobs.py` strips `+psycopg`
+for psycopg's own parser, so there is no second variable to keep in step.
 
 ### 3. Environment variables
 

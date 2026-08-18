@@ -61,6 +61,15 @@ The [`Dockerfile`](../Dockerfile) has always had the right shape and is the thin
 to compare against: it copies `backend/`, `pyproject.toml` and `uv.lock`, then
 runs `uv sync --package bacteria-app`.
 
+**The root depends on `bacteria-app`, and that line is load-bearing.** The
+builder runs a plain `uv sync`, which installs a virtual root's `dependencies`
+and its groups and nothing else. Every command here names the package it wants —
+the Dockerfile, this workflow, the Justfile — so deleting that dependency leaves
+all of them green and produces an image with the entire toolchain and no
+`bacteria` in it. It fails at import, as `No module named 'bacteria'`, well past
+the point anything looks like it could still fail. A test in
+`backend/app/tests/test_entrypoints.py` holds it in place.
+
 ### 2. The database
 
 Attach Postgres through the

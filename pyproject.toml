@@ -2,11 +2,36 @@
 name = "bacteria-workspace"
 version = "0"
 requires-python = ">=3.13"
-dependencies = []
+# The deployed application, named here so that a bare `uv sync` at this root
+# installs it. That is not how it reads -- the root builds nothing and this
+# looks like a dependency it does not have -- but it is what makes the root
+# deployable, and the root is what gets deployed.
+#
+# Every command in this repository names the package it wants: the Dockerfile
+# runs `uv sync --package bacteria-app`, the deploy workflow runs
+# `uv sync --all-packages`, and the Justfile does the same. FastAPI Cloud's
+# builder does not. It runs a plain `uv sync`, which installs a virtual root's
+# `dependencies` and its groups and nothing else -- so with this list empty the
+# image built cleanly, contained the whole toolchain, and had no `bacteria` in
+# it. The failure arrives at import time as `No module named 'bacteria'`, long
+# after the part that looked like it could fail.
+#
+# `bacteria-agent` is deliberately absent: it comes in transitively through the
+# application, which is the direction the dependency already runs.
+dependencies = ["bacteria-app"]
+
+[tool.uv.sources]
+# The workspace copy rather than an index release, matching what
+# `backend/app/pyproject.toml` says about `bacteria-agent` and for the same
+# reason: these are developed here, not consumed as releases.
+bacteria-app = { workspace = true }
 
 [tool.uv]
-# The root builds nothing. It exists to declare the workspace and to hold the
-# toolchain both members are developed with.
+# The root is not itself a package -- nothing imports `bacteria-workspace` and
+# nothing should build it. It exists to declare the workspace, to hold the
+# toolchain both members are developed with, and to be the directory a deploy
+# is rooted at. A virtual project still installs its `dependencies`, which is
+# what makes the line above work without making this buildable.
 package = false
 
 [tool.uv.workspace]

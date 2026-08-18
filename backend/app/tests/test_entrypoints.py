@@ -128,3 +128,31 @@ async def test_a_whole_key_is_refused_with_the_field_it_wanted(engine, capsys):
     out = capsys.readouterr().out
     assert "full key, not a key id" in out
     assert token not in out
+
+
+def test_the_workspace_root_installs_the_application():
+    """A bare `uv sync` at the root must install `bacteria`, or a deploy has no app.
+
+    Every command in this repository names the package it wants --
+    `uv sync --package bacteria-app` in the Dockerfile, `--all-packages` in the
+    deploy workflow and the Justfile -- so all of them keep working if this
+    dependency is deleted. FastAPI Cloud's builder does not name one. It runs a
+    plain `uv sync`, which installs a virtual root's `dependencies` and nothing
+    else, and the image then builds cleanly, carries the whole toolchain, and
+    contains no `bacteria` at all.
+
+    That is why this is a test rather than a comment: the line it guards reads
+    like a redundancy at a root that builds nothing, every local check stays
+    green when it is removed, and the only thing that notices is a deployment
+    failing at import with `No module named 'bacteria'`.
+    """
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3] / "pyproject.toml"
+    manifest = tomllib.loads(root.read_text(encoding="utf-8"))
+
+    assert "bacteria-app" in manifest["project"]["dependencies"], (
+        f"{root} must depend on bacteria-app; a plain `uv sync` installs nothing else"
+    )
+    assert manifest["tool"]["uv"]["sources"]["bacteria-app"] == {"workspace": True}

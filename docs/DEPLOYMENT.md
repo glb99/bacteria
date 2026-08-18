@@ -167,7 +167,7 @@ Set one **variable** as well, under *Variables* rather than *Secrets*:
 
 | Variable | Value |
 |---|---|
-| `SMOKE_BASE_URL` | the deployed URL, e.g. `https://<app>.fastapicloud.dev` |
+| `SMOKE_BASE_URL` | the deployed URL, e.g. `https://<app>.fastapicloud.dev` — a trailing slash is trimmed for you |
 
 It drives the post-deploy check in [§6](#6-check-that-deferred-work-is-actually-running),
 which is skipped with a notice while it is unset rather than failing the deploy.

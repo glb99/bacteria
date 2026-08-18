@@ -103,16 +103,28 @@ def wait_for_health(base_url: str, process: subprocess.Popen | None) -> None:
     cause.
     """
     deadline = time.monotonic() + STARTUP_TIMEOUT
+    # What the last attempt actually got, so the failure can say. "Did not
+    # answer within 60s" is true of a server that is down and of one that
+    # answered 404 sixty times, and those are not the same problem: the first
+    # sent nothing, the second is running perfectly and was asked the wrong
+    # question. A deployed URL with a trailing slash produces the second --
+    # `//health` is a 404, not a redirect -- and reading it as a timeout sends
+    # you to look at the deployment instead of at the variable.
+    last = "nothing was tried"
     while time.monotonic() < deadline:
         if process is not None and process.poll() is not None:
             raise SmokeFailure(f"server exited during startup with code {process.returncode}")
         try:
-            if httpx.get(f"{base_url}/health", timeout=2.0).status_code == 200:
+            response = httpx.get(f"{base_url}/health", timeout=2.0)
+            if response.status_code == 200:
                 return
-        except httpx.TransportError:
-            pass
+            last = f"HTTP {response.status_code}"
+        except httpx.TransportError as error:
+            last = f"{type(error).__name__}: {error}"
         time.sleep(0.5)
-    raise SmokeFailure(f"server did not answer /health within {STARTUP_TIMEOUT}s")
+    raise SmokeFailure(
+        f"{base_url}/health did not answer 200 within {STARTUP_TIMEOUT}s; last: {last}"
+    )
 
 
 def issue_key(principal: str) -> str:
@@ -434,19 +446,26 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # A dashboard and a browser both hand out URLs with a trailing slash, and
+    # every request here appends an absolute path -- so one slash makes every
+    # call `//health`, which FastAPI answers 404 rather than redirecting.
+    # Trimming it is the script's job: the alternative is a variable that has to
+    # be typed exactly right to avoid a failure that names the wrong thing.
+    base_url = args.base_url.rstrip("/")
+
     database_url = os.environ.get(
         "BACTERIA_DATABASE_URL", "postgresql+psycopg://bacteria:bacteria@localhost:5432/bacteria"
     )
 
     try:
         if args.deployed:
-            wait_for_health(args.base_url, process=None)
-            run_deployed_checks(args.base_url, database_url)
+            wait_for_health(base_url, process=None)
+            run_deployed_checks(base_url, database_url)
         elif not args.managed:
-            wait_for_health(args.base_url, process=None)
-            run_checks(args.base_url, database_url)
+            wait_for_health(base_url, process=None)
+            run_checks(base_url, database_url)
         else:
-            host, _, port = args.base_url.removeprefix("http://").partition(":")
+            host, _, port = base_url.removeprefix("http://").partition(":")
             environment = {**os.environ, "HOST": host, "PORT": port or "8000"}
             server = subprocess.Popen(
                 [sys.executable, "-m", "bacteria.app.entrypoints.asgi"], env=environment
@@ -455,8 +474,8 @@ def main() -> int:
                 with background(
                     "worker", [sys.executable, "-m", "bacteria.app.entrypoints.queue_worker"]
                 ):
-                    wait_for_health(args.base_url, server)
-                    run_checks(args.base_url, database_url)
+                    wait_for_health(base_url, server)
+                    run_checks(base_url, database_url)
             finally:
                 server.terminate()
                 try:

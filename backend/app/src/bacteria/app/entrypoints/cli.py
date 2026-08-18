@@ -27,7 +27,7 @@ from bacteria.agent.session.store import (
     UnknownSessionError,
 )
 from bacteria.app.auth import keys
-from bacteria.app.auth.service import issue_key, revoke_key
+from bacteria.app.auth.service import issue_key, principal_is_known, revoke_key
 from bacteria.app.chat import review
 from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
@@ -140,6 +140,13 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
     queue = register_tasks()
     async with queue.open_async(), AsyncSession(get_engine()) as db:
         repository = SqlSessionRepository(db)
+
+        # Before either branch, so it guards resuming as well as creating: the
+        # principal reaches `run_turn` and the turn's span either way.
+        if not await principal_is_known(db, principal_id):
+            print(f"no principal {principal_id}: no key has ever been issued to it.")
+            print("check the spelling, or `bacteria-admin issue-key <principal>` first.")
+            return 1
 
         if session_id is None:
             session = await repository.create_session(principal_id)

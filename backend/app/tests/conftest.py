@@ -39,6 +39,7 @@ from bacteria.app import models as _root_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
 from bacteria.app.chat import models as _chat_models  # noqa: F401
 from bacteria.app.core import observability
+from bacteria.app.core import settings as settings_module
 from bacteria.app.core.settings import ENV_PREFIX, Settings, get_settings
 from bacteria.app.ingestion import models as _ingestion_models  # noqa: F401
 
@@ -104,14 +105,30 @@ def _ignore_ambient_configuration():
     """
     patch = pytest.MonkeyPatch()
 
-    # Two doors, and closing one is not enough -- which is what made this
-    # confusing to diagnose. `just` exports `.env` into the recipe's environment,
-    # and `Settings` *separately* reads the same file into its own fields,
-    # relative to the working directory. So a run from the repository root was
-    # configured twice over, and a run from `backend/app` -- where there is no
-    # `.env` -- was configured not at all, which is why the suite looked green
-    # from one directory and failed from another.
+    # Three doors, and closing two is not enough -- which is what made this
+    # confusing to diagnose, twice. `just` exports `.env` into the recipe's
+    # environment; `Settings` *separately* reads the same file into its own
+    # fields, relative to the working directory. So a run from the repository
+    # root was configured twice over, and a run from `backend/app` -- where there
+    # is no `.env` -- was configured not at all, which is why the suite looked
+    # green from one directory and failed from another.
     patch.setitem(Settings.model_config, "env_file", None)
+
+    # The third door, and it reopens the first two. `load_env_file` calls
+    # `load_dotenv` on its own, so it writes `.env` into `os.environ` at the
+    # moment an entrypoint runs -- which the ASGI lifespan does, and which the
+    # tests drive on purpose. Deleting a variable below is therefore not enough
+    # to keep it deleted: `test_no_worker_runs_in_the_api_by_default` did
+    # `delenv("BACTERIA_RUN_WORKER_IN_API")`, started the lifespan, and got the
+    # value straight back from the file -- so a test asserting the *safe default*
+    # asserted it against a machine where the developer had turned the worker on.
+    # It failed only for people who had configured the project, and passed in CI,
+    # where there is no `.env` at all.
+    #
+    # Pointed at a name that cannot exist rather than patching `load_env_file`
+    # out: the entrypoint really does call it, and the honest statement is that
+    # this run has no dotenv file, not that loading one does nothing.
+    patch.setattr(settings_module, "ENV_FILE", ".env.absent-under-test")
 
     for name in list(os.environ):
         if (

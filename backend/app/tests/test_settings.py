@@ -6,7 +6,25 @@ import os
 import pytest
 from pydantic import ValidationError
 
+from bacteria.app.core import settings as settings_module
 from bacteria.app.core.settings import Settings, load_env_file
+
+
+@pytest.fixture(name="dotenv_is_read")
+def _dotenv_is_read(monkeypatch):
+    """Restore the real dotenv name, for the two tests whose subject is reading one.
+
+    `conftest._ignore_ambient_configuration` points ``ENV_FILE`` at a name that
+    cannot exist, so that an entrypoint starting mid-suite cannot pull the
+    developer's own `.env` back into the environment a test just cleaned.
+
+    These tests are the deliberate exception: each writes its own `.env` into a
+    ``tmp_path`` it has already chdir'd into, so a *relative* name reads theirs
+    and can reach nothing else. Requested by name rather than granted quietly,
+    because "this test reads a dotenv file" is exactly the dependency the session
+    fixture exists to make visible.
+    """
+    monkeypatch.setattr(settings_module, "ENV_FILE", ".env")
 
 
 def test_settings_read_the_prefixed_environment(monkeypatch):
@@ -81,7 +99,9 @@ def test_a_typo_in_a_prefixed_variable_is_still_rejected(monkeypatch):
         Settings()
 
 
-def test_load_env_file_puts_unprefixed_keys_where_the_sdks_look(tmp_path, monkeypatch):
+def test_load_env_file_puts_unprefixed_keys_where_the_sdks_look(
+    tmp_path, monkeypatch, dotenv_is_read
+):
     """The gap between `Settings` reading `.env` and a provider SDK finding a key.
 
     The test above proves an unprefixed key in `.env` does not *break* this
@@ -104,7 +124,7 @@ def test_load_env_file_puts_unprefixed_keys_where_the_sdks_look(tmp_path, monkey
     assert os.environ["ANTHROPIC_API_KEY"] == "from-the-file"
 
 
-def test_the_real_environment_wins_over_the_file(tmp_path, monkeypatch):
+def test_the_real_environment_wins_over_the_file(tmp_path, monkeypatch, dotenv_is_read):
     """A container's configuration must not be overridden by a file in the image.
 
     Same rule `Settings` follows, and the reason it matters more here: this one

@@ -129,6 +129,7 @@ In the FastAPI Cloud dashboard:
 | `BACTERIA_WORKER_CONCURRENCY` | `4` | optional; competes with request handling on one loop |
 | `BACTERIA_LOGFIRE_TOKEN` | Logfire write token | **secret**; optional — absent means the process prints spans instead of exporting them |
 | `BACTERIA_LOGFIRE_ENVIRONMENT` | `production` | defaults to `local`, which is what makes one Logfire project serve both |
+| `BACTERIA_LOGFIRE_CONSOLE` | leave unset | spans are printed only when there is *no* token, so a deployment that exports does not also fill its log with one line per query. `true` gets both; `false` silences them with no exporter either |
 
 Use a **separate write token for this deployment from the one on a laptop**, against
 the same project. Same destination, and either can be revoked without disturbing

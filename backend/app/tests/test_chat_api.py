@@ -645,3 +645,24 @@ async def test_an_empty_session_is_not_reported_as_behind(client, token):
     progress = client.get(f"/chat/sessions/{session_id}/extraction", headers=auth(token)).json()
 
     assert progress == {"through_seq": -1, "latest_seq": -1, "behind": 0}
+
+
+async def test_a_transcript_entry_says_which_run_wrote_it_and_when(client, token):
+    """Without these a console has a list it cannot group or date.
+
+    One turn writes several items -- the user's message, the reply, the
+    `run_meta` -- and they are only recognisable as one turn by sharing a
+    `run_id`. This projection dropped both fields while the layer below carried
+    them, so the omission cost nothing to fix and everything to work around.
+    """
+    session_id = new_session(client, token)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    entries = client.get(f"/chat/sessions/{session_id}/transcript", headers=auth(token)).json()
+
+    assert entries, "the turn wrote nothing"
+    assert all(entry["timestamp"] for entry in entries)
+
+    runs = {entry["run_id"] for entry in entries}
+    assert len(runs) == 1, f"one turn produced items from several runs: {runs}"
+    assert None not in runs

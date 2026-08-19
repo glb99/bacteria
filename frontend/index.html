@@ -10,42 +10,78 @@
     <header class="bar">
       <span class="brand">bacteria</span>
       <span class="path">://console</span>
-      <span class="version">skeleton</span>
+      <span class="version">v0</span>
+
+      <div id="tabs" class="tabs">
+        <button type="button" data-tab="chat" class="on">chat</button>
+        <button type="button" data-tab="graph">graph</button>
+      </div>
+
       <span class="spacer"></span>
+      <span id="watermark" class="status"></span>
       <span id="who" class="who" hidden></span>
       <button id="sign-out" class="ghost" hidden>sign out</button>
     </header>
 
-    <main id="main">
-      <!-- Both panels ship in the markup and one is hidden, rather than being
-           built in script. Which one shows is decided by asking the API, not by
-           reading anything the page stored -- see src/main.ts. -->
-      <section id="sign-in" hidden>
-        <h1>sign in</h1>
-        <p class="note">
-          Paste a key from <code>bacteria-admin issue-key</code>. It is sent once and
-          exchanged for a session cookie this page cannot read.
-        </p>
-        <form id="sign-in-form">
-          <input
-            id="key"
-            type="password"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="fp_…"
-            required
-          />
-          <button type="submit">exchange</button>
-        </form>
-        <p id="sign-in-error" class="error" hidden></p>
+    <!-- Both states are in the markup and one is hidden. Which shows is decided
+         by asking the API, never by reading anything this page stored: the
+         session cookie is HttpOnly and there is nothing else honest to consult. -->
+    <section id="sign-in" hidden>
+      <h1>sign in</h1>
+      <p class="note">
+        Paste a key from <code>bacteria-admin issue-key</code>. It is sent once and exchanged
+        for a session cookie this page cannot read.
+      </p>
+      <form id="sign-in-form">
+        <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="fp_…" required />
+        <button type="submit">exchange</button>
+      </form>
+      <p id="sign-in-error" class="error" hidden></p>
+    </section>
+
+    <main id="workspace" hidden>
+      <section id="tab-chat" class="tab-panel">
+        <div class="conversation">
+          <div class="picker">
+            <label for="session-picker">session</label>
+            <select id="session-picker"></select>
+            <button id="new-session" type="button" class="ghost">new</button>
+          </div>
+
+          <div id="transcript" class="transcript"></div>
+
+          <p id="pending" class="pending" hidden></p>
+
+          <form id="composer" class="composer" hidden>
+            <textarea
+              id="message"
+              rows="2"
+              placeholder="message — enter sends, shift+enter breaks the line"
+              required
+            ></textarea>
+            <button id="send" type="submit">send</button>
+          </form>
+        </div>
+
+        <aside class="rail">
+          <h2>review queue <span id="queue-count" class="count">0</span></h2>
+          <p class="note">Nothing reaches a prompt until it is accepted.</p>
+          <ul id="queue"></ul>
+        </aside>
       </section>
 
-      <section id="sessions" hidden>
-        <h1>sessions</h1>
-        <p id="sessions-empty" class="note" hidden>
-          No conversations yet. <code>bacteria-admin chat &lt;principal&gt;</code> opens one.
-        </p>
-        <ul id="session-list"></ul>
+      <section id="tab-graph" class="tab-panel" hidden>
+        <div class="graph-controls">
+          <span class="label">layout</span>
+          <div id="graph-layout" class="segmented">
+            <button type="button" data-layout="cluster" class="on">cluster</button>
+            <button type="button" data-layout="scope">scope</button>
+          </div>
+          <div id="graph-legend" class="legend"></div>
+        </div>
+
+        <div id="graph" class="graph"></div>
+        <dl id="graph-verdict" class="verdict"></dl>
       </section>
     </main>
 

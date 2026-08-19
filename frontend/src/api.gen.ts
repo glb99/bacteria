@@ -605,7 +605,27 @@ export interface components {
             /** Source */
             source: string;
         };
-        /** TranscriptEntry */
+        /**
+         * TranscriptEntry
+         * @description One thing that happened in a conversation, as a reader sees it.
+         *
+         *     ``run_id`` and ``timestamp`` are carried because a reader needs them and the
+         *     layer below already had them. Without the first, the items belonging to one
+         *     turn -- the user message, the tool calls, the reply, the `run_meta` -- are an
+         *     undifferentiated list; without the second, nothing can say when. Both are on
+         *     :class:`~bacteria.agent.session.store.TranscriptItem` and were simply not
+         *     exposed, so this widens a projection rather than adding a record.
+         *
+         *     ``seq`` is deliberately absent, and its absence is not an oversight to fix
+         *     here. The database orders by it, but the agent's dataclass does not carry
+         *     it, so surfacing it would mean widening a type in a vendorable package to
+         *     serve one screen. The list arrives in order, which is what a reader actually
+         *     needs; the extraction route reports the real ``seq`` where it means
+         *     something.
+         *
+         *     ``run_id`` is optional because it genuinely is: items written outside a run
+         *     have none.
+         */
         TranscriptEntry: {
             /** Kind */
             kind: string;
@@ -613,6 +633,13 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+            /** Run Id */
+            run_id: string | null;
+            /**
+             * Timestamp
+             * Format: date-time
+             */
+            timestamp: string;
         };
         /** Turn */
         Turn: {

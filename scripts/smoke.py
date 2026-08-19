@@ -127,6 +127,34 @@ def wait_for_health(base_url: str, process: subprocess.Popen | None) -> None:
     )
 
 
+def admin(*args: str) -> subprocess.CompletedProcess:
+    """Run `bacteria-admin` and, on failure, say what it actually said.
+
+    **`check=True` was worse than useless here.** It raises a
+    ``CalledProcessError`` whose message is the argv and an exit code, while the
+    child's stdout and stderr sit captured on the exception where nothing prints
+    them. So a smoke run against a deployment reported "returned non-zero exit
+    status 1" and a traceback through `subprocess`, about a command whose own
+    error message explained the problem in one line and was thrown away.
+
+    That is the failure this whole script exists to avoid making: a gate that
+    fails without saying why sends someone to read the gate instead of the
+    system.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "bacteria.app.entrypoints.cli", *args],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SmokeFailure(
+            f"bacteria-admin {' '.join(args)} exited {result.returncode}"
+            f"\n    stdout: {result.stdout.strip() or '(empty)'}"
+            f"\n    stderr: {result.stderr.strip() or '(empty)'}"
+        )
+    return result
+
+
 def issue_key(principal: str) -> str:
     """Mint a credential the way an operator does, and parse it off stdout.
 
@@ -134,20 +162,7 @@ def issue_key(principal: str) -> str:
     produces a token the HTTP layer accepts -- those are different code paths and
     the hashing between them is exactly where they could disagree.
     """
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "bacteria.app.entrypoints.cli",
-            "issue-key",
-            principal,
-            "--label",
-            "smoke",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = admin("issue-key", principal, "--label", "smoke")
     for token in result.stdout.split():
         if token.startswith("fp_"):
             return token
@@ -164,12 +179,7 @@ def revoke_key(token: str) -> None:
     key_id = keys.split(token)
     if key_id is None:
         raise SmokeFailure(f"could not split a key id out of {token[:12]}...")
-    subprocess.run(
-        [sys.executable, "-m", "bacteria.app.entrypoints.cli", "revoke-key", key_id[0]],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    admin("revoke-key", key_id[0])
 
 
 def check_auth(base_url: str, key: str) -> None:

@@ -19,19 +19,30 @@ added — and the drift shows up as a runtime `undefined` rather than as a build
 failure. Whatever generates it belongs in a pre-commit hook, so that a backend
 change and its client change land in the same commit.
 
-**A decision about where the build output goes.** Two shapes, and they are not
-interchangeable:
+**Where the build output goes — decided: served by the API.** The alternative
+was a static host or CDN in front of its own build, which keeps the two
+deployable independently and costs CORS configuration plus a decision about
+where the API URL comes from at build time. It is ruled out by the cookie:
+[ADR 0005](../docs/adr/0005-a-browser-holds-a-session-not-a-key.md) makes
+`SameSite=Strict` the CSRF answer, and that holds only while the console and the
+API share an origin. So the mount and the auth decision are one decision.
 
-- *Served by the API* — the build lands in a directory the ASGI app mounts. One
-  origin, no CORS, one thing to deploy. Costs a coupling: the backend image then
-  cannot be built without the frontend toolchain.
-- *Served separately* — a static host or CDN in front of its own build. Keeps
-  the two deployable independently, and requires CORS configuration and a
-  decision about where the API URL comes from at build time.
+The build lands in **`backend/app/src/bacteria/app/console/`**, inside the
+package rather than beside the repository, and `create_app` serves it at `/` when
+an `index.html` is there. Package data because the alternatives resolve
+differently in development and production: a setting cannot be read at that
+point at all — `views.py` explains why — and a path relative to the working
+directory means one thing for `just serve` at the repository root and another
+for a container started elsewhere.
 
-Nothing in the backend currently assumes either. `create_app` in
-[`bacteria/app/views.py`](../backend/app/src/bacteria/app/views.py) mounts
-routers and a health check and nothing else.
+Verified rather than assumed: a wheel built with a file in that directory
+contains `bacteria/app/console/index.html`, so `uv_build`'s defaults ship it with
+no extra configuration.
+
+The coupling this accepts is the one that shape always had — the backend
+distribution now has a directory only the frontend toolchain fills. An unbuilt
+checkout is the ordinary case and not an error: nothing is mounted, the API
+serves normally, and `/` is a 404.
 
 **An answer for the credential — settled, and it decides the question above.**
 This used to read "a browser client cannot hold an API key safely, so this is a

@@ -11,7 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.auth import keys
 from bacteria.app.auth.models import ApiKey
-from bacteria.app.auth.service import issue_key, principal_is_known, revoke_key
+from bacteria.app.auth.service import issue_key, list_keys, principal_is_known, revoke_key
 
 
 @pytest.fixture(name="db")
@@ -166,3 +166,69 @@ async def test_a_principal_whose_only_key_was_revoked_is_still_known(db):
     await revoke_key(db, key_id=key_id)
 
     assert await principal_is_known(db, "alice") is True
+
+
+async def test_a_revoked_key_is_still_listed(db):
+    """A listing that hid revoked keys would answer the operator's question wrongly.
+
+    "There is no key" and "the key you had was revoked" are different answers to
+    "why did this stop working", and only one of them is fixed by issuing a new
+    one. Hiding the row would also contradict `principal_is_known`, which counts
+    a revoked key as proof the principal is real — so the two would disagree
+    about whether a principal exists.
+    """
+    token = await issue_key(db, principal_id="alice", label="demo")
+    key_id, _secret = keys.split(token)
+    await revoke_key(db, key_id=key_id)
+
+    listed = await list_keys(db)
+
+    assert [row.key_id for row in listed] == [key_id]
+    assert listed[0].is_active is False
+
+
+async def test_one_principals_keys_are_listed_together(db):
+    """Grouping by principal is what makes rotation legible.
+
+    Sorted by issue date alone, a principal holding three keys has them
+    scattered among everyone else's — and a principal holding several is exactly
+    the case worth looking at, because it is either mid-rotation or has keys
+    nobody has revoked.
+    """
+    await issue_key(db, principal_id="bob", label="first")
+    await issue_key(db, principal_id="alice", label="first")
+    await issue_key(db, principal_id="bob", label="second")
+
+    listed = await list_keys(db)
+
+    assert [row.principal_id for row in listed] == ["alice", "bob", "bob"]
+    assert [row.label for row in listed] == ["first", "first", "second"]
+
+
+async def test_the_listing_can_be_narrowed_to_one_principal(db):
+    """Without a filter the answer is unreadable on any database that has run smoke.
+
+    `just smoke` issues four keys per run and revokes one, so a working
+    repository accumulates dozens of `smoke-*` rows — thirty-one on the machine
+    this was written on, of which three were a person's. An operator looking for
+    their own key should not have to read past them.
+    """
+    await issue_key(db, principal_id="alice", label="demo")
+    await issue_key(db, principal_id="bob", label="demo")
+
+    listed = await list_keys(db, "alice")
+
+    assert [row.principal_id for row in listed] == ["alice"]
+
+
+async def test_listing_an_unknown_principal_is_empty_rather_than_an_error(db):
+    """Asking about a principal that does not exist is the normal case here.
+
+    This command exists because someone mistyped a principal, so being asked
+    about one that was never issued a key is the reason it was written rather
+    than a misuse of it. Raising would make the CLI report a traceback for the
+    question it is there to answer.
+    """
+    await issue_key(db, principal_id="alice", label="demo")
+
+    assert await list_keys(db, "alicce") == []

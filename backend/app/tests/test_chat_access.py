@@ -6,6 +6,8 @@ guess. Each asserts a refusal, because a passing "allowed" test says nothing
 about whether anything is denied.
 """
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -53,30 +55,51 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def test_an_unauthenticated_request_is_refused(client):
-    """No credential means no access, on every route.
+UNAUTHENTICATED_BY_DESIGN = frozenset({"/health"})
+"""The only path that answers without a credential, and why it may.
 
-    Checked across all of them rather than one, because the failure mode is a
-    route added later without the dependency — and nothing else would notice.
+Liveness, deliberately touching nothing. Anything added to this set is a
+decision to expose it to the internet unauthenticated, which is why it is a
+named constant rather than a skipped path inside the loop below.
+"""
+
+
+async def test_every_route_refuses_an_unauthenticated_request(client):
+    """No credential means no access, on every route — enumerated, not listed.
+
+    **The failure mode is a route added later without the dependency**, and a
+    hand-written list cannot catch that: it only ever asserts about routes
+    somebody remembered. This test used to be such a list, and it had already
+    drifted — it covered seven of the eleven routes, missing
+    `/ingestion/batches:defer` and all three memory-proposal routes. Those did
+    carry `CurrentPrincipal`, so nothing was open; the point is that nothing here
+    would have said so either way.
+
+    Enumerated from the OpenAPI schema rather than from `app.routes`, because
+    included routers are nested rather than flattened there — walking the
+    attribute finds four documentation endpoints and `/health`, and reports
+    success having tested none of the application.
     """
-    assert client.post("/chat/sessions").status_code == 401
-    assert client.get("/chat/sessions/anything/transcript").status_code == 401
-    assert client.post("/chat/sessions/anything/turns", json={"text": "hi"}).status_code == 401
-    assert client.get("/chat/sessions/anything/memory").status_code == 401
-    assert (
-        client.put(
-            "/chat/sessions/anything/memory/k", json={"value": "v", "reason": "r"}
-        ).status_code
-        == 401
-    )
-    assert client.delete("/chat/sessions/anything/memory/k").status_code == 401
-    assert (
-        client.post(
-            "/ingestion/batches",
-            json={"source": "s", "records": [{"external_id": "1", "name": "n"}]},
-        ).status_code
-        == 401
-    )
+    schema = client.app.openapi()
+    checked = []
+
+    for path, operations in schema["paths"].items():
+        if path in UNAUTHENTICATED_BY_DESIGN:
+            continue
+        # A path parameter's value is irrelevant: authentication is refused
+        # before anything looks at it, which is the property being asserted.
+        concrete = re.sub(r"\{[^}]+\}", "placeholder", path)
+        for method in operations:
+            response = client.request(method.upper(), concrete, json={})
+            assert response.status_code == 401, (
+                f"{method.upper()} {path} answered {response.status_code} "
+                f"without a credential, not 401"
+            )
+            checked.append(f"{method.upper()} {path}")
+
+    # The loop asserts nothing if the schema is empty, and an empty schema is
+    # exactly what a broken enumeration produces.
+    assert len(checked) >= 10, f"only {len(checked)} routes were reached: {checked}"
 
 
 async def test_one_principal_cannot_read_or_write_anothers_memory(client, issue):

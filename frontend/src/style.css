@@ -1,14 +1,16 @@
-/* The Console direction, minimally: dark, dense, monospace, continuous with the
-   CLI this replaces nothing of yet. Enough to look deliberate; not the design
-   system, which arrives with Console v0's tabs. */
+/* The Console direction: dark, dense, monospace, continuous with the CLI.
+   Layout is grid and flex with no fixed pixel widths, so the same page works on
+   a laptop beside a terminal and on a full screen. */
 
 :root {
   --bg: oklch(0.17 0.008 250);
   --panel: oklch(0.21 0.01 250);
+  --raised: oklch(0.25 0.012 250);
   --line: oklch(0.3 0.014 250);
   --text: oklch(0.9 0.01 250);
   --muted: oklch(0.66 0.014 250);
   --accent: oklch(0.84 0.19 128);
+  --user: oklch(0.78 0.13 230);
   --danger: oklch(0.72 0.18 25);
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Fira Code", Consolas, monospace;
 }
@@ -19,18 +21,24 @@
 
 body {
   margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 var(--mono);
+  font: 13px/1.55 var(--mono);
 }
+
+/* ---------- top bar ---------- */
 
 .bar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1rem;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+  flex: none;
 }
 
 .brand {
@@ -40,7 +48,8 @@ body {
 
 .path,
 .version,
-.who {
+.who,
+.status {
   color: var(--muted);
 }
 
@@ -48,6 +57,10 @@ body {
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 0 0.35rem;
+  font-size: 11px;
+}
+
+.status {
   font-size: 12px;
 }
 
@@ -55,51 +68,33 @@ body {
   flex: 1;
 }
 
-main {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-}
-
-h1 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.note {
-  color: var(--muted);
-  max-width: 46rem;
-}
-
-form {
+.tabs,
+.segmented {
   display: flex;
-  gap: 0.5rem;
-  margin: 1rem 0 0;
-}
-
-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.5rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
+  overflow: hidden;
 }
 
-input:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.tabs button,
+.segmented button {
+  border: 0;
+  border-radius: 0;
+  padding: 0.25rem 0.7rem;
+  background: transparent;
+  color: var(--muted);
 }
+
+.tabs button.on,
+.segmented button.on {
+  background: var(--raised);
+  color: var(--accent);
+}
+
+/* ---------- shared controls ---------- */
 
 button {
-  padding: 0.5rem 0.9rem;
+  padding: 0.4rem 0.8rem;
   border: 1px solid var(--accent);
   border-radius: 3px;
   background: transparent;
@@ -108,8 +103,13 @@ button {
   cursor: pointer;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   background: color-mix(in oklch, var(--accent) 14%, transparent);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 button.ghost {
@@ -117,36 +117,414 @@ button.ghost {
   color: var(--muted);
 }
 
+input,
+select,
+textarea {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  resize: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.note {
+  color: var(--muted);
+  margin: 0.25rem 0;
+}
+
 .error {
   color: var(--danger);
 }
 
-ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-}
-
-li {
-  display: flex;
-  gap: 1rem;
-  align-items: baseline;
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-}
-
-li:last-child {
-  border-bottom: 0;
-}
-
-li code {
+code {
   color: var(--accent);
 }
 
-.when {
+/* ---------- sign in ---------- */
+
+#sign-in {
+  max-width: 46rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+#sign-in-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+#sign-in-form input {
+  flex: 1;
+}
+
+/* ---------- workspace ---------- */
+
+#workspace {
+  flex: 1;
+  min-height: 0;
+}
+
+.tab-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+#tab-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+}
+
+.conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.picker label {
+  color: var(--muted);
+}
+
+.picker select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- transcript ---------- */
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.entry {
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 3px;
+  padding: 0.5rem 0.7rem;
+  background: var(--panel);
+}
+
+.entry header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  margin-bottom: 0.3rem;
+}
+
+.entry .who {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.entry .meta {
   margin-left: auto;
   color: var(--muted);
+  font-size: 11px;
+}
+
+.entry p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.entry.user {
+  border-left-color: var(--user);
+}
+
+.entry.assistant {
+  border-left-color: var(--accent);
+}
+
+.entry.run_error {
+  border-left-color: var(--danger);
+}
+
+.entry.run_meta,
+.entry.tool_call {
+  border-left-color: var(--line);
+  background: transparent;
+}
+
+.entry pre {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--muted);
   font-size: 12px;
+}
+
+.run-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.1rem 0.75rem;
+  margin: 0;
+  font-size: 12px;
+}
+
+.run-meta dt {
+  color: var(--muted);
+}
+
+.run-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- composer ---------- */
+
+.pending {
+  padding: 0 0.9rem 0.4rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.composer {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  padding: 0.7rem 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- review rail ---------- */
+
+.rail {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.9rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.rail h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.count {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.rail ul {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.proposal {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.55rem 0.65rem;
+  background: var(--bg);
+}
+
+.proposal header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.proposal .source {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.proposal .value {
+  margin: 0.3rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.actions button {
+  padding: 0.2rem 0.5rem;
+  font-size: 12px;
+}
+
+/* ---------- graph ---------- */
+
+#tab-graph {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.graph-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.graph-controls .label {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.legend {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.graph {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  padding: 0.9rem;
+}
+
+.cluster {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  padding: 0.6rem 0.7rem;
+}
+
+.cluster h3 {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+
+.derivation {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cluster ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.node {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+}
+
+.node .value {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.node .tag {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+}
+
+/* Proposed nodes are dashed. They are the part of the graph that does not
+   exist yet -- nothing reaches a prompt until a person accepts it -- and a
+   solid border would draw them as facts. */
+.node.proposed {
+  border-style: dashed;
+  opacity: 0.85;
+}
+
+.verdict {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 0.2rem 1rem;
+  margin: 0 0.9rem 1.5rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  max-width: 44rem;
+}
+
+.verdict h3,
+.verdict .note {
+  grid-column: 1 / -1;
+}
+
+.verdict dt {
+  color: var(--muted);
+}
+
+.verdict dd {
+  margin: 0;
+  color: var(--accent);
+  text-align: right;
+}
+
+@media (max-width: 60rem) {
+  #tab-chat {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .rail {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
 }

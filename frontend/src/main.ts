@@ -1,132 +1,126 @@
 /**
- * The smallest page that exercises every link in the chain.
+ * The shell: signing in, and which tab is showing.
  *
- * Not Console v0 — it has one screen and no tabs. What it proves is that the
- * static mount, the session cookie, the same-origin assumption `SameSite=Strict`
- * rests on, and the generated client all work together against a real server.
- * Each of those was verified separately; none of them had been used at once.
+ * Everything about a conversation lives in `chat.ts` and everything about the
+ * graph in `graph.ts`. This file owns the two things neither of them can: whether
+ * there is a session at all, and which tab the two are competing for.
  */
 
-import createClient from "openapi-fetch";
-import type { paths } from "./api.gen";
-
-/**
- * No `baseUrl`, and that is the same-origin requirement showing up in code.
- *
- * ADR 0005 makes `SameSite=Strict` the CSRF answer, which holds only while this
- * page and the API share an origin. A base URL pointing elsewhere would compile,
- * run, and silently stop sending the cookie — so the absence of one is load
- * bearing rather than a default nobody changed.
- */
-const api = createClient<paths>();
-
-const el = <T extends HTMLElement>(id: string): T => {
-  const found = document.getElementById(id);
-  if (!found) throw new Error(`missing element: ${id}`);
-  return found as T;
-};
+import { closeSession, openSession, Unauthenticated } from "./api";
+import * as chat from "./chat";
+import { el } from "./dom";
+import * as graph from "./graph";
 
 const signIn = el("sign-in");
 const signInForm = el<HTMLFormElement>("sign-in-form");
 const signInError = el("sign-in-error");
 const keyInput = el<HTMLInputElement>("key");
-const sessions = el("sessions");
-const sessionList = el<HTMLUListElement>("session-list");
-const sessionsEmpty = el("sessions-empty");
+const workspace = el("workspace");
 const who = el("who");
 const signOut = el<HTMLButtonElement>("sign-out");
+const tabs = el<HTMLDivElement>("tabs");
+const panels = {
+  chat: el("tab-chat"),
+  graph: el("tab-graph"),
+};
+
+type Tab = keyof typeof panels;
+let tab: Tab = "chat";
 
 const show = (element: HTMLElement, visible: boolean) => {
   element.hidden = !visible;
 };
 
-const when = (iso: string): string =>
-  new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+function showSignIn(message?: string): void {
+  show(signIn, true);
+  show(workspace, false);
+  show(signOut, false);
+  show(who, false);
+  if (message) {
+    signInError.textContent = message;
+    show(signInError, true);
+  }
+  keyInput.focus();
+}
 
 /**
- * Render the session list, or the sign-in panel if the server refuses.
+ * Reload the visible tab, sending the user back to sign-in if the session went.
  *
- * **The server decides whether we are signed in, not this page.** There is
- * nothing in `localStorage` to consult and nothing in a variable to trust: the
- * cookie is `HttpOnly`, so a 401 from a real request is the only honest way to
- * know. That also means a session expiring mid-visit shows the sign-in panel on
- * the next call rather than a screen of empty data.
+ * **Every call goes through here**, so an expired session cannot show up as an
+ * empty screen in one tab and a working one in the other. Sessions last twelve
+ * hours and a console is exactly the thing left open for longer than that.
  */
-async function render(): Promise<void> {
-  const { data, error, response } = await api.GET("/chat/sessions");
-
-  if (response.status === 401) {
-    show(signIn, true);
-    show(sessions, false);
-    show(who, false);
-    show(signOut, false);
-    keyInput.focus();
-    return;
+async function refresh(): Promise<void> {
+  try {
+    if (tab === "chat") {
+      await chat.refresh();
+    } else {
+      graph.setSession(chat.currentSession());
+      await graph.refresh(chat.currentSession());
+    }
+    show(workspace, true);
+    show(signIn, false);
+    show(signOut, true);
+  } catch (error) {
+    if (error instanceof Unauthenticated) {
+      showSignIn("that session has ended — sign in again");
+      return;
+    }
+    throw error;
   }
-
-  if (error || !data) {
-    signInError.textContent = `the API answered ${response.status}`;
-    show(signInError, true);
-    show(signIn, true);
-    return;
-  }
-
-  show(signIn, false);
-  show(sessions, true);
-  show(signOut, true);
-
-  sessionList.replaceChildren(
-    ...data.map((session) => {
-      const item = document.createElement("li");
-
-      const id = document.createElement("code");
-      id.textContent = session.session_id;
-
-      const activity = document.createElement("span");
-      activity.className = "when";
-      activity.textContent = `active ${when(session.last_activity_at)}`;
-
-      item.append(id, activity);
-      return item;
-    }),
-  );
-  show(sessionsEmpty, data.length === 0);
 }
+
+tabs.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement) || !target.dataset["tab"]) return;
+
+  tab = target.dataset["tab"] as Tab;
+  for (const button of tabs.querySelectorAll("button")) {
+    button.classList.toggle("on", button === target);
+  }
+  for (const [name, panel] of Object.entries(panels)) {
+    show(panel, name === tab);
+  }
+  await refresh();
+});
 
 signInForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   show(signInError, false);
 
-  const { data, response } = await api.POST("/auth/session", {
-    body: { key: keyInput.value },
-  });
-
-  // Cleared whether or not it worked. The value is a live credential and it has
-  // done its whole job by now -- the cookie is what every later request uses.
-  keyInput.value = "";
-
-  if (!data) {
-    // The same message for every failure, matching what the server does: it
-    // answers one 401 for a malformed key, an unknown one, a wrong secret and a
-    // revoked one, and a page that guessed between them would undo that.
-    signInError.textContent =
-      response.status === 401 ? "that key was not accepted" : `the API answered ${response.status}`;
-    show(signInError, true);
-    keyInput.focus();
+  try {
+    const opened = await openSession(keyInput.value);
+    who.textContent = `as ${opened.principal_id}`;
+    show(who, true);
+  } catch (error) {
+    // One message for every failure, matching the server, which answers a single
+    // 401 for a malformed key, an unknown one, a wrong secret and a revoked one.
+    // A page that guessed between them would undo that deliberately.
+    showSignIn(
+      error instanceof Unauthenticated ? "that key was not accepted" : String(error),
+    );
     return;
+  } finally {
+    // Cleared whether or not it worked: the value is a live credential and the
+    // cookie is what every later request uses.
+    keyInput.value = "";
   }
 
-  who.textContent = `as ${data.principal_id}`;
-  show(who, true);
-  await render();
+  await refresh();
 });
 
 signOut.addEventListener("click", async () => {
-  await api.DELETE("/auth/session");
-  // Re-asked rather than assumed. Logout is idempotent and answers 204 even when
-  // nothing was ended, so the only way to know what the browser now holds is to
-  // make a request and see.
-  await render();
+  await closeSession();
+  // Asked again rather than assumed. Logout answers 204 even when nothing was
+  // ended, so the only honest way to know what the browser now holds is to make
+  // a request with it.
+  await refresh().catch(() => showSignIn());
 });
 
-await render();
+// Whether we are signed in is decided by asking. The cookie is HttpOnly, so
+// there is nothing on this page to consult and nothing worth trusting if there
+// were.
+await refresh().catch((error) => {
+  if (error instanceof Unauthenticated) showSignIn();
+  else throw error;
+});

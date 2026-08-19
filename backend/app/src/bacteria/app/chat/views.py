@@ -69,8 +69,30 @@ class TurnResult(BaseModel):
 
 
 class TranscriptEntry(BaseModel):
+    """One thing that happened in a conversation, as a reader sees it.
+
+    ``run_id`` and ``timestamp`` are carried because a reader needs them and the
+    layer below already had them. Without the first, the items belonging to one
+    turn -- the user message, the tool calls, the reply, the `run_meta` -- are an
+    undifferentiated list; without the second, nothing can say when. Both are on
+    :class:`~bacteria.agent.session.store.TranscriptItem` and were simply not
+    exposed, so this widens a projection rather than adding a record.
+
+    ``seq`` is deliberately absent, and its absence is not an oversight to fix
+    here. The database orders by it, but the agent's dataclass does not carry
+    it, so surfacing it would mean widening a type in a vendorable package to
+    serve one screen. The list arrives in order, which is what a reader actually
+    needs; the extraction route reports the real ``seq`` where it means
+    something.
+
+    ``run_id`` is optional because it genuinely is: items written outside a run
+    have none.
+    """
+
     kind: str
     payload: dict
+    run_id: str | None
+    timestamp: datetime
 
 
 class MemoryWrite(BaseModel):
@@ -200,7 +222,15 @@ async def read_transcript(
     session_id: str, principal: CurrentPrincipal, db: DbSession
 ) -> list[TranscriptEntry]:
     state = await load_owned_session(SqlSessionRepository(db), principal, session_id)
-    return [TranscriptEntry(kind=i.kind, payload=i.payload) for i in state.transcript]
+    return [
+        TranscriptEntry(
+            kind=item.kind,
+            payload=item.payload,
+            run_id=item.run_id,
+            timestamp=item.timestamp,
+        )
+        for item in state.transcript
+    ]
 
 
 @router.get("/sessions/{session_id}/extraction", response_model=ExtractionProgressOut)

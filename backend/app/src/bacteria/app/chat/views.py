@@ -4,6 +4,13 @@ Every route requires an authenticated caller and touches only that caller's
 sessions. The two are separate steps on purpose: ``CurrentPrincipal``
 establishes who, :func:`~bacteria.app.chat.access.load_owned_session` establishes
 whether.
+
+**One route does not use the second step, and cannot.** ``GET /sessions`` has no
+session id to establish anything about; ownership there is a filter rather than
+a check. The difference matters because the two fail in opposite directions — a
+broken check refuses a legitimate caller, a broken filter hands over everyone
+else's conversations — so that route asserts its refusal in
+`test_chat_access.py` rather than trusting the shape.
 """
 
 from datetime import datetime
@@ -25,6 +32,31 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 class SessionCreated(BaseModel):
     session_id: str
     user_id: str
+
+
+class SessionSummaryOut(BaseModel):
+    """One line in a session picker.
+
+    No ``user_id``: every session in the response belongs to the caller, so a
+    per-row owner would be a constant field that reads like it could vary.
+    """
+
+    session_id: str
+    created_at: datetime
+    last_activity_at: datetime
+
+
+class ExtractionProgressOut(BaseModel):
+    """How far memory extraction has read this conversation.
+
+    ``behind`` is served rather than left as arithmetic for the client: both
+    positions start at ``-1``, so subtracting them on a fresh session is right
+    only by accident.
+    """
+
+    through_seq: int
+    latest_seq: int
+    behind: int
 
 
 class Turn(BaseModel):
@@ -86,6 +118,32 @@ class ProposalOut(BaseModel):
     created_at: datetime
 
 
+@router.get("/sessions", response_model=list[SessionSummaryOut])
+async def list_sessions(principal: CurrentPrincipal, db: DbSession) -> list[SessionSummaryOut]:
+    """Every conversation the caller owns, most recently active first.
+
+    **The principal is the filter, and the client cannot influence it.** There
+    is no ``user_id`` parameter and there must not be one: this route returns a
+    set rather than a named resource, so there is nothing for
+    :func:`load_owned_session` to check afterwards, and a query parameter here
+    would be the same mistake ``create_session`` records — accepting an owner
+    from the caller and then serving it entirely legitimately.
+
+    Returns everything, unpaginated, matching the repository's own note about
+    transcripts: it is bounded by how many conversations one principal has
+    opened, which is a number nobody has yet made large.
+    """
+    summaries = await SqlSessionRepository(db).list_sessions(principal.id)
+    return [
+        SessionSummaryOut(
+            session_id=summary.session_id,
+            created_at=summary.created_at,
+            last_activity_at=summary.last_activity_at,
+        )
+        for summary in summaries
+    ]
+
+
 @router.post("/sessions", response_model=SessionCreated, status_code=201)
 async def create_session(principal: CurrentPrincipal, db: DbSession) -> SessionCreated:
     """Open a session owned by the caller.
@@ -143,6 +201,32 @@ async def read_transcript(
 ) -> list[TranscriptEntry]:
     state = await load_owned_session(SqlSessionRepository(db), principal, session_id)
     return [TranscriptEntry(kind=i.kind, payload=i.payload) for i in state.transcript]
+
+
+@router.get("/sessions/{session_id}/extraction", response_model=ExtractionProgressOut)
+async def read_extraction_progress(
+    session_id: str, principal: CurrentPrincipal, db: DbSession
+) -> ExtractionProgressOut:
+    """Whether the memory extractor has kept up with this conversation.
+
+    The question that was only answerable by opening psql, and it was asked in
+    anger: a deployment ran for an afternoon with no worker, and the symptom was
+    proposals never appearing while everything else looked healthy. A watermark
+    that has stopped moving while ``latest_seq`` climbs is that failure, visible.
+
+    Answers for a session with extraction switched off too, and truthfully —
+    ``behind`` grows, because the transcript is genuinely unread. This route
+    reports the queue's state, not the configuration's intent.
+    """
+    repository = SqlSessionRepository(db)
+    await load_owned_session(repository, principal, session_id)
+
+    progress = await repository.extraction_progress(session_id)
+    return ExtractionProgressOut(
+        through_seq=progress.through_seq,
+        latest_seq=progress.latest_seq,
+        behind=progress.behind,
+    )
 
 
 @router.get("/sessions/{session_id}/memory", response_model=list[MemoryEntryOut])

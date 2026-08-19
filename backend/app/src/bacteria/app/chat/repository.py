@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
 from sqlalchemy import func
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.session.store import (
@@ -54,11 +54,55 @@ from bacteria.agent.session.store import (
 )
 from bacteria.app.chat.models import (
     ChatMemoryEntry,
+    ChatMemoryExtraction,
     ChatMemoryProposal,
     ChatSession,
     ChatTranscriptItem,
     ChatUserMemoryEntry,
 )
+
+
+@dataclass(frozen=True)
+class SessionSummary:
+    """One line in a session picker: enough to choose, and nothing more.
+
+    Deliberately not a :class:`~bacteria.agent.session.store.Session`. That type
+    is the agent's and carries ``user_id``, which every row here already shares —
+    a listing is by definition all one principal's, so repeating the owner on
+    each line would be noise that also reads like it could vary.
+
+    ``last_activity_at`` falls back to ``created_at`` for a session nobody has
+    spoken in. ``None`` would be more literal and would force every caller to
+    handle a sort key that is sometimes absent, to distinguish a case that looks
+    identical on screen.
+    """
+
+    session_id: str
+    created_at: datetime
+    last_activity_at: datetime
+
+
+@dataclass(frozen=True)
+class ExtractionProgress:
+    """Whether memory extraction has kept up with a conversation.
+
+    Answerable before this existed only by reading ``chat_memory_extraction`` by
+    hand, which is how it was answered during the deployment where no worker was
+    running: the symptom was proposals never appearing, and the evidence was a
+    watermark that had stopped moving while the transcript grew.
+
+    Attributes:
+        through_seq: Highest transcript position already examined. ``-1`` when
+            extraction has never run, matching the column's own initial value.
+        latest_seq: Highest position in the transcript. ``-1`` when empty.
+        behind: How many positions are unexamined. Zero means caught up; it is
+            zero for an empty session too, which is correct rather than a
+            special case — nothing is waiting to be read.
+    """
+
+    through_seq: int
+    latest_seq: int
+    behind: int
 
 
 @dataclass(frozen=True)
@@ -130,6 +174,89 @@ class SqlSessionRepository:
             session_id=row.session_id,
             user_id=row.user_id,
             created_at=_as_utc(row.created_at),
+        )
+
+    async def list_sessions(self, user_id: str) -> list["SessionSummary"]:
+        """Every session this principal owns, most recently active first.
+
+        **The one session route with no session id to check**, which makes it
+        the one place `chat/access.py` cannot help. Ownership here is the
+        ``WHERE`` clause rather than a comparison after loading, so a bug is a
+        missing filter and not a missing check — and a missing filter returns
+        other people's conversations rather than failing closed. That asymmetry
+        is why this method takes ``user_id`` and not a session id, and why the
+        route hands it :attr:`Principal.id` and nothing the client sent.
+
+        Sorted by last activity, not by creation. A picker ordered by creation
+        puts a conversation someone abandoned in January above the one they were
+        in five minutes ago.
+
+        Returns:
+            Summaries, not states. Loading each session's transcript to build a
+            list would read the whole history of every conversation to render
+            one line each — the cost this class's "Not built: Pagination" note
+            is about, paid on the cheapest screen in the product.
+        """
+        # `timestamp`, which is what a transcript item calls the moment it
+        # happened -- there is no `created_at` on that table, and reaching for
+        # the name every other table uses is how this was first written.
+        last_activity = func.coalesce(
+            func.max(ChatTranscriptItem.timestamp), ChatSession.created_at
+        )
+        rows = (
+            await self._db.exec(
+                select(ChatSession.session_id, ChatSession.created_at, last_activity)
+                .outerjoin(
+                    ChatTranscriptItem,
+                    col(ChatTranscriptItem.session_id) == col(ChatSession.session_id),
+                )
+                .where(ChatSession.user_id == user_id)
+                .group_by(col(ChatSession.session_id), col(ChatSession.created_at))
+                .order_by(last_activity.desc())
+            )
+        ).all()
+
+        # Unpacked positionally rather than by attribute: a `select` of columns
+        # yields plain tuples, and naming them with `.label()` satisfies neither
+        # the type checker nor a reader looking for where the names came from.
+        return [
+            SessionSummary(
+                session_id=session_id,
+                created_at=_as_utc(created_at),
+                last_activity_at=_as_utc(last_activity_at),
+            )
+            for session_id, created_at, last_activity_at in rows
+        ]
+
+    async def extraction_progress(self, session_id: str) -> "ExtractionProgress":
+        """How far memory extraction has read this session, and how far behind.
+
+        ``behind`` is computed here rather than left to the caller because the
+        subtraction has a trap in it: both values start at ``-1``, not ``0``, so
+        a client doing the arithmetic on a fresh session gets the right answer
+        only by accident and a client special-casing zero gets it wrong.
+
+        The ceiling query is the same one ``chat.extraction._max_seq`` runs, and
+        the duplication is deliberate. That one executes inside the extractor's
+        own transaction, where *when* it is read is part of the concurrency
+        argument that module makes at length; this one is a detached read for a
+        reader. Sharing them would tie a reporting route to a locking decision.
+        """
+        watermark = await self._db.get(ChatMemoryExtraction, session_id)
+        through_seq = watermark.through_seq if watermark is not None else -1
+
+        latest_seq = (
+            await self._db.exec(
+                select(func.coalesce(func.max(ChatTranscriptItem.seq), -1)).where(
+                    ChatTranscriptItem.session_id == session_id
+                )
+            )
+        ).one()
+
+        return ExtractionProgress(
+            through_seq=through_seq,
+            latest_seq=latest_seq,
+            behind=latest_seq - through_seq,
         )
 
     async def get_state(self, session_id: str) -> SessionState:

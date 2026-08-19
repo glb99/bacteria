@@ -122,10 +122,12 @@ a page cannot hold a key safely —
 | `GET` | `/health` | Liveness. Does not touch the database, so a database outage cannot cause a restart loop. |
 | `POST` | `/auth/session` | `{"key": "..."}` → a session cookie. The only other route that answers without a credential, because it is the one that establishes one. |
 | `DELETE` | `/auth/session` | Ends the session server-side and clears the cookie. `204` whether or not there was one. |
+| `GET` | `/chat/sessions` | The caller's conversations, most recently active first. The only session route whose ownership is a filter rather than a check, so it takes no `user_id` and never will. |
 | `POST` | `/chat/sessions` | Open a conversation. Takes no body — the owner is the authenticated caller and cannot be named by the client. |
 | `POST` | `/chat/sessions/{id}/turns` | `{"text": "..."}` → `{"run_id", "reply"}`. Runs one agent turn. |
 | `GET` | `/chat/sessions/{id}/transcript` | Everything that happened in the conversation, in order. |
 | `GET` | `/chat/sessions/{id}/memory` | What this session is told to remember, with the reason each was kept. |
+| `GET` | `/chat/sessions/{id}/extraction` | How far memory extraction has read this conversation, and how far behind it is. A watermark that stops while the transcript grows is a worker that is not running. |
 | `PUT` | `/chat/sessions/{id}/memory/{key}` | `{"value", "reason"}`. Preserved into the system prompt of every later turn. Overwrites by key. |
 | `DELETE` | `/chat/sessions/{id}/memory/{key}` | `204`, whether or not it was there. |
 | `GET` | `/chat/sessions/{id}/memory-proposals` | Suggested memories awaiting a decision. These reach no model. |
@@ -318,6 +320,7 @@ rather than only here:
 |---|---|
 | Tools over HTTP | Approval has nobody to ask until a run can pause and resume. Passing no tool registry is the only option that neither silently approves everything nor pretends to gate. |
 | A way to ask how a deferred job went | The job id is real and queryable by hand, but no route reports it, so `:defer` is fire-and-forget today. |
+| Which memories a turn actually carried | `run_meta` records *how many* reached the prompt, not which. Recording the keys is a change inside `bacteria.agent`, against a decision `_run_meta` states on purpose, so it needs a record of its own rather than a route. |
 | Retries on ingestion jobs | Ingestion is not idempotent — duplicates are only caught within a batch — so a retried job would store everything twice. Needs the cross-batch decision first. |
 | Key scopes | Every key grants identity and therefore everything; there is no read-only key to hand a script. Browser sessions expire, keys still do not — [ADR 0005](docs/adr/0005-a-browser-holds-a-session-not-a-key.md) explains why the asymmetry is deliberate. |
 | Ending every session for a principal | Revoking a key does not close the sessions it opened, which outlive it by up to twelve hours. `revoke-sessions <principal>` is the missing verb. |

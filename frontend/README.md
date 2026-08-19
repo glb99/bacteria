@@ -1,23 +1,55 @@
 # frontend
 
-Nothing here yet. This directory exists so the shape of the repository states
-the intent, and so the questions below are answered before code arrives rather
-than discovered by it.
-
-## What goes here
-
 A browser client for the API in [`../backend/app`](../backend/app). The routes
-it would consume are listed in the [API table](../README.md#api); `/docs` on a
+it consumes are listed in the [API table](../README.md#api); `/docs` on a
 running server is the live version.
 
-## What it will need, and why each is a decision
+Vite, TypeScript, and a client generated from the application's own OpenAPI
+document. What is here is a **skeleton, not Console v0** — one screen that signs
+in and lists sessions. It exists to prove the chain end to end: the static mount,
+the session cookie, the same-origin assumption `SameSite=Strict` rests on, and
+the generated types, each of which was verified alone and none of which had been
+used together.
+
+```bash
+just console-types   # regenerate the client from the API
+just console-build   # build into the package directory the API serves
+just console-check   # types, and that the client has not drifted
+npm --prefix frontend run dev   # a dev server proxying to :8000
+```
+
+`npm run dev` proxies `/auth`, `/chat`, `/ingestion` and `/health` to
+`127.0.0.1:8000` rather than pointing the client at a full URL. That keeps
+development same-origin, which is the condition the cookie depends on — a CORS
+setup here would be a development-only shape production never has.
+
+## The decisions behind it
 
 **A generated client, not a hand-written one.** The application already serves
 an OpenAPI document, so the request layer should be generated from it. A
 hand-written client duplicates every schema and drifts the first time a field is
 added — and the drift shows up as a runtime `undefined` rather than as a build
-failure. Whatever generates it belongs in a pre-commit hook, so that a backend
-change and its client change land in the same commit.
+failure.
+
+`just console-types` dumps the document from `create_app()` — no server, no port,
+no database — and `openapi-typescript` turns it into `src/api.gen.ts`, which is
+committed. `just console-check` regenerates it and fails when the result differs,
+so a renamed response field cannot land without its client change.
+
+**That check runs in CI rather than in a pre-commit hook**, which is a deliberate
+departure from what this file used to specify. The hook would need `node_modules`
+present to run at all, so it would either fail on a fresh clone or be skipped —
+and a hook people skip is worse than a gate that stops the merge. The frontend
+job in `.github/workflows/test.yml` is where it actually runs.
+
+It is not only a diff check. Regenerating also type-checks the console against
+the new types, which is the half that names the line to change:
+
+```
+src/main.ts(87,53): error TS2551: Property 'last_activity_at' does not exist
+  on type '{ created_at: string; lastActivityAt: string; session_id: string; }'.
+  Did you mean 'lastActivityAt'?
+```
 
 **Where the build output goes — decided: served by the API.** The alternative
 was a static host or CDN in front of its own build, which keeps the two

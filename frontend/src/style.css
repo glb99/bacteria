@@ -1,0 +1,152 @@
+/* The Console direction, minimally: dark, dense, monospace, continuous with the
+   CLI this replaces nothing of yet. Enough to look deliberate; not the design
+   system, which arrives with Console v0's tabs. */
+
+:root {
+  --bg: oklch(0.17 0.008 250);
+  --panel: oklch(0.21 0.01 250);
+  --line: oklch(0.3 0.014 250);
+  --text: oklch(0.9 0.01 250);
+  --muted: oklch(0.66 0.014 250);
+  --accent: oklch(0.84 0.19 128);
+  --danger: oklch(0.72 0.18 25);
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Fira Code", Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 var(--mono);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.path,
+.version,
+.who {
+  color: var(--muted);
+}
+
+.version {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 0.35rem;
+  font-size: 12px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.note {
+  color: var(--muted);
+  max-width: 46rem;
+}
+
+form {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+}
+
+button.ghost {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+li {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+li:last-child {
+  border-bottom: 0;
+}
+
+li code {
+  color: var(--accent);
+}
+
+.when {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}

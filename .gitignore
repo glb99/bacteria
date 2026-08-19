@@ -17,3 +17,18 @@ dist/
 # which `just test` already does correctly; committing it would make one
 # person's IDE layout everyone else's problem.
 .vscode/
+
+# The console's build output, produced by `just console-build` from `frontend/`.
+# Ignored because it is an artifact: committing it would make every frontend
+# change show up twice in review, once as source and once as minified output
+# nobody can read. It is installed as package data, so CI and the deploy have to
+# build it -- see `.github/workflows/deploy.yml`, where building it *after*
+# `fastapi deploy` would ship an application with no console and say nothing.
+backend/app/src/bacteria/app/console/
+
+# The OpenAPI document, dumped from the application to generate the client from.
+# An intermediate: `frontend/src/api.gen.ts` is the committed artifact, and the
+# frontend CI job regenerates it and fails when it differs.
+frontend/openapi.json
+
+node_modules/

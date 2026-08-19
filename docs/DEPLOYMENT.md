@@ -18,6 +18,7 @@ and the way that is resolved gives up a property the code otherwise protects.
 | Entrypoint | `bacteria.app.entrypoints.asgi:app`, from `[tool.fastapi]` in the **root** `pyproject.toml` |
 | Schema | Applied by the workflow, before the deploy. Nothing creates or upgrades it at startup. |
 | Worker | **In-process**, via `BACTERIA_RUN_WORKER_IN_API=true`. There is nowhere else to put it. |
+| Console | Built by the workflow **before** the deploy, into `backend/app/src/bacteria/app/console/`. The platform never runs npm, so nothing on their side produces it. |
 
 ---
 
@@ -231,6 +232,44 @@ mislead you. There are two proposers and only one of them uses the queue:
 
 An empty queue after a `"hello"` turn is correct behaviour rather than a fault:
 the extractor proposes what it finds, and there was nothing there.
+
+---
+
+## The console, and the ignore rule that hid it
+
+Two orderings have to hold, and both failed once.
+
+**The console is built before `fastapi deploy`, not after.** That command
+archives its working directory *at the moment it runs*, and FastAPI Cloud builds
+from `pyproject.toml` and never runs npm — so a console built afterwards, or in a
+parallel job, never reaches the image.
+
+**And the build output is un-ignored before the archive is made.** This is the
+one that actually shipped. `fastapi deploy` walks the directory with
+[`rignore`](https://pypi.org/project/rignore/), a binding for Rust's `ignore`
+crate, which honours `.gitignore`:
+
+```python
+def _rignore_walk(path: Path) -> rignore.Walker:
+    return rignore.walk(path, should_exclude_entry=..., ignore_hidden=False)
+```
+
+The console's output is gitignored, because it is a build artifact and
+committing it would put every frontend change in review twice. So the same line
+that keeps the repository clean removed the console from the upload. The build
+ran, wrote its files, the archiver walked past them, and the deploy reported
+success while `/` answered `404`.
+
+The workflow now deletes that one line from `.gitignore` before deploying — the
+runner's checkout is disposable — and then asks `git check-ignore` whether the
+path is still ignored, failing loudly if it is. A `sed` that matches nothing
+fails exactly like a `sed` that works, so the check is the part that matters.
+
+**Neither ordering is visible from the outside**, which is why
+`scripts/smoke.py --deployed` asserts that the root serves a built page. It
+checks for built asset references rather than any particular text, so restyling
+cannot fail a deploy. That check is what caught this: it went red on its first
+real run, four minutes after the merge.
 
 ---
 

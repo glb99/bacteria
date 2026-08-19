@@ -135,6 +135,33 @@ jobs:
         if: steps.configured.outputs.ready == 'true'
         run: uv run just console-build
 
+      # `fastapi deploy` archives its working directory with `rignore`, a
+      # binding for Rust's `ignore` crate -- which honours `.gitignore`. So the
+      # single line that keeps the build artifact out of git also kept it out of
+      # the upload: the build ran, wrote the files, and the archiver walked past
+      # them. The deploy reported success and `/` answered 404.
+      #
+      # Un-ignored here rather than committed. Committing built output would put
+      # every frontend change in review twice, once as source and once as
+      # minified bundle, and add a stale-artifact failure mode that nothing
+      # would catch. The runner's checkout is disposable, so editing it costs
+      # nothing and leaves the repository honest.
+      #
+      # Verified rather than assumed, because a `sed` that matches nothing fails
+      # exactly like a `sed` that works. `git check-ignore` is the same question
+      # the archiver asks, so if this step passes, the file will be uploaded.
+      - name: Un-ignore the built console so the archiver uploads it
+        if: steps.configured.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          sed -i '\#^backend/app/src/bacteria/app/console/$#d' .gitignore
+
+          if git check-ignore -q backend/app/src/bacteria/app/console/index.html; then
+            echo "::error title=Console would not be uploaded::The built console is still ignored, so the archive will not contain it and the deployment will serve no console. The pattern this step removes no longer matches .gitignore."
+            exit 1
+          fi
+          echo "console is uploadable: $(find backend/app/src/bacteria/app/console -type f | wc -l) files"
+
       # Run from the repository root, and no `working-directory:`. This step is
       # what chooses the build context -- `fastapi deploy` packages its own
       # working directory and uploads that -- so it, and not the dashboard's

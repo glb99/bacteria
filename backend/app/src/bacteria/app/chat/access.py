@@ -5,6 +5,11 @@ is calling"; this one answers "may they have this", and only ``chat`` knows what
 owning a session means. Merging them would put an access decision in a module
 with no idea what it is deciding about.
 
+The split is recorded in
+[ADR 0004](../../../../../docs/adr/0004-authentication-is-shared-authorization-lives-next-to-the-resource.md).
+That record also says what it costs: an ownership rule per feature, forgotten
+silently, with nothing in the build to notice. Ingestion has not written one.
+
 This is the distinction the agent's own design is built around — a session
 identifies an interaction, and identifying it is not permission to read it. The
 application had the first half and none of the second: any caller who knew or

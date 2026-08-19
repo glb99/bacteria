@@ -1,19 +1,29 @@
 """Issuing and revoking credentials.
 
-Deliberately not reachable over HTTP. Key issuance is the one operation that
-cannot require a key without a bootstrapping problem — the first one has to come
-from somewhere — and an endpoint that mints credentials is the single most
-valuable thing on the service to compromise. It is an operator action, run from
-`bacteria.app.entrypoints.cli`.
+**Key issuance is deliberately not reachable over HTTP.** It is the one
+operation that cannot require a key without a bootstrapping problem — the first
+one has to come from somewhere — and an endpoint that mints credentials is the
+single most valuable thing on the service to compromise. It is an operator
+action, run from `bacteria.app.entrypoints.cli`.
+
+**Browser sessions are, and that is not the same claim.** `POST /auth/session`
+does not mint a credential from nothing: it takes a key the caller already
+holds, proves it, and hands back something strictly weaker — no ability to
+issue, a twelve-hour life, and revocable on its own. Compromising that endpoint
+gets an attacker exactly what presenting the key they already had would have.
+The bootstrapping argument is untouched, because the bootstrap still happens at
+`bacteria-admin issue-key`. See
+[ADR 0005](../../../../../docs/adr/0005-a-browser-holds-a-session-not-a-key.md).
 """
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.auth import keys
-from bacteria.app.auth.models import ApiKey
-from bacteria.app.auth.repository import ApiKeyRepository
+from bacteria.app.auth.models import SESSION_LIFETIME, ApiKey, BrowserSession
+from bacteria.app.auth.repository import ApiKeyRepository, BrowserSessionRepository
 
 
 async def issue_key(session: AsyncSession, principal_id: str, label: str) -> str:
@@ -79,3 +89,61 @@ async def revoke_key(session: AsyncSession, key_id: str) -> Optional[ApiKey]:
         should not get an error.
     """
     return await ApiKeyRepository(session).revoke(key_id)
+
+
+async def open_browser_session(session: AsyncSession, principal_id: str) -> tuple[str, datetime]:
+    """Open a session for a principal whose key has *already* been verified.
+
+    **Takes a principal id, not a key**, and the signature is the guard. A
+    function here that accepted a token would be one that could be called
+    without checking it; the caller proves the key through
+    :func:`~bacteria.app.auth.dependencies.principal_for_key` and passes what
+    that returned, so "was this verified" is answered by the type rather than by
+    reading the call site.
+
+    Returns:
+        The token, in the only moment it exists in readable form, and when it
+        expires. The expiry is returned rather than recomputed by the caller so
+        that the cookie's ``max-age`` and the row cannot disagree — a cookie
+        outliving its row is a confusing 401 and a row outliving its cookie is a
+        session nothing can reach.
+    """
+    generated = keys.generate(keys.SESSION_PREFIX)
+    expires_at = datetime.now(timezone.utc) + SESSION_LIFETIME
+    await BrowserSessionRepository(session).create(
+        generated, principal_id=principal_id, expires_at=expires_at
+    )
+    return generated.token, expires_at
+
+
+async def close_browser_session(session: AsyncSession, token: str) -> Optional[BrowserSession]:
+    """End the session a cookie names, if it names a real one.
+
+    Not behind :data:`CurrentPrincipal`, on purpose: logging out is not an
+    action anyone needs permission for, and requiring a *valid* session to end
+    one would refuse exactly the person whose session has gone wrong — an
+    expired cookie could then never be cleared server-side.
+
+    **The secret is still checked**, and that is not the same thing as requiring
+    a live session. Revoking on the session id alone would make logout an
+    unauthenticated write against any id an attacker could name, and ids are not
+    secret — this module's own failure logs print them. Sixty-four bits makes
+    guessing impractical rather than impossible, and "impractical" is a poor
+    reason to accept a write nobody proved they were entitled to.
+
+    Returns:
+        The session, or ``None`` if the cookie was malformed, unknown, or not
+        backed by the right secret. The caller reports success either way — see
+        the view.
+    """
+    parsed = keys.split(token, keys.SESSION_PREFIX)
+    if parsed is None:
+        return None
+
+    session_id, secret = parsed
+    repository = BrowserSessionRepository(session)
+    row = await repository.get(session_id)
+    if row is None or not keys.matches(secret, row.secret_hash):
+        return None
+
+    return await repository.revoke(session_id)

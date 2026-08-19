@@ -21,3 +21,4 @@ conventions do not qualify.
 | [0002](0002-the-memory-graph-is-postgres-tables.md) | Build the memory graph as tables in the application's Postgres, not in a graph database | Accepted |
 | [0003](0003-observability-is-opentelemetry-exported-to-logfire.md) | Instrument with OpenTelemetry, export to Logfire, and keep both out of the agent | Accepted |
 | [0004](0004-authentication-is-shared-authorization-lives-next-to-the-resource.md) | Authenticate once at the edge; decide authorization next to the resource | Accepted |
+| [0005](0005-a-browser-holds-a-session-not-a-key.md) | A browser exchanges a key for an expiring, HttpOnly session cookie | Accepted |

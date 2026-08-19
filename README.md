@@ -106,14 +106,22 @@ server runs.
 
 ## API
 
-Every route except `/health` requires `Authorization: Bearer <key>`. Anything
-wrong with the credential — missing, malformed, unknown, wrong secret,
-revoked — returns the same `401`, because telling them apart tells an attacker
-which half of a guess was right.
+Every route except `/health` and `/auth/session` requires a credential. Anything
+wrong with it — missing, malformed, unknown, wrong secret, revoked, expired —
+returns the same `401`, because telling them apart tells an attacker which half
+of a guess was right.
+
+Two credentials are accepted. `Authorization: Bearer <key>` is the operator's,
+issued by CLI and never expiring. A browser instead trades that key once for an
+`HttpOnly` cookie that lasts twelve hours and can be revoked on its own, because
+a page cannot hold a key safely —
+[ADR 0005](docs/adr/0005-a-browser-holds-a-session-not-a-key.md).
 
 | | | |
 |---|---|---|
 | `GET` | `/health` | Liveness. Does not touch the database, so a database outage cannot cause a restart loop. |
+| `POST` | `/auth/session` | `{"key": "..."}` → a session cookie. The only other route that answers without a credential, because it is the one that establishes one. |
+| `DELETE` | `/auth/session` | Ends the session server-side and clears the cookie. `204` whether or not there was one. |
 | `POST` | `/chat/sessions` | Open a conversation. Takes no body — the owner is the authenticated caller and cannot be named by the client. |
 | `POST` | `/chat/sessions/{id}/turns` | `{"text": "..."}` → `{"run_id", "reply"}`. Runs one agent turn. |
 | `GET` | `/chat/sessions/{id}/transcript` | Everything that happened in the conversation, in order. |
@@ -311,7 +319,8 @@ rather than only here:
 | Tools over HTTP | Approval has nobody to ask until a run can pause and resume. Passing no tool registry is the only option that neither silently approves everything nor pretends to gate. |
 | A way to ask how a deferred job went | The job id is real and queryable by hand, but no route reports it, so `:defer` is fire-and-forget today. |
 | Retries on ingestion jobs | Ingestion is not idempotent — duplicates are only caught within a batch — so a retried job would store everything twice. Needs the cross-batch decision first. |
-| Key scopes and expiry | Every key grants identity and therefore everything; there is no read-only key to hand a script. |
+| Key scopes | Every key grants identity and therefore everything; there is no read-only key to hand a script. Browser sessions expire, keys still do not — [ADR 0005](docs/adr/0005-a-browser-holds-a-session-not-a-key.md) explains why the asymmetry is deliberate. |
+| Ending every session for a principal | Revoking a key does not close the sessions it opened, which outlive it by up to twelve hours. `revoke-sessions <principal>` is the missing verb. |
 | Tenancy for ingested records | Submitting requires authentication, but a batch is not owned by its submitter. Urgent the moment a read route exists. |
 | Cross-batch duplicates | A repeated `external_id` in a later batch is stored twice. Needs someone to choose between "update" and "reject". |
 | A ceiling on pending proposals | Each extraction run is capped, and the total is not. A long conversation accumulates suggestions until a person drains them, which costs nothing in the prompt and everything in the review surface. |

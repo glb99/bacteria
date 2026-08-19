@@ -7,6 +7,7 @@ every other test shares.
 
 from fastapi import FastAPI
 
+from bacteria.app.auth.views import router as auth_router
 from bacteria.app.chat.views import router as chat_router
 from bacteria.app.ingestion.views import router as ingestion_router
 
@@ -23,6 +24,10 @@ def create_app(lifespan=None) -> FastAPI:
             is `entrypoints/`' job, not this one's.
     """
     app = FastAPI(title="bacteria", lifespan=lifespan)
+    # First, and only because it reads that way in `/docs`: establishing a
+    # session is the first thing a browser does, and the generated page lists
+    # tags in the order routers are added.
+    app.include_router(auth_router)
     app.include_router(chat_router)
     app.include_router(ingestion_router)
 

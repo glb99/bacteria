@@ -29,6 +29,27 @@ import secrets
 from dataclasses import dataclass
 
 PREFIX = "fp"
+"""The prefix on an API key, minted by the operator CLI and never expiring."""
+
+SESSION_PREFIX = "bs"
+"""The prefix on a browser session token, exchanged for a key and expiring.
+
+Separate from :data:`PREFIX` so that :func:`split` rejects a credential of the
+wrong kind outright -- a session token presented as ``Authorization: Bearer``
+parses to ``None`` and is refused by the same path as any malformed value.
+
+**This is a second line, not the mechanism**, and the distinction was learned by
+deleting the prefix check and finding every test still green. What actually
+keeps the two apart is that they are two tables: a session id looked up in
+``api_key`` is simply not there. The prefix makes that failure happen one step
+earlier, with a log line that says which mistake was made rather than "unknown
+key id" -- and it is what would still hold if the two id spaces ever collided,
+since both are :func:`secrets.token_hex` over the same width.
+
+Tested directly in `test_auth.py` for that reason. Routed through HTTP it is
+unfalsifiable: the tables refuse first either way.
+"""
+
 _SEPARATOR = "_"
 
 
@@ -48,16 +69,26 @@ class GeneratedKey:
     secret_hash: str
 
 
-def generate() -> GeneratedKey:
-    """Mint a new key.
+def generate(prefix: str = PREFIX) -> GeneratedKey:
+    """Mint a new credential.
 
     ``token_urlsafe(32)`` is 256 bits from the OS CSPRNG. ``token_hex(8)`` is
     plenty for the id, which needs to be unique rather than unguessable.
+
+    Args:
+        prefix: Which kind of credential. Defaults to an API key;
+            :data:`SESSION_PREFIX` mints a browser session token.
+
+            Parameterised rather than copied into a second module, so that both
+            credentials get the same entropy, the same hash, and the same
+            constant-time comparison. A session token is weaker than a key by
+            *lifetime*, which is a column, and must not also be weaker by
+            construction.
     """
     key_id = secrets.token_hex(8)
     secret = secrets.token_urlsafe(32)
     return GeneratedKey(
-        token=f"{PREFIX}{_SEPARATOR}{key_id}{_SEPARATOR}{secret}",
+        token=f"{prefix}{_SEPARATOR}{key_id}{_SEPARATOR}{secret}",
         key_id=key_id,
         secret_hash=hash_secret(secret),
     )
@@ -68,16 +99,23 @@ def hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
-def split(token: str) -> tuple[str, str] | None:
-    """Parse a presented token into ``(key_id, secret)``.
+def split(token: str, prefix: str = PREFIX) -> tuple[str, str] | None:
+    """Parse a presented token of the given kind into ``(key_id, secret)``.
+
+    Args:
+        token: Whatever the client sent.
+        prefix: The kind of credential this call is willing to accept. A token
+            of the *other* kind returns ``None`` here, which is what stops a
+            session cookie from working as a bearer key and back again.
 
     Returns:
-        ``None`` for anything malformed. A caller must treat that exactly like a
-        wrong key — reporting "malformed" separately tells an attacker which of
-        their guesses had the right shape.
+        ``None`` for anything malformed, including a well-formed credential of
+        the wrong kind. A caller must treat that exactly like a wrong key —
+        reporting "malformed" separately tells an attacker which of their
+        guesses had the right shape.
     """
     parts = token.split(_SEPARATOR, 2)
-    if len(parts) != 3 or parts[0] != PREFIX or not parts[1] or not parts[2]:
+    if len(parts) != 3 or parts[0] != prefix or not parts[1] or not parts[2]:
         return None
     return parts[1], parts[2]
 

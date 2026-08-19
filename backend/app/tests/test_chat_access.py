@@ -55,13 +55,23 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-UNAUTHENTICATED_BY_DESIGN = frozenset({"/health"})
-"""The only path that answers without a credential, and why it may.
+UNAUTHENTICATED_BY_DESIGN = frozenset({"/health", "/auth/session"})
+"""The paths that answer without a credential, and why each may.
 
-Liveness, deliberately touching nothing. Anything added to this set is a
-decision to expose it to the internet unauthenticated, which is why it is a
-named constant rather than a skipped path inside the loop below.
-"""
+Anything added here is a decision to expose something to the internet
+unauthenticated, which is why it is a named constant rather than a skipped path
+inside the loop below.
+
+``/health`` is liveness, deliberately touching nothing.
+
+``/auth/session`` is the credential-establishing route, so requiring a
+credential to reach it is the bootstrapping problem `auth/service.py` describes.
+It is not *unauthorised*, which is the distinction worth keeping straight: `POST`
+proves an API key out of the request body and answers the same 401 as anything
+else when that fails, and `DELETE` ends a session whose secret the caller
+proved. Neither is covered by the loop below, so both are asserted directly in
+`test_auth_session.py` -- an exemption here is a promise that the path is tested
+somewhere else, not that it is safe to leave alone."""
 
 
 async def test_every_route_refuses_an_unauthenticated_request(client):

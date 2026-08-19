@@ -1,4 +1,4 @@
-"""Storing and finding API keys."""
+"""Storing and finding the two credentials: API keys and browser sessions."""
 
 from datetime import datetime, timezone
 from typing import Optional
@@ -7,7 +7,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.auth.keys import GeneratedKey
-from bacteria.app.auth.models import ApiKey
+from bacteria.app.auth.models import ApiKey, BrowserSession
 
 
 class ApiKeyRepository:
@@ -87,6 +87,62 @@ class ApiKeyRepository:
     async def revoke(self, key_id: str) -> Optional[ApiKey]:
         """Mark a key unusable, keeping the row."""
         row = await self._db.get(ApiKey, key_id)
+        if row is None or row.revoked_at is not None:
+            return row
+        row.revoked_at = datetime.now(timezone.utc)
+        self._db.add(row)
+        await self._db.commit()
+        await self._db.refresh(row)
+        return row
+
+
+class BrowserSessionRepository:
+    """Persists browser sessions and resolves a presented cookie.
+
+    A second class rather than more methods on :class:`ApiKeyRepository`. They
+    answer the same shape of question about different tables, and a repository
+    that owns two is one that has to be told which every call — see ADR 0005 for
+    why the tables are separate to begin with.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._db = session
+
+    async def create(
+        self, generated: GeneratedKey, principal_id: str, expires_at: datetime
+    ) -> BrowserSession:
+        """Open a session. Only the secret's hash is written."""
+        row = BrowserSession(
+            session_id=generated.key_id,
+            secret_hash=generated.secret_hash,
+            principal_id=principal_id,
+            expires_at=expires_at,
+        )
+        self._db.add(row)
+        await self._db.commit()
+        await self._db.refresh(row)
+        return row
+
+    async def get(self, session_id: str) -> Optional[BrowserSession]:
+        """Find a session by its public half, expired and revoked ones included.
+
+        The caller checks :attr:`BrowserSession.is_active`, for the reason
+        :meth:`ApiKeyRepository.get_by_key_id` gives: "no such session" and
+        "expired session" must look identical to a client and are worth telling
+        apart in a log.
+        """
+        return await self._db.get(BrowserSession, session_id)
+
+    async def revoke(self, session_id: str) -> Optional[BrowserSession]:
+        """End a session now, keeping the row.
+
+        Logging out revokes rather than deletes, matching ``api_key`` — an
+        authenticated action in the log should still have something behind it.
+        Revoking an already-revoked or expired session is a no-op: a person
+        clicking log out twice, or on a session that had already lapsed, has not
+        made a mistake worth an error.
+        """
+        row = await self._db.get(BrowserSession, session_id)
         if row is None or row.revoked_at is not None:
             return row
         row.revoked_at = datetime.now(timezone.utc)

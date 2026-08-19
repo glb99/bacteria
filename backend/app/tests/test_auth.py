@@ -232,3 +232,30 @@ async def test_listing_an_unknown_principal_is_empty_rather_than_an_error(db):
     await issue_key(db, principal_id="alice", label="demo")
 
     assert await list_keys(db, "alicce") == []
+
+
+def test_a_session_token_does_not_parse_as_a_key():
+    """The two credentials must not be interchangeable at the parser.
+
+    Asserted here rather than over HTTP, and that is the point of it existing:
+    through a route the separation holds anyway, because a session id is not in
+    `api_key` and the lookup misses. Deleting the prefix check left every HTTP
+    test green, so this is the only place the rule can actually fail.
+    """
+    session_token = keys.generate(keys.SESSION_PREFIX).token
+
+    assert keys.split(session_token, keys.PREFIX) is None
+    assert keys.split(session_token, keys.SESSION_PREFIX) is not None
+
+
+def test_a_key_does_not_parse_as_a_session_token():
+    """The direction that matters more.
+
+    A key accepted from a cookie is a non-expiring credential living where a
+    twelve-hour one was supposed to, sent automatically on every request — the
+    exact situation browser sessions exist to prevent.
+    """
+    token = keys.generate().token
+
+    assert keys.split(token, keys.SESSION_PREFIX) is None
+    assert keys.split(token, keys.PREFIX) is not None

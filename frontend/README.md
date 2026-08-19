@@ -33,13 +33,21 @@ Nothing in the backend currently assumes either. `create_app` in
 [`bacteria/app/views.py`](../backend/app/src/bacteria/app/views.py) mounts
 routers and a health check and nothing else.
 
-**An answer for the credential.** Every route except `/health` wants
-`Authorization: Bearer <key>`, and keys are issued by an operator CLI rather
-than an endpoint — deliberately, because minting a credential over HTTP needs a
-credential. There is no login, no session cookie, and no browser-facing auth
-flow of any kind. **A browser client cannot hold an API key safely**, so this is
-a real gap rather than a wiring task: it needs an interactive auth story on the
-backend first. See the Status table in the [README](../README.md#status).
+**An answer for the credential — settled, and it decides the question above.**
+This used to read "a browser client cannot hold an API key safely, so this is a
+real gap rather than a wiring task". It is now
+[ADR 0005](../docs/adr/0005-a-browser-holds-a-session-not-a-key.md): the client
+posts a key to `/auth/session` once, and gets back an `HttpOnly` cookie it
+cannot read, lasting twelve hours. Nothing in the browser ever holds the key.
+
+**That constrains the build output to the *served by the API* shape.** The
+cookie is `SameSite=Strict`, which is what stands in for a CSRF token — and it
+only does so while the console and the API share an origin. Putting the console
+on a CDN needs CORS *and* a real CSRF token, and would be a decision to record
+rather than a configuration change.
+
+Still open here: nothing sweeps expired session rows, and revoking a key does
+not end the sessions opened with it.
 
 ## Running the API without a frontend
 

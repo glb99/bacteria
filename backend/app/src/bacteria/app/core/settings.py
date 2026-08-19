@@ -136,6 +136,19 @@ class Settings(BaseSettings):
         logfire_environment: Which deployment produced a trace. Kept separate
             from the token so that two deployments sharing one project stay
             distinguishable.
+        logfire_console: Whether spans are also printed to stdout. ``None``, the
+            default, means *print only when there is no token* — see
+            :func:`bacteria.app.core.observability._should_print_spans` for why
+            that is the honest default rather than a preference.
+
+            Set it to ``true`` to get both, which is a real local case: a
+            developer holding a token may still want spans in the terminal. Set
+            it to ``false`` to silence them even with no exporter configured.
+
+            It cannot put spans back into ``bacteria-admin``'s stdout. That
+            surface opts out in code, because its output is a conversation
+            rather than a log, and a deployment variable must not be able to
+            override a property of what the stream *is*.
         memory_extraction_max_proposals: The most proposals one extraction run
             may write.
 
@@ -176,6 +189,7 @@ class Settings(BaseSettings):
     memory_extraction_max_proposals: int = 5
     logfire_token: str = ""
     logfire_environment: str = "local"
+    logfire_console: bool | None = None
 
     @model_validator(mode="after")
     def _reject_unknown_prefixed_variables(self) -> "Settings":

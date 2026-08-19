@@ -68,6 +68,35 @@ def _keep_identifiers(match: Any) -> Any:
     return match.value if match.path and str(match.path[-1]) in _KEPT_FROM_SCRUBBING else None
 
 
+def _should_print_spans(console: bool, *, token: str, override: bool | None) -> bool:
+    """Whether this process prints spans to its own stdout.
+
+    Three inputs in a deliberate order, kept out of :func:`configure` so the rule
+    can be read and tested without acquiring an exporter to observe it.
+
+    ``console=False`` wins outright. A surface passing it is stating that its
+    stdout is not a log — ``bacteria-admin`` relays what a model said — and no
+    environment variable should be able to put query spans back into a
+    conversation.
+
+    Otherwise: **printing is the fallback for spans with nowhere else to go.**
+    With a token they are already exported, so printing duplicates a queryable
+    record into a stream that is not one. In the API and the worker that stream
+    *is* the log, and the cost is not theoretical — procrastinate polls, so a
+    deployed worker printed a bare ``SELECT`` pair every few seconds forever, and
+    an extraction job finishing was two meaningful lines adrift in them.
+
+    ``override`` exists for wanting both anyway, which is an ordinary local case
+    rather than a misconfiguration: a developer holding a token can still ask for
+    spans in the terminal.
+    """
+    if not console:
+        return False
+    if override is not None:
+        return override
+    return not token
+
+
 def configure(service_name: str, *, console: bool = True) -> None:
     """Set up tracing for this process. Safe to call twice; the second is a no-op.
 
@@ -90,6 +119,10 @@ def configure(service_name: str, *, console: bool = True) -> None:
     conversation unreadable. Spans are still produced and still exported when a
     token is set; only the printing stops.
 
+    It is not the whole answer, though, and the API and the worker are why: they
+    never opted out, so once a token was configured they exported *and* printed
+    every span. :func:`_should_print_spans` decides the rest.
+
     Called from entrypoints, which is where configuration belongs. Not from
     ``create_app``: a test that builds the application must not acquire an
     exporter as a side effect.
@@ -100,9 +133,16 @@ def configure(service_name: str, *, console: bool = True) -> None:
 
     settings = get_settings()
 
+    printing = _should_print_spans(
+        console, token=settings.logfire_token, override=settings.logfire_console
+    )
+
     logfire.configure(
         service_name=service_name,
-        console=None if console else False,
+        # `None` rather than `True` for the printing case: it leaves Logfire's
+        # own console defaults alone, which is not the same claim as configuring
+        # them here.
+        console=None if printing else False,
         # "if-token-present" is what makes absence a local-console run rather
         # than an error, and it is a Logfire behaviour rather than one this
         # module implements -- so there is no branch here that could disagree

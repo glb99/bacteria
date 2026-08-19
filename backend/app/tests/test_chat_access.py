@@ -276,3 +276,43 @@ async def test_one_principal_cannot_review_anothers_proposals(client, issue):
     )
 
     assert listed.status_code == activated.status_code == rejected.status_code == 404
+
+
+async def test_a_listing_shows_only_the_callers_own_sessions(client, issue):
+    """The one ownership rule here that is a filter, not a check, so it fails open.
+
+    Every other session route names an id and refuses when it is not yours: a
+    mistake there is a 404 for a legitimate caller, which is loud. This route
+    names nothing, so ownership lives in a ``WHERE`` clause — and a mistake is
+    every other principal's conversation list, returned with a 200 and no
+    indication that anything happened.
+
+    Asserted on the *intruder's* view rather than the owner's, because a test
+    that only checks the owner sees their own session passes just as well when
+    the filter is missing entirely.
+    """
+    owner, intruder = await issue("acme"), await issue("rival")
+
+    created = client.post("/chat/sessions", headers=auth(owner))
+    assert created.status_code == 201
+
+    listed = client.get("/chat/sessions", headers=auth(intruder))
+
+    assert listed.status_code == 200
+    assert listed.json() == []
+
+
+async def test_extraction_progress_is_not_readable_by_a_stranger(client, issue):
+    """A new session-scoped route is a new chance to forget the ownership check.
+
+    It reports how much of a transcript exists, which tells a stranger how long
+    somebody's conversation is even without its contents.
+    """
+    owner, intruder = await issue("acme"), await issue("rival")
+    session_id = client.post("/chat/sessions", headers=auth(owner)).json()["session_id"]
+
+    refused = client.get(f"/chat/sessions/{session_id}/extraction", headers=auth(intruder))
+
+    # 404 rather than 403, for the reason `_NOT_FOUND` gives: a 403 would
+    # confirm the session exists.
+    assert refused.status_code == 404

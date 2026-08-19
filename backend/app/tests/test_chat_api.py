@@ -573,3 +573,75 @@ async def test_a_turn_refuses_before_the_model_when_it_cannot_enqueue(engine, mo
             )
 
     assert not called
+
+
+async def test_listing_sessions_is_ordered_by_last_activity_not_creation(client, token):
+    """A picker sorted by creation buries the conversation someone is in.
+
+    The failure is not an error: the list is complete, correct, and puts a
+    session abandoned weeks ago above the one from five minutes ago, so the
+    console looks broken in a way nothing reports.
+
+    **Three sessions, spoken in out of order, and that is not padding.** With
+    two, the expected order matches creation order in one direction or the
+    other whatever you do — the first version of this test used two and passed
+    with the sort replaced by ``created_at``, which is how the arrangement below
+    was arrived at. Here activity order matches neither creation ascending nor
+    descending, so only the real rule produces it.
+    """
+    first, second, third = (new_session(client, token) for _ in range(3))
+
+    for session_id in (third, first, second):
+        client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    listed = [row["session_id"] for row in client.get("/chat/sessions", headers=auth(token)).json()]
+
+    assert listed == [second, first, third]
+    assert listed != [first, second, third], "this is creation order, ascending"
+    assert listed != [third, second, first], "this is creation order, descending"
+
+
+async def test_a_session_nobody_has_spoken_in_is_still_listed(client, token):
+    """An empty session must not fall out of the join that finds activity.
+
+    The outer join is the whole reason: an inner one would drop every session
+    with no transcript rows, which is exactly the session a person has just
+    created and is about to use.
+    """
+    session_id = new_session(client, token)
+
+    listed = client.get("/chat/sessions", headers=auth(token)).json()
+
+    assert [row["session_id"] for row in listed] == [session_id]
+    assert listed[0]["last_activity_at"] == listed[0]["created_at"]
+
+
+async def test_extraction_progress_reports_an_unread_transcript(client, token):
+    """A watermark that stops while the transcript grows is the failure this shows.
+
+    Extraction is off in these tests, so nothing advances the watermark — which
+    is the same state as a deployment whose worker is not running, and that
+    state cost an afternoon to diagnose because no route reported it.
+    """
+    session_id = new_session(client, token)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    progress = client.get(f"/chat/sessions/{session_id}/extraction", headers=auth(token)).json()
+
+    assert progress["through_seq"] == -1
+    assert progress["latest_seq"] > -1
+    assert progress["behind"] == progress["latest_seq"] + 1
+
+
+async def test_an_empty_session_is_not_reported_as_behind(client, token):
+    """Nothing unread is not the same as work outstanding.
+
+    Both positions start at ``-1``, so the arithmetic has to give zero here. A
+    client special-casing that would be working around this route rather than
+    reading it.
+    """
+    session_id = new_session(client, token)
+
+    progress = client.get(f"/chat/sessions/{session_id}/extraction", headers=auth(token)).json()
+
+    assert progress == {"through_seq": -1, "latest_seq": -1, "behind": 0}

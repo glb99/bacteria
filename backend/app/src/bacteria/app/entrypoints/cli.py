@@ -27,7 +27,7 @@ from bacteria.agent.session.store import (
     UnknownSessionError,
 )
 from bacteria.app.auth import keys
-from bacteria.app.auth.service import issue_key, principal_is_known, revoke_key
+from bacteria.app.auth.service import issue_key, list_keys, principal_is_known, revoke_key
 from bacteria.app.chat import review
 from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
@@ -56,6 +56,65 @@ async def _issue(principal_id: str, label: str) -> int:
     print(f"key:       {token}")
     print()
     print("Store it now. Only a hash is kept, so this cannot be shown again.")
+    return 0
+
+
+def _plural(count: int, noun: str) -> str:
+    """``1 key``, ``2 keys``. Only ever called on nouns that take a plain ``s``."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+async def _list_keys(principal_id: str | None) -> int:
+    """Print who holds credentials, so that "check the spelling" has something to check.
+
+    The listing an operator needed and did not have. `chat` refuses an unknown
+    principal -- correctly, since `chat_session.user_id` has no foreign key and a
+    typo would otherwise create a valid session owned by nobody -- and then told
+    them to check a spelling against no available list. Answering that question
+    meant opening psql.
+
+    Revoked keys are shown rather than filtered, and marked. An operator reading
+    this is usually deciding what to revoke or why something stopped working, and
+    "there is no key" and "the key you had was revoked on Tuesday" are different
+    answers to that.
+
+    `secret_hash` is on every row and is not printed. Nothing is served by
+    putting it on a terminal, and the column exists precisely so that the value
+    it stands for is not recoverable from anywhere.
+    """
+    async with AsyncSession(get_engine()) as session:
+        rows = await list_keys(session, principal_id)
+
+    if not rows:
+        print("no keys for {}.".format(principal_id) if principal_id else "no keys issued yet.")
+        print("`bacteria-admin issue-key <principal>` mints one.")
+        return 0
+
+    # Padded to the widest value rather than to a constant, because a principal
+    # id is whatever an operator typed and a fixed column truncates the one
+    # thing being looked up. The heading is in the max for the same reason it
+    # looks pedantic: `acme` is shorter than `principal`, so without it the
+    # first listing anyone ran had its columns out of line with its header.
+    principal_width = max(max(len(row.principal_id) for row in rows), len("principal"))
+    label_width = max(max(len(row.label) for row in rows), len("label"))
+
+    print(
+        f"{'principal':<{principal_width}}  {'key id':<16}  issued      {'label':<{label_width}}  status"
+    )
+    for row in rows:
+        status = "active" if row.is_active else f"revoked {row.revoked_at:%Y-%m-%d}"
+        print(
+            f"{row.principal_id:<{principal_width}}  {row.key_id:<16}  "
+            f"{row.created_at:%Y-%m-%d}  {row.label:<{label_width}}  {status}"
+        )
+
+    principals = {row.principal_id for row in rows}
+    active = sum(1 for row in rows if row.is_active)
+    print()
+    print(
+        f"{_plural(len(rows), 'key')}, {active} active, "
+        f"across {_plural(len(principals), 'principal')}."
+    )
     return 0
 
 
@@ -550,6 +609,13 @@ def main() -> int:
         help="resume this session id instead of opening a new one",
     )
 
+    keys_listing = commands.add_parser("list-keys", help="show who holds credentials")
+    keys_listing.add_argument(
+        "--principal",
+        default=None,
+        help="restrict to one principal; omit to list every key ever issued",
+    )
+
     listing = commands.add_parser("list-proposals", help="show memories awaiting a decision")
     listing.add_argument("session_id", help="the conversation whose proposals to review")
 
@@ -597,6 +663,8 @@ def main() -> int:
         return platform.run(_issue(args.principal_id, args.label or args.principal_id))
     if args.command == "chat":
         return platform.run(_chat(args.principal_id, args.session))
+    if args.command == "list-keys":
+        return platform.run(_list_keys(args.principal))
     if args.command == "list-proposals":
         return platform.run(_one_shot(_list_proposals, args.session_id))
     if args.command == "accept-proposal":

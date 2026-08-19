@@ -57,7 +57,12 @@ Issue yourself a credential — an operator command, not an endpoint:
 uv run bacteria-admin issue-key acme-corp --label "local dev"
 ```
 
-It prints the key once. Only a hash is stored, so it cannot be shown again.
+It prints the key once. Only a hash is stored, so it cannot be shown again — the
+key **id** is printed beside it, which is what `revoke-key` takes.
+
+`bacteria-admin list-keys` says who holds credentials, revoked ones included and
+marked. Take `--principal` to cut through the `smoke-*` rows a repository that
+has run `just smoke` accumulates.
 
 ```bash
 just serve

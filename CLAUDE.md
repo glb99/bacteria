@@ -83,6 +83,9 @@ test.
   nothing else. Whether they may have a resource is decided next to that
   resource (`chat/access.py`), because only the owning feature knows what
   owning one means.
+  [ADR 0004](docs/adr/0004-authentication-is-shared-authorization-lives-next-to-the-resource.md)
+  records it, including the consequence: ingestion never wrote an ownership
+  rule, so a batch is authenticated and unowned.
 - **Entrypoints hold configuration, never logic.** They are omitted from
   coverage on that basis, so logic there is untested by rule.
 - **Migrations own the schema.** Nothing creates tables at startup — not the

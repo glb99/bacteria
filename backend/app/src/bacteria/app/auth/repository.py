@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlmodel import select
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.auth.keys import GeneratedKey
@@ -53,6 +53,36 @@ class ApiKeyRepository:
             select(ApiKey.key_id).where(ApiKey.principal_id == principal_id).limit(1)
         )
         return found.first() is not None
+
+    async def list_keys(self, principal_id: Optional[str] = None) -> list[ApiKey]:
+        """Every key issued, or one principal's, grouped by principal.
+
+        Revoked keys are included, for the reason :attr:`ApiKey.is_active`
+        gives: the row is kept so that "this key was valid until Tuesday" stays
+        answerable, and hiding them here would leave an operator unable to tell
+        a principal whose key was revoked from one that never existed at all —
+        which is precisely the distinction :meth:`has_principal` is built on.
+
+        Ordered by principal and then by issue date, rather than by date alone.
+        The question this answers is "who exists and what do they hold", and a
+        principal's keys sitting next to each other is what makes rotation
+        legible; sorting by time scatters them for exactly the principals that
+        hold more than one, which are the ones worth looking at.
+
+        Returns whole rows rather than a projection. The caller decides what to
+        show, and one of the columns — ``secret_hash`` — is the one thing that
+        must not be shown, which is a rule about output and is stated where the
+        output is written.
+        """
+        # `col()` rather than the bare attributes: at class level those are
+        # `InstrumentedAttribute`, and only this wrapper tells a type checker so
+        # -- `where()` above infers it from the comparison and `order_by()` has
+        # nothing to infer from.
+        statement = select(ApiKey).order_by(col(ApiKey.principal_id), col(ApiKey.created_at))
+        if principal_id is not None:
+            statement = statement.where(ApiKey.principal_id == principal_id)
+        found = await self._db.exec(statement)
+        return list(found.all())
 
     async def revoke(self, key_id: str) -> Optional[ApiKey]:
         """Mark a key unusable, keeping the row."""

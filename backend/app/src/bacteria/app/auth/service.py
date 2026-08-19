@@ -35,6 +35,10 @@ async def principal_is_known(session: AsyncSession, principal_id: str) -> bool:
     credential was issued to this principal at some point, not that the caller
     holds it — every route proves that with :data:`CurrentPrincipal` instead.
 
+    [ADR 0004](../../../../../docs/adr/0004-authentication-is-shared-authorization-lives-next-to-the-resource.md)
+    names this function as the one most likely to be misused that way, and this
+    docstring as the only thing preventing it.
+
     It exists for the operator CLI, where the principal is *typed* rather than
     proven. ``chat_session.user_id`` has no foreign key, deliberately, so a
     mistyped principal creates a perfectly valid session owned by nobody: no
@@ -45,6 +49,25 @@ async def principal_is_known(session: AsyncSession, principal_id: str) -> bool:
         Whether any key exists for the principal, revoked ones included.
     """
     return await ApiKeyRepository(session).has_principal(principal_id)
+
+
+async def list_keys(session: AsyncSession, principal_id: Optional[str] = None) -> list[ApiKey]:
+    """Every issued key, or one principal's, for an operator to read.
+
+    **Also not an authorization check**, and less obviously so than
+    :func:`principal_is_known` — this one returns rows, and rows look like
+    facts a caller may act on. Nothing here decides access; it exists so that a
+    person can answer "which principals are there" without opening a database
+    client, which is what the CLI otherwise sent them to do.
+
+    That gap was found by hitting it. ``bacteria-admin chat`` refuses an unknown
+    principal and tells the operator to check the spelling — against nothing,
+    because no command listed what the spellings were.
+
+    Returns:
+        Rows including revoked keys, oldest first within each principal.
+    """
+    return await ApiKeyRepository(session).list_keys(principal_id)
 
 
 async def revoke_key(session: AsyncSession, key_id: str) -> Optional[ApiKey]:

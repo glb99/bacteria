@@ -1,0 +1,21 @@
+{
+  "name": "bacteria-console",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "generate": "openapi-typescript openapi.json --output src/api.gen.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.14.1"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.9.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.14"
+  }
+}

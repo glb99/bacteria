@@ -147,9 +147,51 @@ jobs:
   # One required check for branch protection, instead of a list that has to be
   # edited in the GitHub UI every time a job is added or renamed. A skipped or
   # cancelled job counts as a failure here, which a plain `needs:` would not.
+  console:
+    # Needs both toolchains, which is the shape of the check rather than an
+    # oversight: the client is generated from the application's own OpenAPI
+    # document, so proving it has not drifted means building the Python
+    # application and then running node against what it produced.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Pinned so a uv release cannot change what the gate means. Before
+          # bumping, check astral-sh/setup-uv knows the new version's checksum.
+          version: "0.11.18"
+          enable-cache: true
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: uv sync --all-packages
+      - run: npm ci
+        working-directory: frontend
+      # `console-check` regenerates the client and fails when it differs from
+      # what was committed, so a backend rename cannot land without its client
+      # change. It also type-checks the console against the regenerated types,
+      # which is the half that names the line that has to change.
+      - run: uv run just console-check
+      # Built as well as checked. A client that type-checks and a bundle that
+      # will not build are different failures, and the deploy runs the second
+      # one -- so a green gate that never ran it would be a gate that cannot see
+      # what production does.
+      - run: uv run just console-build
+
   test-alls-green:
     if: always()
-    needs: [lint, typing, test-agent, test-app]
+    needs: [lint, typing, test-agent, test-app, console]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

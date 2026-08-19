@@ -108,6 +108,33 @@ jobs:
           BACTERIA_DATABASE_URL: ${{ secrets.BACTERIA_DATABASE_URL }}
         run: uv run just migrate
 
+      # Before `fastapi deploy`, and the ordering is the whole point of this
+      # step existing here rather than anywhere else.
+      #
+      # The platform builds from `pyproject.toml` and does not run npm, so
+      # nothing on their side will ever produce this. The console is installed as
+      # package data out of `backend/app/src/bacteria/app/console/`, and
+      # `fastapi deploy` packages its working directory *at the moment it runs* --
+      # so building afterwards, or in a separate job, ships an application whose
+      # console directory is empty.
+      #
+      # That failure is silent by design elsewhere: `views.py` mounts nothing
+      # when there is no `index.html`, deliberately, because an unbuilt checkout
+      # is the ordinary state of a fresh clone. The same silence in production
+      # means `/` answers 404 and every API route keeps working, which is a
+      # deployment that looks entirely healthy from the smoke check down.
+      - name: Set up Node
+        if: steps.configured.outputs.ready == 'true'
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build the console
+        if: steps.configured.outputs.ready == 'true'
+        run: uv run just console-build
+
       # Run from the repository root, and no `working-directory:`. This step is
       # what chooses the build context -- `fastapi deploy` packages its own
       # working directory and uploads that -- so it, and not the dashboard's

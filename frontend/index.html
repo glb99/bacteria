@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bacteria console</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <span class="brand">bacteria</span>
+      <span class="path">://console</span>
+      <span class="version">skeleton</span>
+      <span class="spacer"></span>
+      <span id="who" class="who" hidden></span>
+      <button id="sign-out" class="ghost" hidden>sign out</button>
+    </header>
+
+    <main id="main">
+      <!-- Both panels ship in the markup and one is hidden, rather than being
+           built in script. Which one shows is decided by asking the API, not by
+           reading anything the page stored -- see src/main.ts. -->
+      <section id="sign-in" hidden>
+        <h1>sign in</h1>
+        <p class="note">
+          Paste a key from <code>bacteria-admin issue-key</code>. It is sent once and
+          exchanged for a session cookie this page cannot read.
+        </p>
+        <form id="sign-in-form">
+          <input
+            id="key"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="fp_…"
+            required
+          />
+          <button type="submit">exchange</button>
+        </form>
+        <p id="sign-in-error" class="error" hidden></p>
+      </section>
+
+      <section id="sessions" hidden>
+        <h1>sessions</h1>
+        <p id="sessions-empty" class="note" hidden>
+          No conversations yet. <code>bacteria-admin chat &lt;principal&gt;</code> opens one.
+        </p>
+        <ul id="session-list"></ul>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

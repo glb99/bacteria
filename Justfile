@@ -113,6 +113,42 @@ typing:
 audit-ci:
     uv run zizmor .github/workflows
 
+# Regenerate the console's client from the application's own OpenAPI document.
+#
+# Two steps rather than one npm script, because the first needs Python and the
+# second needs node. The document is dumped from `create_app()` rather than
+# fetched from a running server: a step that needed a port, a database and a
+# startup wait would not survive being run inside CI or a pre-commit hook.
+#
+# `frontend/src/api.gen.ts` is committed; the document it came from is not. The
+# frontend CI job runs this and fails when the result differs from what was
+# committed, which is what stops a renamed response field from reaching a client
+# that still expects the old one -- the same shape as the migration drift test.
+
+# Regenerate the console's typed API client
+[group('console')]
+console-types:
+    uv run python scripts/openapi_document.py > frontend/openapi.json
+    cd frontend && npm run generate
+
+# Build the console into the package directory the API serves it from.
+#
+# `npm ci`, not `npm install`: it installs exactly the lockfile and fails when
+# `package.json` and the lock disagree, which is the difference between a build
+# that is reproducible and one that resolves whatever is newest today. The same
+# argument the comment at the top of this file makes about pinning the linter.
+
+# Build the console
+[group('console')]
+console-build:
+    cd frontend && npm ci && npm run build
+
+# Check the console's types and that its client matches the API
+[group('console')]
+console-check: console-types
+    cd frontend && npm run typecheck
+    git diff --exit-code frontend/src/api.gen.ts
+
 # `test-agent` is listed explicitly because `cov` does not cover it. Coverage
 # measures the application only, deliberately (ADR 0013) -- but "excluded from
 # the coverage report" quietly became "not run by the gate", so the agent's
@@ -124,7 +160,7 @@ audit-ci:
 
 # Perform all checks
 [group('qa')]
-check-all: lint test-agent cov typing audit-ci
+check-all: lint test-agent cov typing audit-ci console-check
 
 
 # Names the service rather than starting everything in the file, because

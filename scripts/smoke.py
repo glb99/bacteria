@@ -395,6 +395,39 @@ def run_checks(base_url: str, database_url: str) -> None:
     check_chat_cli(database_url)
 
 
+def check_console_is_served(base_url: str) -> None:
+    """The deployed application serves a built console at its root.
+
+    **A guard for a failure that is deliberately silent everywhere else.**
+    `views.py` mounts nothing when there is no `index.html`, on purpose, because
+    an unbuilt checkout is the ordinary state of a fresh clone. In production
+    that same silence means the console directory shipped empty -- `/` answers
+    404, every API route keeps working, and the deployment looks healthy from
+    every other check in this file.
+
+    The way it happens is one ordering mistake: `fastapi deploy` packages its
+    working directory at the moment it runs, and the platform builds from
+    `pyproject.toml` and never runs npm. A console built after that step, or in
+    a separate job, is a console that never reaches the image.
+
+    Deployed only, not in `run_checks`. A local `just smoke` runs against a
+    checkout that may legitimately have no console, and a gate that fails for
+    that would be one people learn to run around.
+    """
+    print("\n[console] a built console is served at the root")
+    response = httpx.get(f"{base_url}/", timeout=30.0, follow_redirects=True)
+    check(response.status_code == 200, "GET / is served", response.status_code)
+
+    # Asserted on the marker the build puts there rather than on any text, so
+    # that restyling the page cannot fail a deploy. What is being checked is
+    # that a *build* is present, not what it says.
+    check(
+        "<script" in response.text and 'src="/assets/' in response.text,
+        "the page references built assets",
+        response.text[:120],
+    )
+
+
 def run_deployed_checks(base_url: str, database_url: str) -> None:
     """The subset worth running against a deployment, after it lands.
 
@@ -421,6 +454,8 @@ def run_deployed_checks(base_url: str, database_url: str) -> None:
     revokes is a live credential accumulating in production for a principal only
     CI uses.
     """
+    check_console_is_served(base_url)
+
     key = issue_key("smoke-deploy")
     try:
         check_auth(base_url, key)

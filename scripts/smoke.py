@@ -405,26 +405,45 @@ def check_console_is_served(base_url: str) -> None:
     404, every API route keeps working, and the deployment looks healthy from
     every other check in this file.
 
-    The way it happens is one ordering mistake: `fastapi deploy` packages its
-    working directory at the moment it runs, and the platform builds from
-    `pyproject.toml` and never runs npm. A console built after that step, or in
-    a separate job, is a console that never reaches the image.
+    **Polls, and that is not defensive padding.** `fastapi deploy` prints "your
+    app is ready" when its build is ready, which is not the same instant the new
+    revision starts serving traffic. Asked once, this check failed a second
+    after that line appeared -- against the *previous* revision, which genuinely
+    had no console -- and reported a packaging fault that had already been fixed.
+
+    So this doubles as the wait for the rollout, and it is the only check here
+    that can serve as one. `check_auth` and `check_deferred_ingestion` answer
+    identically on either revision, so neither can tell you which one you are
+    talking to. That makes this the first check to run and the one that decides
+    whether the rest are describing what was just deployed.
 
     Deployed only, not in `run_checks`. A local `just smoke` runs against a
     checkout that may legitimately have no console, and a gate that fails for
     that would be one people learn to run around.
     """
     print("\n[console] a built console is served at the root")
-    response = httpx.get(f"{base_url}/", timeout=30.0, follow_redirects=True)
-    check(response.status_code == 200, "GET / is served", response.status_code)
+    deadline = time.monotonic() + STARTUP_TIMEOUT
+    last = "nothing was tried"
 
-    # Asserted on the marker the build puts there rather than on any text, so
-    # that restyling the page cannot fail a deploy. What is being checked is
-    # that a *build* is present, not what it says.
+    while time.monotonic() < deadline:
+        try:
+            response = httpx.get(f"{base_url}/", timeout=10.0, follow_redirects=True)
+        except httpx.TransportError as error:
+            last = f"{type(error).__name__}: {error}"
+        else:
+            # Asserted on the marker the build leaves rather than on any text,
+            # so that restyling the page cannot fail a deploy. What is being
+            # checked is that a *build* is present, not what it says.
+            if response.status_code == 200 and 'src="/assets/' in response.text:
+                check(True, f"a built console is served at {base_url}/")
+                return
+            last = f"HTTP {response.status_code}"
+        time.sleep(2.0)
+
     check(
-        "<script" in response.text and 'src="/assets/' in response.text,
-        "the page references built assets",
-        response.text[:120],
+        False,
+        f"a built console was served at {base_url}/ within {STARTUP_TIMEOUT}s",
+        last,
     )
 
 

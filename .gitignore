@@ -24,6 +24,13 @@ dist/
 # nobody can read. It is installed as package data, so CI and the deploy have to
 # build it -- see `.github/workflows/deploy.yml`, where building it *after*
 # `fastapi deploy` would ship an application with no console and say nothing.
+#
+# **This line is deleted by the deploy workflow, on purpose.** `fastapi deploy`
+# archives its working directory with `rignore`, which honours this file -- so
+# ignoring the artifact here also excluded it from the upload, and the first
+# deploy after the console existed reported success while `/` answered 404.
+# The workflow removes this exact line before deploying and fails if the path is
+# still ignored afterwards. Changing the pattern below means changing that step.
 backend/app/src/bacteria/app/console/
 
 # The OpenAPI document, dumped from the application to generate the client from.

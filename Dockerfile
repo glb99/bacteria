@@ -8,6 +8,32 @@
 # because which process this container is is a deployment decision and not a
 # property of the build.
 
+# The console is built here rather than copied in, and that is a correctness fix
+# rather than a convenience. `.dockerignore` used to let `COPY backend/` pick up
+# `backend/app/src/bacteria/app/console/` -- gitignored build output -- so the
+# image contained whatever the developer had last built, a stale bundle, or on a
+# fresh clone nothing at all. The same class of bug as the deploy workflow's
+# `rignore` problem, with the same symptom: `/` answers 404 and every API route
+# keeps working, so the deployment looks healthy from every other check.
+#
+# Its own stage, so node is a build dependency and never ships. `npm ci` for the
+# reason `just console-build` gives: it installs the lockfile exactly and fails
+# when `package.json` disagrees, where `npm install` resolves whatever is newest.
+FROM node:22-slim AS console
+
+WORKDIR /frontend
+# The manifests alone first, so editing a component does not reinstall vite.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+# `vite.config.ts` writes to `../backend/app/src/bacteria/app/console`, which
+# lands at /backend/... in this stage. Not overridden here: the path is where the
+# Python package looks, and a second definition of it is a second thing to keep
+# in step.
+RUN npm run build
+
+
 FROM python:3.13-slim-bookworm AS base
 
 # Compile to bytecode at install time and copy rather than link out of the cache
@@ -65,6 +91,22 @@ COPY scripts/ /app/scripts/
 # stops.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --package bacteria-app
+
+# After the sync, so a frontend edit does not invalidate the dependency layers.
+#
+# Into the source tree because `uv sync` installs workspace members editable, so
+# this is the directory the installed `bacteria.app` imports from. That is an
+# assumption about uv rather than something this file controls, which is why the
+# next step checks it instead of trusting it.
+COPY --from=console /backend/app/src/bacteria/app/console/                     /app/backend/app/src/bacteria/app/console/
+
+# Asked of the *installed* package, not of the filesystem. `views.py` mounts
+# nothing when `index.html` is absent -- deliberately, because an unbuilt
+# checkout is the ordinary state of a clone -- so a console that landed in the
+# wrong directory produces an image that starts cleanly, serves every API route,
+# and 404s at `/`. That is precisely the failure that shipped six times from the
+# other packaging path. Here it is a build error.
+RUN python -c "from bacteria.app.views import CONSOLE_DIR; index = CONSOLE_DIR / 'index.html'; assert index.is_file(), f'no console at {CONSOLE_DIR}; the COPY above missed where the package imports from'; print(f'console present: {CONSOLE_DIR}')"
 
 # Non-root, and created before the switch so the venv stays owned by root and
 # read-only to the process using it. A compromised worker cannot rewrite the code

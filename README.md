@@ -45,7 +45,9 @@ Contributing? `just hooks` installs the pre-commit hook as well, and
 [CONTRIBUTING.md](CONTRIBUTING.md) has the conventions.
 
 `just db-up` starts Postgres in Docker and waits until it accepts queries. It is
-required — the tests skip without it, and there is no SQLite fallback anywhere.
+required — the tests skip without it (and `just cov` fails rather than skipping,
+so the gate cannot go green on a machine with no database), and there is no
+SQLite fallback anywhere.
 SQLite was the default for a while and hid three things: it has no `SKIP LOCKED`,
 which the job queue needs; its DDL differs enough that a migration could pass
 here and fail in production; and it ignores `DateTime(timezone=True)`, so every
@@ -259,11 +261,17 @@ just cov             # application coverage, entrypoints omitted
 just lint            # ruff check + format
 just typing          # ty
 just audit-ci        # zizmor over the workflows
+just console-check   # console types, and that the generated client has not drifted
+just console-build   # and that the bundle actually builds, which typing alone misses
 just check-all       # all of the above
 ```
 
-`just check-all` is what CI runs, recipe for recipe. A check that exists only in
-CI is one people meet by being rejected by it.
+`just check-all` is what CI runs, apart from a handful of recorded exceptions —
+things needing a Docker daemon, a migrated database, or minutes rather than
+seconds. A check that exists only in CI is one people meet by being rejected by
+it, so the exceptions are not left to be noticed: `backend/app/tests/test_ci_gates.py`
+compares the two lists and fails on any difference that has not been written
+down with its reason.
 
 ```bash
 just smoke           # start a server and a worker, issue a key, make real requests
@@ -276,12 +284,20 @@ application could enqueue anything at all.
 
 ```bash
 just stack           # the whole thing in containers: migrate, then API + worker
-just stack-down
+just stack-smoke     # ... and run the smoke checks against it. What CI gates.
+just stack-stop      # stop the app containers, keep the database
+just stack-down      # also removes the Postgres volume `just db-up` shares
 ```
 
 One image, three processes. Not a deployment — no TLS, no restart policy,
 development credentials — but proof the image runs all of them against a real
-database.
+database, and the console is built inside it rather than copied from whatever
+the working tree happened to hold.
+
+`just stack-smoke` is the gate on that, and it exists because nothing built this
+image before. `fastapi deploy` never reads the `Dockerfile`; the platform builds
+with its own `uv sync`. So this is a second packaging path, and an unbuilt one
+is not the exit route it is meant to be.
 
 ```bash
 just makemigration "add whatever"   # generate from model changes — read it before committing

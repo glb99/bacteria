@@ -25,6 +25,11 @@ or let it start and stop everything itself, which is what CI does:
 
     uv run python scripts/smoke.py --managed
 
+or check the topology the deployment actually runs -- one process, with the
+worker inside the API rather than beside it:
+
+    uv run python scripts/smoke.py --managed --in-process-worker
+
 or check a deployment that is already running, after it lands:
 
     uv run python scripts/smoke.py --deployed --base-url https://...
@@ -394,7 +399,14 @@ def check_chat_cli(database_url: str) -> None:
     )
 
 
-def run_checks(base_url: str, database_url: str) -> None:
+def run_checks(base_url: str, database_url: str, check_console: bool = False) -> None:
+    # Opt-in, because whether a console *should* be there is a property of what
+    # is being checked rather than of the checks. A source checkout has none and
+    # that is not an error; an image built to ship has one, and its absence is
+    # the silent 404 this flag exists to make loud.
+    if check_console:
+        check_console_is_served(base_url)
+
     key = issue_key("smoke-principal")
     other_key = issue_key("smoke-stranger")
     check_auth(base_url, key)
@@ -403,6 +415,39 @@ def run_checks(base_url: str, database_url: str) -> None:
     check_inline_ingestion(base_url, key)
     check_deferred_ingestion(base_url, key, database_url)
     check_chat_cli(database_url)
+
+
+def run_in_process_checks(base_url: str, database_url: str) -> None:
+    """The topology production actually runs: one process, worker inside it.
+
+    **Every other check in this file runs a topology the deployment does not
+    use.** `--managed` starts a server and a worker as two processes, and so
+    does `compose.app.yml`. FastAPI Cloud runs one process, so the worker lives
+    in the API's lifespan behind `BACTERIA_RUN_WORKER_IN_API` (ADR 0001, "there
+    is nowhere else to put it"). That flag is therefore load-bearing in exactly
+    one configuration and exercised by none of them.
+
+    It failed once, in production. The variable never reached the process; the
+    service conversed perfectly while nothing drained the queue, and it was
+    found by hand days later — the last of six deployments that shipped broken
+    and looked healthy. `run_deployed_checks` catches it now, but only *after* a
+    deploy has landed on `main`. This catches it on the pull request.
+
+    Deliberately one assertion. The delta between this and `run_checks` is
+    whether a job is consumed when no separate worker exists, so serving,
+    authenticating and ingesting are not repeated here — they are the same code
+    on the same process either way, and a second copy would double the runtime
+    of the slowest job to re-answer a question already answered.
+
+    **Assumes no other worker is draining this database**, which is true in CI
+    by construction: the two-process run above terminates its worker in a
+    `finally` before this starts. Run locally with `just worker` going in
+    another terminal, this passes without proving anything — the job drains,
+    just not for the reason being tested.
+    """
+    print("\n[topology] the worker runs inside the API, as it does in production")
+    key = issue_key("smoke-in-process")
+    check_deferred_ingestion(base_url, key, database_url)
 
 
 def check_console_is_served(base_url: str) -> None:
@@ -508,7 +553,25 @@ def main() -> int:
         action="store_true",
         help="Start and stop the server and worker. Assumes the database is migrated.",
     )
+    parser.add_argument(
+        "--check-console",
+        action="store_true",
+        help="Also assert a built console is served at /. For checking something "
+        "packaged to ship; a source checkout legitimately has none.",
+    )
+    parser.add_argument(
+        "--in-process-worker",
+        action="store_true",
+        help="With --managed: start no worker, and run the API with "
+        "BACTERIA_RUN_WORKER_IN_API=true instead. Checks the deployed topology.",
+    )
     args = parser.parse_args()
+
+    # Refused rather than ignored. Without --managed this script starts nothing,
+    # so there is no process for the flag to apply to -- and silently checking
+    # the wrong topology is the failure this mode exists to catch.
+    if args.in_process_worker and not args.managed:
+        parser.error("--in-process-worker only means something with --managed")
 
     # A dashboard and a browser both hand out URLs with a trailing slash, and
     # every request here appends an absolute path -- so one slash makes every
@@ -527,19 +590,25 @@ def main() -> int:
             run_deployed_checks(base_url, database_url)
         elif not args.managed:
             wait_for_health(base_url, process=None)
-            run_checks(base_url, database_url)
+            run_checks(base_url, database_url, check_console=args.check_console)
         else:
             host, _, port = base_url.removeprefix("http://").partition(":")
             environment = {**os.environ, "HOST": host, "PORT": port or "8000"}
+            if args.in_process_worker:
+                environment["BACTERIA_RUN_WORKER_IN_API"] = "true"
             server = subprocess.Popen(
                 [sys.executable, "-m", "bacteria.app.entrypoints.asgi"], env=environment
             )
             try:
-                with background(
-                    "worker", [sys.executable, "-m", "bacteria.app.entrypoints.queue_worker"]
-                ):
+                if args.in_process_worker:
                     wait_for_health(base_url, server)
-                    run_checks(base_url, database_url)
+                    run_in_process_checks(base_url, database_url)
+                else:
+                    with background(
+                        "worker", [sys.executable, "-m", "bacteria.app.entrypoints.queue_worker"]
+                    ):
+                        wait_for_health(base_url, server)
+                        run_checks(base_url, database_url, check_console=args.check_console)
             finally:
                 server.terminate()
                 try:

@@ -48,13 +48,25 @@ test-app *args:
 _cov *args:
     uv run -m coverage {{ args }}
 
+# `REQUIRE_POSTGRES` is what makes this a gate rather than a report.
+#
+# The fixtures skip when the database is unreachable, which is right for one
+# file run from an editor and wrong here: pytest exits 0 on a run that skipped
+# everything, so with Docker stopped `just check-all` reported success having
+# executed no database test at all. The variable turns that skip into a failure.
+# `just test-app` deliberately does not set it -- that recipe is for iterating.
+#
+# Not `BACTERIA_`-prefixed, and that is not a style choice: an unrecognized
+# variable with that prefix is a refusal to boot, and this suite builds
+# `Settings`. See conftest.py.
+
 # Run tests and measure coverage
 [group('qa')]
 @cov:
     just _cov erase
     # The application only. The agent's suite is excluded on purpose --
     # see the note on `source` in pyproject.toml.
-    just _cov run -m pytest backend/app/tests
+    REQUIRE_POSTGRES=1 just _cov run -m pytest backend/app/tests
     # The entrypoint import check used to live here as `run -m
     # bacteria.app.entrypoints.asgi`, which quietly stopped being one when asgi.py
     # grew a __main__ block: -m runs the module, so it started a server and hung.
@@ -160,7 +172,7 @@ console-check: console-types
 
 # Perform all checks
 [group('qa')]
-check-all: lint test-agent cov typing audit-ci console-check
+check-all: lint test-agent cov typing audit-ci console-check console-build
 
 
 # Names the service rather than starting everything in the file, because
@@ -231,6 +243,41 @@ worker *args:
 stack *args:
     docker compose -f compose.yml -f compose.app.yml up --build {{ args }}
 
+# The image is the exit route off FastAPI Cloud, and until this existed nothing
+# ever built it. The platform's builder does not read the Dockerfile -- it runs
+# its own `uv sync` -- so this is a second packaging path that no gate exercised
+# and that could rot unnoticed until the day it was needed.
+#
+# It also checks the console, which the process-level `smoke` cannot: that recipe
+# runs against a checkout, where an unbuilt console is the ordinary case. Here
+# the image is expected to contain one, so `/` answering 404 is a failure.
+#
+# Leaves the stack running, like `smoke` leaves the database running. Locally,
+# stop it with `just stack-stop` and **not** `just stack-down`: that one passes
+# `-v`, and the volume it removes is the one `just db-up` uses, so tearing down
+# an experiment would silently take the development database with it. CI runs
+# `stack-down` on purpose -- a runner has nothing worth keeping.
+
+# Build the image, run all three processes, and smoke the result
+[group('qa')]
+stack-smoke:
+    just stack -d --wait
+    uv run python scripts/smoke.py --base-url http://127.0.0.1:8000 --check-console
+
+# Named services rather than `down`, which would stop Postgres too, and without
+# `-v`, which would delete its data. This is the teardown for "I am finished
+# looking at the containers" -- the common case, and the one where reaching for
+# `stack-down` costs a development database.
+
+# Stop just the application containers, leaving Postgres and its data
+[group('run')]
+stack-stop:
+    docker compose -f compose.yml -f compose.app.yml rm --stop --force api worker migrate
+
+# **Removes the Postgres volume**, which `just db-up` shares. That is right on a
+# CI runner and is why this is what the workflow calls; locally it is almost
+# always `just stack-stop` that was meant.
+
 # Stop the containerized stack and remove its volumes
 [group('run')]
 stack-down:
@@ -249,6 +296,12 @@ agent:
 #
 # Assumes the database is up and migrated. Verified to fail: run it with the
 # worker stopped and the queue check times out.
+#
+# `just smoke --in-process-worker` runs the arrangement a deployment uses
+# instead -- one process, worker inside the API -- which is the only
+# configuration `BACTERIA_RUN_WORKER_IN_API` is load-bearing in and the one that
+# shipped broken once. Note that a local `.env` setting that flag makes the
+# plain run a hybrid: both this recipe's worker and one inside the API.
 
 # Exercise the real path against a running stack
 [group('qa')]

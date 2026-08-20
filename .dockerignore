@@ -7,6 +7,10 @@
 !uv.lock
 !backend/
 !scripts/
+# The console's sources. The image builds them in its own stage; see the
+# Dockerfile. Only the sources are wanted here -- the built output is excluded
+# below, from both the place it is produced and the place it is consumed.
+!frontend/
 
 # Re-excluded from inside the directories added above. `.venv` is the important
 # one: it holds Linux-incompatible binaries when built on Windows or macOS, and
@@ -19,6 +23,19 @@ backend/**/.pytest_cache/
 backend/**/.ruff_cache/
 backend/**/.mypy_cache/
 backend/**/dist/
+
+# The console's build output, in the two places a working tree can hold it.
+#
+# **This is the line that makes the image reproducible.** Without it, `backend/`
+# carries whatever `just console-build` last wrote into the source tree, so the
+# image's console depended on the developer's working directory: stale on one
+# machine, absent on a fresh clone, current only by luck. The build stage
+# produces it now, and the build context must not be able to supply a second
+# candidate.
+backend/app/src/bacteria/app/console/
+frontend/node_modules/
+frontend/dist/
+frontend/openapi.json
 
 # Tests are not shipped. They need Postgres and dev dependencies the image does
 # not install, so their presence would only be misleading.

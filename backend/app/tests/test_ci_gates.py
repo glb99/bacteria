@@ -26,7 +26,26 @@ import pytest
 
 REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKFLOWS = REPOSITORY_ROOT / ".github" / "workflows"
-JUSTFILE = REPOSITORY_ROOT / "justfile"
+
+JUSTFILE_NAMES = ("justfile", "Justfile", ".justfile", "JUSTFILE")
+"""The names `just` itself accepts, searched in that order.
+
+Not a constant path, because the obvious one was wrong in a way no local run
+could show. This repository's file is committed as `Justfile`; the first version
+of this module asked for `justfile`, which resolves on a case-insensitive
+filesystem and does not on the Linux runner. It passed here, passed the whole
+`check-all`, and failed in CI on a name that is correct on the machine it was
+written on.
+"""
+
+
+def _justfile():
+    for name in JUSTFILE_NAMES:
+        candidate = REPOSITORY_ROOT / name
+        if candidate.is_file():
+            return candidate
+    raise AssertionError(f"no justfile under any of {JUSTFILE_NAMES} in {REPOSITORY_ROOT}")
+
 
 RUN_ONLY_IN_CI = {
     "db-up": "A precondition, not a check. `check-all` demands a database rather than "
@@ -78,10 +97,11 @@ def _recipes_run_by_workflows():
 
 
 def _check_all_dependencies():
-    for line in JUSTFILE.read_text(encoding="utf-8").splitlines():
+    justfile = _justfile()
+    for line in justfile.read_text(encoding="utf-8").splitlines():
         if line.startswith("check-all:"):
             return line.split(":", 1)[1].split()
-    raise AssertionError(f"no `check-all:` recipe in {JUSTFILE}")
+    raise AssertionError(f"no `check-all:` recipe in {justfile}")
 
 
 def test_the_parsers_find_something():
@@ -93,7 +113,7 @@ def test_the_parsers_find_something():
     shape as the `sed` in deploy.yml that had to be followed by a
     `git check-ignore`, and it is here for the same reason.
     """
-    assert JUSTFILE.is_file(), f"no justfile at {JUSTFILE}"
+    assert _justfile().is_file()
     assert WORKFLOWS.is_dir(), f"no workflows at {WORKFLOWS}"
 
     dependencies = _check_all_dependencies()

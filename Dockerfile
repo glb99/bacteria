@@ -98,6 +98,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # this is the directory the installed `bacteria.app` imports from. That is an
 # assumption about uv rather than something this file controls, which is why the
 # next step checks it instead of trusting it.
+# Emptied first, because `COPY backend/` above brings in whatever the developer
+# last built. Doing it here rather than in `.dockerignore` is deliberate and the
+# comment there says why: that file is uploaded to FastAPI Cloud and read by its
+# builder, so excluding the console there took it out of the *deployed* image.
+RUN rm -rf /app/backend/app/src/bacteria/app/console
+
 COPY --from=console /backend/app/src/bacteria/app/console/                     /app/backend/app/src/bacteria/app/console/
 
 # Asked of the *installed* package, not of the filesystem. `views.py` mounts

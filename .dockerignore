@@ -24,15 +24,19 @@ backend/**/.ruff_cache/
 backend/**/.mypy_cache/
 backend/**/dist/
 
-# The console's build output, in the two places a working tree can hold it.
+# **`backend/app/src/bacteria/app/console/` must NOT be listed here**, however
+# much it looks like it belongs -- it is build output, and excluding build output
+# is what the rest of this file does.
 #
-# **This is the line that makes the image reproducible.** Without it, `backend/`
-# carries whatever `just console-build` last wrote into the source tree, so the
-# image's console depended on the developer's working directory: stale on one
-# machine, absent on a fresh clone, current only by luck. The build stage
-# produces it now, and the build context must not be able to supply a second
-# candidate.
-backend/app/src/bacteria/app/console/
+# This file is uploaded to FastAPI Cloud. `.gitignore` and `.fastapicloudignore`
+# are stripped from the archive; `.dockerignore` and the `Dockerfile` are not, so
+# the platform's builder reads this. Listing the console here excluded it from
+# the deployed image: the API stayed healthy, every route kept working, and `/`
+# answered 404 -- the silent failure `check_console_is_served` exists for, which
+# is what caught it, twice, in sixty seconds.
+#
+# The Dockerfile gets its determinism by emptying that directory itself, just
+# before copying the freshly built console in. See the `rm -rf` there.
 frontend/node_modules/
 frontend/dist/
 frontend/openapi.json

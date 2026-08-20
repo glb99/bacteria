@@ -62,6 +62,24 @@ jobs:
       - name: Smoke
         run: uv run just smoke
 
+      # The same system in the arrangement it is actually deployed in, which the
+      # step above does not cover. That one starts a server and a worker as two
+      # processes; FastAPI Cloud runs one, so the worker lives in the API's
+      # lifespan behind `BACTERIA_RUN_WORKER_IN_API` (ADR 0001).
+      #
+      # So the flag that production depends on was exercised by nothing. It
+      # failed exactly that way once -- the variable never reached the process,
+      # the service conversed normally, and no job was ever consumed. That was
+      # found by hand, days after it shipped. `--deployed` catches it now, but
+      # only after a deploy has landed; this catches it on the pull request.
+      #
+      # A second step rather than a second job, so it reuses the Postgres and the
+      # migration above. It runs after, not before: the two-process run stops its
+      # worker in a `finally`, and a worker still running would drain the queue
+      # here for the wrong reason and pass.
+      - name: Smoke the deployed topology
+        run: uv run just smoke --in-process-worker
+
       - name: Server and worker logs
         if: failure()
         run: docker compose logs --no-color || true
@@ -69,3 +87,57 @@ jobs:
       - name: Stop Postgres
         if: always()
         run: docker compose down -v --remove-orphans
+
+  # The image, which nothing built before this job existed.
+  #
+  # `fastapi deploy` never reads the Dockerfile -- the platform builds with its
+  # own `uv sync` -- so the repository carries two packaging paths and only one
+  # of them was ever exercised. That is tolerable for a convenience and not for
+  # what this is: the way off the platform if it stops being the right host. A
+  # migration route that has not been built in six months is not a route.
+  #
+  # Its own job rather than a step in `smoke`, because it fails for different
+  # reasons. That one is "does the code work"; this is "does the artifact work",
+  # and a Docker registry hiccup should not be reported as a broken queue.
+  stack:
+    runs-on: ubuntu-latest
+    # Longer than `smoke`: this builds a Node stage and a Python stage from
+    # scratch on every run, with no layer cache carried between runs.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Pinned so a uv release cannot change what the gate means. Before
+          # bumping, check astral-sh/setup-uv knows the new version's checksum.
+          version: "0.11.18"
+          enable-cache: true
+
+      # Needed on the runner as well as in the image: the smoke script issues a
+      # credential through `bacteria-admin` locally and reads the job queue over
+      # the published port, while the API and worker under test are the
+      # containers. That split is the point -- an operator's CLI and a deployed
+      # service have to agree about a database neither of them owns.
+      - run: uv sync --all-packages
+
+      # No Node on the runner, deliberately. The console is built inside the
+      # image, so a console that only builds because the runner happened to have
+      # the right toolchain would be exactly the failure this is guarding.
+      - name: Build the image and smoke the whole stack
+        run: uv run just stack-smoke
+
+      - name: Stack logs
+        if: failure()
+        run: docker compose -f compose.yml -f compose.app.yml logs --no-color || true
+
+      - name: Stop the stack
+        if: always()
+        run: uv run just stack-down

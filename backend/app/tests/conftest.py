@@ -72,6 +72,52 @@ def pytest_asyncio_loop_factories(config, item):
     return {"loop": LOOP_FACTORY or asyncio.new_event_loop}
 
 
+REQUIRE_POSTGRES = "REQUIRE_POSTGRES"
+"""Set by `just cov` to turn "Postgres is down" from a skip into a failure.
+
+**Deliberately not ``BACTERIA_``-prefixed.** Every variable with that prefix
+that is not a setting is a refusal to boot (`core/settings.py`), and this suite
+drives entrypoints that build `Settings`. It is also outside the prefix
+`_ignore_ambient_configuration` strips, which is the second reason: a variable
+this suite must see cannot be one the suite deletes.
+"""
+
+
+def no_postgres(reason: str) -> None:
+    """Skip, or fail when the gate asked for a database and did not get one.
+
+    **A skipped test suite exits 0, and that made `just check-all` a gate that
+    could not fail.** With Docker stopped, every database test skipped, pytest
+    returned success, and the recipe people are told to run before pushing
+    reported green having exercised nothing — while `just smoke`, which is not
+    in that recipe, would have failed outright. "A gate nobody can turn green is
+    a gate nobody consults" is written in pyproject.toml about the opposite
+    failure; this is the one that costs more, because it is silent.
+
+    Still a skip by default, and that is the whole design. Running one file from
+    an editor on a machine with no Docker should say so and move on. It is the
+    *aggregate gate* that has no business claiming success, so `just cov` is
+    what sets the variable, and `just test-app` — the recipe for iterating —
+    does not.
+    """
+    if os.environ.get(REQUIRE_POSTGRES):
+        pytest.fail(f"{reason} (REQUIRE_POSTGRES is set, so this is a failure and not a skip)")
+    pytest.skip(reason)
+
+
+@pytest.fixture(scope="session", name="require_postgres")
+def _require_postgres():
+    """Hand :func:`no_postgres` to test modules, which cannot import it directly.
+
+    `--import-mode=importlib`, in `backend/app/pyproject.toml`, is the reason:
+    it does not put the test directory on `sys.path`, so `from conftest import
+    no_postgres` fails at collection rather than at runtime. A fixture is the
+    supported channel between a conftest and a test module, and this one exists
+    only to be that channel.
+    """
+    return no_postgres
+
+
 KEPT_FROM_THE_AMBIENT_ENVIRONMENT = frozenset({f"{ENV_PREFIX}DATABASE_URL"})
 """The only ``BACTERIA_*`` variable a test run inherits from outside.
 
@@ -240,7 +286,7 @@ def database_url() -> str:
             connection.execute(text(f'CREATE DATABASE "{name}"'))
     except sqlalchemy.exc.OperationalError:
         admin.dispose()
-        pytest.skip("Postgres unreachable; run `just db-up`")
+        no_postgres("Postgres unreachable; run `just db-up`")
 
     url = f"{stem}/{name}"
     patch = pytest.MonkeyPatch()

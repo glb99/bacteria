@@ -28,11 +28,12 @@ just install
 just hooks          # pre-commit hook; once per clone
 just migrate
 just test           # both suites
-just check-all      # what CI runs, recipe for recipe
+just check-all      # what CI runs, minus the recorded exceptions
 just smoke          # real server + real worker + real requests
 just serve          # migrates first
 just worker         # deferred jobs only run if this is running
 just stack          # all three processes in containers
+just stack-smoke    # build the image and smoke the containers; stack-stop after
 ```
 
 `just --list` is the full set. A recipe's description is the **last** contiguous
@@ -40,8 +41,17 @@ comment line above it, so the one-line summary goes immediately above the recipe
 and the reasoning above a blank line — otherwise `just --list` prints the tail of
 an explanation, which it did for six recipes.
 
-**Postgres must be running.** Without it, migration tests skip (loudly) and
-`just serve` fails. Docker Desktop has to be started manually on this machine.
+**Postgres must be running.** Docker Desktop has to be started manually on this
+machine. Without it `just serve` fails, and the suite's behaviour depends on
+which recipe asked: `just test-app` skips the database tests, `just cov` — and
+therefore `just check-all` — fails them, because `cov` sets `REQUIRE_POSTGRES`.
+
+That split exists because the skip made `check-all` a gate that could not fail.
+pytest exits 0 on a run that skipped everything, so with Docker stopped the
+recipe people are told to run before pushing reported success having executed no
+database test at all. Iterating on one file from an editor should still skip;
+the aggregate gate has no business claiming success. Never name that variable
+with the `BACTERIA_` prefix — an unrecognized one is a refusal to boot.
 
 ## Traps, each of which cost real time
 
@@ -123,6 +133,21 @@ runs on every pull request and fails them; a script written to answer one
 question, once, is not that, and adding it to the repository leaves behind
 something nobody maintains and nobody trusts.
 
+Two narrower modes exist alongside it, and both cover something the plain run
+cannot:
+
+- `just smoke --in-process-worker` runs the topology a deployment actually uses
+  — one process, worker inside the API behind `BACTERIA_RUN_WORKER_IN_API`
+  (ADR 0001). Everything else here runs the two-process shape, so that flag was
+  load-bearing in production and exercised nowhere. It failed exactly that way
+  once: the variable never reached the process, the service conversed normally,
+  nothing drained the queue, and it was found by hand days later. Note that a
+  local `.env` setting the flag makes the *plain* run a hybrid.
+- `just stack-smoke` builds the Docker image and runs the same checks against
+  the containers, including that the console is served from the image. The
+  platform's builder never reads the Dockerfile, so that is a second packaging
+  path, and it is the exit route off FastAPI Cloud.
+
 What `just smoke` deliberately does not cover: an agent turn. That needs a model
 provider, and the options are billing a vendor from CI or putting a test-only
 seam into production code. The turn is still verified by hand.
@@ -133,8 +158,9 @@ is a guard nobody has tested.
 
 ## Testing
 
-**Every test runs on Postgres.** `just db-up` first, or the suite skips. There is
-no SQLite anywhere — not as a fallback, not as a fast path. It was removed
+**Every test runs on Postgres.** `just db-up` first, or the suite skips — or
+fails, under `just cov`; see the note above. There is no SQLite anywhere — not
+as a fallback, not as a fast path. It was removed
 because it was actively lying: SQLite ignores `DateTime(timezone=True)` and
 returns naive datetimes, so every timestamp in the application round-tripped one
 way under test and another in production, and no test could see it.

@@ -50,7 +50,7 @@ def _sync_url(url: str) -> str:
 
 
 @pytest.fixture(name="migrated_db")
-def _migrated_db(monkeypatch):
+def _migrated_db(monkeypatch, require_postgres):
     """A throwaway database built by replaying every migration.
 
     A fresh database per run rather than a shared one, because a migration
@@ -72,7 +72,7 @@ def _migrated_db(monkeypatch):
         with admin.connect() as connection:
             connection.execute(text(f'CREATE DATABASE "{name}"'))
     except sqlalchemy.exc.OperationalError:
-        pytest.skip("Postgres unreachable; run `just db-up`")
+        require_postgres("Postgres unreachable; run `just db-up`")
 
     target = settings_url.rsplit("/", 1)[0] + "/" + name
     monkeypatch.setenv("BACTERIA_DATABASE_URL", target)

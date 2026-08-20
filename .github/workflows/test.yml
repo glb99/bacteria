@@ -120,8 +120,16 @@ jobs:
       - name: Start Postgres
         run: uv run just db-up
 
-      - name: Migrate
-        run: uv run just migrate
+      # No `Migrate` step, and its absence is deliberate rather than forgotten --
+      # smoke.yml has one, so the asymmetry is worth a sentence.
+      #
+      # This suite never touches the configured database. `conftest.py` creates
+      # `bacteria_test_<uuid>` and builds the schema straight from the models;
+      # `test_migrations.py` creates another and replays the whole history into
+      # it. Both connect to `postgres`, the maintenance database, to do so. A
+      # step upgrading `bacteria` would therefore change nothing any test can
+      # observe, which is worse than doing nothing: it reads as the thing
+      # keeping the schema honest, and that is test_migrations.py's job.
 
       # `cov` rather than `test-app`: it runs the same suite and produces the
       # report below. Running both would run the tests twice.

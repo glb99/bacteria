@@ -136,3 +136,27 @@ def _explained(left: Assertion, right: Assertion, conclusions: Sequence[Conclusi
         c.status == "active" and c.derived_by == "constraint-inference" and pair <= set(c.evidence)
         for c in conclusions
     )
+
+
+SEEDED: tuple[FunctionalConstraint, ...] = (
+    FunctionalConstraint(rel="cto", sentence="An organization has one CTO at a time."),
+    FunctionalConstraint(rel="ceo", sentence="An organization has one CEO at a time."),
+    FunctionalConstraint(rel="employer", sentence="A person has one employer at a time."),
+)
+"""The constraints that exist, which is a hardcoded three.
+
+Not built:
+    Anywhere for a constraint to come from. Nobody authors these: a person will
+    not sit down and write functional properties, and the model is explicit that
+    they should never have to. The agent proposing them from observed regularity
+    is the obvious answer and is not obviously right — a wrongly inferred
+    constraint generates false contradictions *forever*, which is worse than
+    having no constraint at all, and there is no equivalent of the rule of three
+    to say when a regularity is an invariant rather than a coincidence.
+
+    Left as a literal until that question has an answer, because a table and an
+    authoring route would commit to one before anyone chose it. Three is enough
+    to exercise the layer and small enough that a wrong one is noticed. When it
+    moves, it moves to rows keyed by owner, since "a person has one employer" is
+    exactly the kind of rule a particular person is entitled to disagree with.
+"""

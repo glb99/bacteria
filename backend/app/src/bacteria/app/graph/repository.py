@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
 from sqlalchemy import or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -148,14 +149,25 @@ class SqlGraphRepository:
     async def record(self, assertions: Iterable[Assertion]) -> None:
         """Append claims. Nothing here updates anything.
 
-        The unique constraint on ``(user_id, src, rel, dst, recorded_at)`` is what
-        makes a re-run idempotent rather than duplicating: the same claim recorded
-        at the same instant is the same row. A re-run at a *different* instant is
-        a second observation of the same fact, which is a thing that genuinely
-        happened and is worth having twice.
+        **Recording the same assertion twice is a no-op, not an error.** Writers
+        derive an assertion id from the claim, so an identical id means an
+        identical claim — and a retried job that re-reads the same slice must
+        land where it did rather than crash. The first version relied on the
+        unique constraint for that and did not survive a test of it: an
+        identical primary key raises rather than being ignored, so a crash
+        between the write and its watermark turned every retry into a failure.
+
+        Conflicts are ignored on the primary key alone. The constraint on
+        ``(user_id, src, rel, dst, recorded_at)`` still raises, and should: two
+        *different* ids for one claim at one instant means two writers disagreed
+        about how ids are derived, which is worth hearing about rather than
+        silently resolving.
         """
-        for assertion in assertions:
-            self._db.add(_to_row(assertion))
+        rows = [_to_row(assertion) for assertion in assertions]
+        if not rows:
+            return
+        statement = pg_insert(GraphAssertion).values([row.model_dump() for row in rows])
+        await self._db.exec(statement.on_conflict_do_nothing(index_elements=["assertion_id"]))
         await self._db.flush()
 
     async def believed_at(self, user_id: str, moment: datetime) -> list[Assertion]:

@@ -35,6 +35,7 @@ Not built:
 """
 
 import unicodedata
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -77,3 +78,39 @@ def normalize(label: str) -> str:
     nodes for "José" would be a split nobody could see by reading.
     """
     return unicodedata.normalize("NFKC", label).strip().casefold()
+
+
+SELF = "self"
+"""The label a first-person mention resolves to.
+
+A person's own graph has them in it, and a transcript almost never names them:
+they say "I", "me", "my team". Left alone an extractor invents a label for the
+speaker, and invents a different one next week — "user", "me", "I" — so the
+person whose graph it is ends up as three nodes, none of them connected.
+
+Reserved rather than guessed, and the guarantee is the id below rather than this
+string. Someone genuinely named "Self" gets an ordinary node, because their
+mention resolves by *label* while the owner resolves by *id*.
+"""
+
+_OWNER_NAMESPACE = uuid.UUID("6f1a9f9e-9a5e-4a4a-9d3a-1f3a4c2b8e77")
+"""A fixed namespace, so an owner's node id is the same on every machine.
+
+Arbitrary and permanent: changing it re-points every existing owner to a new
+node, orphaning every assertion about the person whose graph it is. It is written
+here as a literal rather than generated so that nothing can regenerate it.
+"""
+
+
+def owner_node_id(user_id: str) -> str:
+    """The node id standing for the person whose graph this is.
+
+    Derived rather than minted, so it needs no lookup and cannot be duplicated by
+    two concurrent first mentions — the failure that would otherwise leave one
+    person with two "self" nodes and their assertions split between them.
+
+    Deterministic from ``user_id`` alone. The label is not part of it: the owner's
+    name may be learned later and corrected in the column, which is exactly what
+    an id must not depend on.
+    """
+    return uuid.uuid5(_OWNER_NAMESPACE, user_id).hex

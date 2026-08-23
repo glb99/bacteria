@@ -24,6 +24,11 @@ export type MemoryEntry = components["schemas"]["MemoryEntryOut"];
 export type Proposal = components["schemas"]["ProposalOut"];
 export type Held = components["schemas"]["HeldOut"];
 export type ExtractionProgress = components["schemas"]["ExtractionProgressOut"];
+export type Graph = components["schemas"]["GraphOut"];
+export type GraphNode = components["schemas"]["NodeOut"];
+export type GraphAssertion = components["schemas"]["AssertionOut"];
+export type GraphConflict = components["schemas"]["ConflictOut"];
+export type GraphConclusion = components["schemas"]["ConclusionOut"];
 
 /** Raised when the API refuses the session, so callers can send the user back to sign-in. */
 export class Unauthenticated extends Error {}
@@ -72,6 +77,17 @@ export const readTranscript = (sessionId: string) =>
 
 export const readMemory = (sessionId: string) =>
   unwrap(api.GET("/chat/sessions/{session_id}/memory", { params: { path: { session_id: sessionId } } }));
+
+/**
+ * The whole memory graph for the signed-in caller.
+ *
+ * No session id, and the absence is the API's design rather than an omission
+ * here: a graph belongs to a person and outlives every conversation it was
+ * learned in, so there is no id to pass and therefore no id to get wrong.
+ */
+export const readGraph = () => unwrap(api.GET("/graph"));
+
+export const readConclusions = () => unwrap(api.GET("/graph/conclusions"));
 
 export const readProposals = (sessionId: string) =>
   unwrap(

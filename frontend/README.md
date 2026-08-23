@@ -6,9 +6,11 @@ running server is the live version.
 
 Vite, TypeScript, and a client generated from the application's own OpenAPI
 document. What is here is **Console v0**: signing in, then two tabs — `chat`,
-which drives a conversation, and `graph`, which draws memory and its proposals
-(with the edges labelled as derived, because ADR 0002 has not built relations
-yet). The chain it was built to prove runs underneath all of that and is still
+which drives a conversation, and `graph`, which draws the relations the
+extractor found, what contradicts what, and the conclusions drawn from them.
+It drew memory keys with edges derived from their prefixes until ADR 0006
+shipped real relations; that heuristic is gone, and proposals are reviewed in
+the chat tab where they always were. The chain it was built to prove runs underneath all of that and is still
 the reason the shape is what it is: the static mount, the session cookie, the
 same-origin assumption `SameSite=Strict` rests on, and the generated types —
 each verified alone, none of them used together before.

@@ -380,6 +380,28 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* Two proposers agreeing on a key is the ordinary case -- the `remember` tool
+   and the extractor both find the same fact, and `known_keys` steers them onto
+   one key on purpose. Marked in the header so the count is visible before the
+   accept buttons rather than after. */
+.proposal .rival {
+  font-size: 11px;
+  color: var(--danger);
+  border: 1px solid color-mix(in oklch, var(--danger) 45%, transparent);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+}
+
+/* Active memory is keyed by `key` alone, so this accept overwrites rather than
+   joins, and there is no history table to recover the previous value from.
+   Coloured like a destructive action because it is one. */
+.proposal .replaces {
+  margin: 0.35rem 0 0;
+  font-size: 11px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -472,15 +494,30 @@ code {
 .node .value {
   color: var(--muted);
   overflow-wrap: anywhere;
+  /* Pushes the tags right as a group. It was on `.tag` itself, which was correct
+     while there was only ever one and puts a gap between them once there are
+     two. */
+  margin-right: auto;
 }
 
 .node .tag {
-  margin-left: auto;
   font-size: 11px;
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 0 0.3rem;
+}
+
+/* A key more than one node claims. Active memory holds one entry per key, so
+   these are rivals for a single slot rather than separate facts -- and the graph
+   would otherwise draw them as two identical boxes side by side. */
+.node.contested {
+  border-color: color-mix(in oklch, var(--danger) 55%, var(--line));
+}
+
+.node .tag.contested {
+  color: var(--danger);
+  border-color: color-mix(in oklch, var(--danger) 45%, transparent);
 }
 
 /* Proposed nodes are dashed. They are the part of the graph that does not

@@ -7,6 +7,8 @@ exception ordering below is a correctness detail that fails silently, and it was
 in a file nothing measured.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -25,6 +27,16 @@ async def _repo(engine):
 async def _session_id(repo):
     session = await repo.create_session("owner-1")
     return session.session_id
+
+
+WHENEVER = datetime(2026, 1, 1, tzinfo=timezone.utc)
+"""A creation time for entries built by hand.
+
+Every ``held_now`` test below constructs a :class:`~bacteria.app.chat.review.PendingEntry`
+and none of them care when it was proposed -- but the field is required rather
+than defaulted, because the surfaces do care and a default would let one ship
+without it.
+"""
 
 
 # --- Parsing -----------------------------------------------------------------
@@ -138,7 +150,9 @@ def test_the_replacement_note_counts_decisions_made_since_the_listing():
     decision. Shown that snapshot, the reviewer is told the choice is free at
     exactly the moment it is not.
     """
-    entry = review.PendingEntry(source="model", key="dog_name", value="v", reason="r")
+    entry = review.PendingEntry(
+        source="model", key="dog_name", value="v", reason="r", created_at=WHENEVER
+    )
     just_accepted = review.Held(USER_SCOPE, "Pipin")
 
     assert review.held_now(entry, {}) == ()
@@ -149,7 +163,9 @@ def test_the_replacement_note_counts_decisions_made_since_the_listing():
 def test_a_scope_already_held_is_not_reported_twice():
     """Accepting into a scope the key already holds is still one replacement."""
     held = review.Held(SESSION_SCOPE, "terse")
-    entry = review.PendingEntry(source="model", key="tone", value="v", reason="r", held_by=(held,))
+    entry = review.PendingEntry(
+        source="model", key="tone", value="v", reason="r", created_at=WHENEVER, held_by=(held,)
+    )
 
     assert review.held_now(entry, {"tone": review.Held(SESSION_SCOPE, "terse")}) == (held,)
     assert review.held_now(entry, {"tone": review.Held(USER_SCOPE, "chatty")}) == (
@@ -173,6 +189,7 @@ def test_the_note_names_the_value_a_decision_would_destroy():
         key="dad_name",
         value="Your dad's name is Pedro.",
         reason="r",
+        created_at=WHENEVER,
         held_by=(review.Held(USER_SCOPE, "Pedro"),),
     )
 
@@ -193,6 +210,7 @@ def test_a_walks_own_decision_supersedes_the_listings_value():
         key="tone",
         value="chatty",
         reason="r",
+        created_at=WHENEVER,
         held_by=(review.Held(USER_SCOPE, "stale"),),
     )
 

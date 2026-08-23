@@ -414,6 +414,85 @@ async def test_rejecting_a_proposal_leaves_no_memory(client, token, monkeypatch)
     )
 
 
+async def test_a_listing_says_what_accepting_a_proposal_would_replace(client, token, monkeypatch):
+    """Accepting replaces rather than joins, and a reviewer must see that first.
+
+    Proposals are keyed by ``(source, key)`` and active memory by ``key`` alone,
+    so a proposal for a key something already holds is a destructive accept
+    wearing the same shape as a free one. There is no history table: the moment
+    the write lands the previous value is gone.
+
+    This lived only in the admin CLI's review walk. The console read
+    ``state.proposals`` through a projection that dropped it, so the surface
+    where people actually click accept was the one surface that could not say
+    what the click would cost.
+    """
+    session_id = new_session(client, token)
+    remember(client, token, session_id, "tone", "terse, no lists")
+
+    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    pending = client.get(
+        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
+    ).json()
+
+    assert len(pending) == 1
+    # The value, not merely the fact of a collision. Told only that something
+    # would be replaced, a reviewer accepted a strictly worse phrasing over a
+    # good one -- recorded in `review.Held`, and the reason this carries a value.
+    assert pending[0]["held_by"] == [{"scope": "session", "value": "terse, no lists"}]
+
+
+async def test_two_proposers_for_one_key_are_not_listed_as_independent(
+    client, token, monkeypatch, engine
+):
+    """The duplicate a reviewer actually sees, and why it is not a bug to remove.
+
+    Saying "my name is Guillermo" produces two proposals: the model's `remember`
+    tool proposes one mid-turn, and the extraction job proposes another from the
+    transcript afterwards. They agree on the *key* because `known_keys` pushes
+    the extractor towards names already in use -- without it the same fact
+    arrives as `name`, `first_name` and `preferred_name`, which is worse.
+
+    So two rows for one fact is the design (ADR 0017: collapsing them is a
+    judgement a person makes). What is not the design is listing them as though
+    they were unrelated. They compete for one slot in active memory, and
+    accepting both means the second silently undoes the first.
+    """
+    session_id = new_session(client, token)
+    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
+
+    async with AsyncSession(engine) as db:
+        await SqlSessionRepository(db).propose(
+            session_id,
+            key="tone",
+            value="likes bullet points",
+            reason="read it off the transcript",
+            source="extractor",
+        )
+
+    listing = client.get(
+        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
+    ).json()
+    assert {row["source"] for row in listing} == {"model", "extractor"}
+    # Nothing is active yet, so neither displaces anything: two rivals, both free.
+    assert all(row["held_by"] == [] for row in listing)
+
+    client.post(f"/chat/sessions/{session_id}/memory-proposals/extractor/tone", headers=auth(token))
+
+    survivor = client.get(
+        f"/chat/sessions/{session_id}/memory-proposals", headers=auth(token)
+    ).json()
+
+    # Accepting one does not clear the other -- deliberately, since the loser may
+    # be the better phrasing. But it is no longer a free accept, and that is what
+    # the listing now says rather than leaving the reviewer to notice.
+    assert [row["source"] for row in survivor] == ["model"]
+    assert survivor[0]["held_by"] == [{"scope": "session", "value": "likes bullet points"}]
+
+
 async def test_activating_a_proposal_that_is_not_there_is_404(client, token):
     """A stale review page must not conjure a memory nobody just read."""
     session_id = new_session(client, token)

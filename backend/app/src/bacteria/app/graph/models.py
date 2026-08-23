@@ -35,33 +35,23 @@ from typing import Any, Optional
 from sqlalchemy import Column, DateTime, UniqueConstraint
 from sqlmodel import JSON, Field, SQLModel
 
-OPEN_ENDED = datetime.max.replace(tzinfo=timezone.utc)
-"""Valid time that has not ended: true as of now, and continuing.
+from bacteria.app.graph.temporal import ALWAYS, OPEN_ENDED
 
-A sentinel rather than ``'infinity'``, and this was measured rather than
-reasoned about. Postgres accepts ``'infinity'::timestamptz`` and **psycopg 3
-raises on the way back**: ``DataError: timestamp too large (after year 10K)``. It
-does not degrade to ``datetime.max``; it refuses. A row carrying it would be
-writable, correct in SQL, and fatal to every Python caller that selected it —
-and nothing would notice until the first open-ended fact was read.
+__all__ = [
+    "ALWAYS",
+    "OPEN_ENDED",
+    "GraphAssertion",
+    "GraphConclusion",
+    "GraphConclusionEvidence",
+    "GraphNode",
+]
+"""Re-exports the two temporal sentinels, which are defined in ``temporal.py``.
 
-``datetime.max`` was checked against this stack instead: it round-trips to the
-same value, compares greater than ``now()``, and orders correctly, so indexes and
-``ORDER BY`` behave. ``tests/test_graph_models.py`` is what keeps that true.
-
-What it costs: a fact genuinely valid until the year 9999 is indistinguishable
-from an open one. Every query anyone will write treats those identically, which
-is why this is acceptable rather than merely tolerated.
-
-Distinct from ``None``, which means *unknown* — see :class:`GraphAssertion`.
-"""
-
-ALWAYS = datetime.min.replace(tzinfo=timezone.utc)
-"""Valid time with no beginning: true for as long as the subject existed.
-
-The mirror of :data:`OPEN_ENDED` and much rarer — most facts started at some
-unrecorded moment, which is ``None``, not this. Reach for it only when "has
-always been true" is a claim someone actually made.
+They were declared here first, when this was the only module in the package, and
+moved once there was logic to compare them: what a bound *means* is a property of
+the domain, not of the table it is stored in, and the comparison rules in
+``temporal.py`` depend on ``OPEN_ENDED`` being the maximum. Anything that stores
+an assertion needs both, so both stay importable from here.
 """
 
 

@@ -344,7 +344,8 @@ rather than only here:
 | Cross-batch duplicates | A repeated `external_id` in a later batch is stored twice. Needs someone to choose between "update" and "reject". |
 | A ceiling on pending proposals | Each extraction run is capped, and the total is not. A long conversation accumulates suggestions until a person drains them, which costs nothing in the prompt and everything in the review surface. |
 | Review across sessions | Proposals are listed one conversation at a time, so answering "what is waiting anywhere" means already knowing every session id. The nudge tells you a count for the session you are in and nothing about the rest. |
-| A graph over memory | Extraction produces flat keyed facts. Nodes, edges and vector retrieval are phase two of [ADR 0002](docs/adr/0002-the-memory-graph-is-postgres-tables.md), and the agent-side seam they need is [its ADR 0024](backend/agent/docs/adr/0024-memory-candidates-are-supplied-not-read-whole.md). |
+| Retrieval over the graph | Nodes, edges, contradictions and conclusions exist and are visible ([ADR 0006](docs/adr/0006-the-memory-graph-is-an-assertion-log.md)); nothing yet *retrieves* over them, so the graph does not affect what a model is told. That needs anchor resolution, vectors and the agent-side seam in [its ADR 0024](backend/agent/docs/adr/0024-memory-candidates-are-supplied-not-read-whole.md), and it is where ADR 0006's kill criterion gets settled. |
+| Writing to the graph | The console can show a wrong claim and offers no way to retract it. Read routes shipped first deliberately: a destructive route should not exist before there is a way to see what it would destroy. |
 | Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
 
 What is planned, in what order, and why, is in

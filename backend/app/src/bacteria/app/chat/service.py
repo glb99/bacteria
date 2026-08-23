@@ -37,6 +37,7 @@ from bacteria.app.chat.repository import KnownKeys, SqlSessionRepository
 from bacteria.app.chat.tasks import extract_memories_task
 from bacteria.app.core import observability
 from bacteria.app.core.jobs import get_app
+from bacteria.app.graph.tasks import extract_assertions_task
 
 # Suppressed for the same reason as bacteria's own table: the annotation is the
 # contract, and a checker inferring the concrete classes from the literal
@@ -164,6 +165,7 @@ async def run_turn(
     user_text: str,
     principal: str,
     extract: bool = False,
+    build_graph: bool = False,
 ) -> RunResult:
     """Advance one turn of a conversation.
 
@@ -182,6 +184,15 @@ async def run_turn(
             It reaches the trace and not yet ``run_meta``. Putting it in the
             transcript means widening what the agent stores, which is that
             package's decision to make.
+        build_graph: Whether to queue graph extraction over what this turn
+            wrote — the relationships between things said, rather than the facts
+            worth telling a model later.
+
+            Separate from ``extract`` rather than folded into it. They are two
+            model calls with two costs and two failure modes, and a deployment
+            wanting suggested facts reviewed by a person does not thereby want a
+            graph built. One argument would make turning either on a decision
+            about both, which is the coupling the two watermarks exist to avoid.
         extract: Whether to queue memory extraction over what this turn wrote.
 
             An argument rather than a settings lookup, so configuration stays at
@@ -208,7 +219,7 @@ async def run_turn(
             the same. This obligation is the cost of the trigger living here
             rather than at each entrance, and it is the smaller cost.
     """
-    if extract:
+    if extract or build_graph:
         _require_open_queue()
 
     # Fetched here rather than by each entrance, and the concrete repository is
@@ -233,11 +244,19 @@ async def run_turn(
         )
         turn.records(result.run_id)
 
+    # Both after the turn, so each job sees the transcript this turn wrote rather
+    # than the one before it. A turn that raised never reaches here and never
+    # enqueues, which loses nothing: neither watermark moved, so the next
+    # successful turn reads that turn's messages too.
     if extract:
-        # After the turn, so the job sees the transcript this turn wrote rather
-        # than the one before it. A turn that raised never reaches here and
-        # never enqueues, which loses nothing: the watermark did not move, so
-        # the next successful turn extracts from that turn's messages too.
         await extract_memories_task.defer_async(session_id=session_id)
+
+    # Enqueued independently rather than from inside the other job. They read the
+    # same slice and fail separately, and chaining them would make a graph
+    # extraction that returned unusable JSON cost a memory proposal its run — or,
+    # the other way round, make the graph silently stop being built the day
+    # someone turned memory extraction off.
+    if build_graph:
+        await extract_assertions_task.defer_async(session_id=session_id)
 
     return result

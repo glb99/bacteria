@@ -240,6 +240,7 @@ async def take_turn(
         # attribute away from a span.
         principal=principal.id,
         extract=settings.memory_extraction_enabled,
+        build_graph=settings.graph_extraction_enabled,
     )
     return TurnResult(run_id=result.run_id, reply=result.response.text)
 

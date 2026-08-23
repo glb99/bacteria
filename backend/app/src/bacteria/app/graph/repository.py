@@ -261,17 +261,35 @@ class SqlGraphRepository:
                 return _to_node(row)
         return None
 
-    async def mint_node(self, user_id: str, kind: str, label: str, *, now: datetime) -> Node:
+    async def node(self, user_id: str, node_id: str) -> Optional[Node]:
+        """One node by id, or ``None``. Scoped by owner like every other read."""
+        row = await self._db.get(GraphNode, (user_id, node_id))
+        return None if row is None else _to_node(row)
+
+    async def mint_node(
+        self,
+        user_id: str,
+        kind: str,
+        label: str,
+        *,
+        now: datetime,
+        node_id: Optional[str] = None,
+    ) -> Node:
         """Record a thing nobody has mentioned before.
 
         No uniqueness constraint stops two nodes carrying the same name, and that
         is deliberate: two people really can share one, and the schema has no way
         to know which case it is looking at. Deciding they are the same is a claim
         somebody makes, not a rule a table enforces.
+
+        ``node_id`` is supplied only for nodes whose identity is derived rather
+        than allocated — the graph owner's, which comes from the user id so that
+        two concurrent first mentions cannot produce two of them. Everything else
+        leaves it alone and gets a fresh one.
         """
         node = Node(
             user_id=user_id,
-            node_id=str(uuid.uuid4()),
+            node_id=node_id or str(uuid.uuid4()),
             label=label,
             kind=kind,
             first_seen=now,

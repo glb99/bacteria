@@ -118,6 +118,26 @@ class Settings(BaseSettings):
             not discover it on a bill. Nothing it produces can reach a model
             without a human activating it, so the risk of leaving it on is
             expense and review backlog rather than behaviour.
+        graph_extraction_enabled: Whether a turn queues a job to read the new
+            transcript items and record *relationships* from them in the memory
+            graph.
+
+            **Off by default**, and separately from ``memory_extraction_enabled``
+            rather than beside it. They are two model calls with two costs, and a
+            deployment that wants suggested facts reviewed by a person does not
+            thereby want a graph built — nor the reverse. One flag would make
+            turning either on a decision about both.
+
+            Nothing it writes reaches a model. An assertion may influence which
+            already-confirmed memories are surfaced and never contributes text,
+            so the risk of leaving this on is expense rather than behaviour.
+        graph_extraction_model: Which model records relationships, or ``None`` for
+            the provider's default. Separate from ``memory_extraction_model``
+            because the two prompts fill different schemas and may want different
+            models; the provider is shared.
+        graph_extraction_max_assertions: The most claims one run may record.
+            Higher than the proposal cap because nothing here waits for a person
+            — the bound is on a model's enthusiasm rather than on a review queue.
         memory_extraction_model: Which model performs the extraction, or ``None``
             for the provider's default.
 
@@ -185,6 +205,9 @@ class Settings(BaseSettings):
     run_worker_in_api: bool = False
     worker_concurrency: int = 4
     memory_extraction_enabled: bool = False
+    graph_extraction_enabled: bool = False
+    graph_extraction_model: str | None = None
+    graph_extraction_max_assertions: int = 8
     memory_extraction_model: str | None = None
     memory_extraction_max_proposals: int = 5
     logfire_token: str = ""

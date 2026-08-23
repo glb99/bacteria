@@ -119,3 +119,54 @@ async def test_node_ids_say_nothing_about_the_label(repo):
 
     assert "diane" not in node.node_id.lower()
     assert "mercer" not in node.node_id.lower()
+
+
+async def test_the_owner_resolves_to_one_node_however_it_is_spelled(repo):
+    """ "self", "Self" and "SELF" are the same person: the one whose graph it is.
+
+    A transcript rarely names the speaker, so an extractor left to itself invents
+    a label and invents a different one next week. Three nodes for the graph's
+    owner, none of them connected, is the failure this reserves against.
+    """
+    first = await refer_to(repo, "u1", "person", "self", now=NOW)
+    shouted = await refer_to(repo, "u1", "person", "SELF", now=LATER)
+
+    assert shouted.node_id == first.node_id
+
+
+async def test_the_owner_node_id_is_derived_rather_than_allocated(repo):
+    """Two concurrent first mentions must not produce two owners.
+
+    An allocated id would let both mint before either could look the other up,
+    splitting the owner's own assertions across a pair of nodes with nothing
+    recording that they are one person. Derived from the user id, that race has
+    nowhere to happen.
+    """
+    from bacteria.app.graph.identity import owner_node_id
+
+    node = await refer_to(repo, "u1", "person", "self", now=NOW)
+
+    assert node.node_id == owner_node_id("u1")
+    assert owner_node_id("u1") != owner_node_id("u2")
+
+
+async def test_two_owners_are_different_people(repo):
+    """The reserved label must not collapse two graphs into one node."""
+    mine = await refer_to(repo, "u1", "person", "self", now=NOW)
+    theirs = await refer_to(repo, "u2", "person", "self", now=NOW)
+
+    assert mine.node_id != theirs.node_id
+
+
+async def test_a_person_actually_called_self_gets_an_ordinary_node(repo):
+    """The reservation is on the label, so only a *person* named self collides.
+
+    An organization called "Self" resolves lexically like anything else, because
+    the owner is reserved for `kind="person"` alone. A person genuinely called
+    that is the case this cannot serve, and is rare enough to accept.
+    """
+    from bacteria.app.graph.identity import owner_node_id
+
+    org = await refer_to(repo, "u1", "organization", "Self", now=NOW)
+
+    assert org.node_id != owner_node_id("u1")

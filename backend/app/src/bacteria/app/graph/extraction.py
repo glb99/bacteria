@@ -86,7 +86,8 @@ Return ONLY a JSON array, with no prose and no code fence. Each element:
   tense     - whether the relationship still holds:
               "current" - stated in the present. "She is their CTO."
               "past"    - stated as over. "She used to work there."
-              "unknown" - mentioned without saying. "She worked with them once."
+              "unknown" - the relationship is named without saying whether it
+                          holds. "Diane and Acme came up in the meeting."
               Choose from how it is said, not from what seems likely.
   reason    - the words that support it, quoted or closely paraphrased, so a
               person can check the claim against the transcript.
@@ -96,6 +97,8 @@ Rules:
   Keep the same direction for the same relationship every time.
 - Use the name as it appears. Do not expand, shorten or correct it, and do not
   merge two spellings — deciding two names are one person is not your job.
+- For the person speaking — "I", "me", "my" — use exactly {"label": "self",
+  "kind": "person"}. Never invent a name for them and never use "user".
 - Only relationships between two named things. Not attributes ("is tired"), not
   events, not summaries of what was discussed.
 - Prefer few, high-confidence relationships. Return [] when nothing qualifies;

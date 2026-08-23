@@ -28,7 +28,7 @@ from typing import Sequence
 
 from bacteria.app.graph.conclusions import Conclusion, stale_after
 from bacteria.app.graph.constraints import SEEDED, Conflict, FunctionalConstraint
-from bacteria.app.graph.identity import Node
+from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -82,6 +82,12 @@ async def refer_to(
     ``last_seen`` moves on every mention, including the first, so a node that has
     only ever been mentioned once still says when.
     """
+    if kind == "person" and normalize(label) == SELF:
+        # A first-person mention is about the owner, whatever spelling reached
+        # here. Routed before the lexical lookup so that "self" can never mint an
+        # ordinary node and leave the owner with two.
+        return await owner(repository, user_id, now=now)
+
     existing = await repository.node_named(user_id, kind, label)
     if existing is None:
         return await repository.mint_node(user_id, kind, label, now=now)
@@ -91,6 +97,26 @@ async def refer_to(
     # caller a value that disagrees with the row it names, which is the class of
     # bug the detached-reads rule exists to prevent and which this reintroduced
     # by updating after reading.
+    return replace(existing, last_seen=now)
+
+
+async def owner(repository: SqlGraphRepository, user_id: str, *, now: datetime) -> Node:
+    """The node standing for the person whose graph this is.
+
+    Its id is derived from the user id rather than allocated, so this is a
+    get-or-create that two concurrent first mentions cannot turn into two nodes —
+    the failure that would split the owner's own assertions across a pair of
+    "self" nodes with nothing recording that they are one person.
+
+    The label starts as ``self`` because a transcript rarely names the speaker.
+    It is a label like any other and can be corrected the day their name is
+    learned, which is why the id does not depend on it.
+    """
+    node_id = owner_node_id(user_id)
+    existing = await repository.node(user_id, node_id)
+    if existing is None:
+        return await repository.mint_node(user_id, "person", SELF, now=now, node_id=node_id)
+    await repository.touch_node(user_id, node_id, now=now)
     return replace(existing, last_seen=now)
 
 

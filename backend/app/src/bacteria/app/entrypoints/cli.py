@@ -308,6 +308,7 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
                 user_text=user_text,
                 principal=principal_id,
                 extract=settings.memory_extraction_enabled,
+                build_graph=settings.graph_extraction_enabled,
             )
             print(result.response.text)
 

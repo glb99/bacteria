@@ -43,6 +43,7 @@ __all__ = [
     "GraphAssertion",
     "GraphConclusion",
     "GraphConclusionEvidence",
+    "GraphExtraction",
     "GraphNode",
 ]
 """Re-exports the two temporal sentinels, which are defined in ``temporal.py``.
@@ -237,3 +238,37 @@ class GraphConclusionEvidence(SQLModel, table=True):
     assertion_id: str = Field(
         foreign_key="graph_assertion.assertion_id", primary_key=True, index=True
     )
+
+
+class GraphExtraction(SQLModel, table=True):
+    """How far the graph extractor has read this session's transcript.
+
+    A second watermark table beside ``chat_memory_extraction``, which is what
+    that table's own docstring said would happen: "a second reader of the
+    transcript would want its own watermark, and a column named for one of them
+    would be the wrong shape immediately". This is that second reader.
+
+    Two watermarks rather than one shared column, because the readers advance
+    independently and for different reasons. Turning graph extraction on for an
+    existing deployment must not skip the backlog just because memory extraction
+    has already been through it, and a prompt change that justifies re-reading
+    one does not justify re-reading the other.
+
+    ``through_seq`` is the highest transcript ``seq`` already examined, so a run
+    reads ``seq > through_seq`` and costs stay proportional to new turns rather
+    than to conversation length. Initialized to ``-1`` rather than ``0``, since
+    position ``0`` is a real item and a default of ``0`` would silently skip the
+    first message of every session — the one most likely to say who someone is.
+
+    Not locked across a run, for the reason ``ChatMemoryExtraction`` gives: a run
+    holds a model call in the middle of it, and a row lock spanning a network
+    round trip is held for as long as a vendor feels like taking. Two concurrent
+    runs may both pay for a call and reach the same answer, which is money rather
+    than correctness.
+    """
+
+    __tablename__ = "graph_extraction"
+
+    session_id: str = Field(foreign_key="chat_session.session_id", primary_key=True)
+    through_seq: int = Field(default=-1)
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())

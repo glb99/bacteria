@@ -30,6 +30,7 @@ Not built:
     adding a limit here first would bound the wrong end.
 """
 
+import uuid
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
@@ -38,11 +39,13 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.app.graph.conclusions import Conclusion
+from bacteria.app.graph.identity import Node, normalize
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.models import (
     GraphAssertion,
     GraphConclusion,
     GraphConclusionEvidence,
+    GraphNode,
 )
 from bacteria.app.graph.temporal import Interval
 
@@ -101,6 +104,17 @@ def _to_row(assertion: Assertion) -> GraphAssertion:
         trust=assertion.trust,
         session_id=assertion.session_id,
         run_id=assertion.run_id,
+    )
+
+
+def _to_node(row: GraphNode) -> Node:
+    return Node(
+        user_id=row.user_id,
+        node_id=row.node_id,
+        label=row.label,
+        kind=row.kind,
+        first_seen=_as_utc(row.first_seen),
+        last_seen=_as_utc(row.last_seen),
     )
 
 
@@ -207,6 +221,78 @@ class SqlGraphRepository:
         self._db.add(_to_row(replacement))
         await self._db.flush()
 
+    async def node_named(self, user_id: str, kind: str, label: str) -> Optional[Node]:
+        """The node this person already has for this exact name, if any.
+
+        Matched on the normalized label rather than the stored one, so the same
+        name typed with different capitalization or Unicode composition finds the
+        existing node instead of quietly creating a second.
+
+        Normalizing in Python and comparing in SQL means the comparison happens
+        over values the database never normalized itself. That is fine while
+        `normalize` only casefolds and composes — both idempotent — and would
+        stop being fine the moment it did anything a stored label could not be
+        re-derived from. The stored label is the one that was written; this only
+        decides which node it belongs to.
+        """
+        rows = (
+            await self._db.exec(
+                select(GraphNode).where(
+                    col(GraphNode.user_id) == user_id,
+                    col(GraphNode.kind) == kind,
+                )
+            )
+        ).all()
+        wanted = normalize(label)
+        for row in rows:
+            if normalize(row.label) == wanted:
+                return _to_node(row)
+        return None
+
+    async def mint_node(self, user_id: str, kind: str, label: str, *, now: datetime) -> Node:
+        """Record a thing nobody has mentioned before.
+
+        No uniqueness constraint stops two nodes carrying the same name, and that
+        is deliberate: two people really can share one, and the schema has no way
+        to know which case it is looking at. Deciding they are the same is a claim
+        somebody makes, not a rule a table enforces.
+        """
+        node = Node(
+            user_id=user_id,
+            node_id=str(uuid.uuid4()),
+            label=label,
+            kind=kind,
+            first_seen=now,
+            last_seen=now,
+        )
+        self._db.add(
+            GraphNode(
+                user_id=node.user_id,
+                node_id=node.node_id,
+                label=node.label,
+                kind=node.kind,
+                first_seen=node.first_seen,
+                last_seen=node.last_seen,
+            )
+        )
+        await self._db.flush()
+        return node
+
+    async def touch_node(self, user_id: str, node_id: str, *, now: datetime) -> None:
+        """Note that this thing came up again.
+
+        ``last_seen`` is the only column on a node that changes. It answers "what
+        has this person stopped talking about", which is a question about the
+        record rather than about the world — so it is recorded time, and it is not
+        a claim.
+        """
+        row = await self._db.get(GraphNode, (user_id, node_id))
+        if row is None:
+            raise UnknownNodeError(node_id)
+        row.last_seen = now
+        self._db.add(row)
+        await self._db.flush()
+
     async def record_conclusion(self, conclusion: Conclusion) -> None:
         """Store a belief and the assertions it rests on.
 
@@ -291,3 +377,7 @@ class UnknownAssertionError(KeyError):
 
 class UnknownConclusionError(KeyError):
     """A conclusion id that did not resolve, or belongs to someone else."""
+
+
+class UnknownNodeError(KeyError):
+    """A node id that did not resolve, or belongs to someone else."""

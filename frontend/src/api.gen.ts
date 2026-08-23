@@ -325,6 +325,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Graph
+         * @description The caller's own graph as it currently stands.
+         *
+         *     "Currently" means believed now — ``recorded_until IS NULL`` — not everything
+         *     ever claimed. The log keeps superseded claims so a past belief stays
+         *     recoverable; a reader looking at their memory wants what it holds, and the
+         *     history is a different question with a different route when someone needs it.
+         *
+         *     Conflicts are computed on read rather than stored. They are a function of
+         *     what is believed and which rules exist, so a stored copy would be a cache
+         *     that goes stale the moment either changes — and the thing it would be
+         *     caching is a comparison over a set small enough to walk.
+         */
+        get: operations["read_graph_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/graph/conclusions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Conclusions
+         * @description Beliefs the system drew, including the ones that have gone stale.
+         *
+         *     Stale ones are returned rather than filtered, because "this rested on
+         *     something that has since changed" is the most useful thing this layer can
+         *     tell a person, and hiding it would leave them looking at a shorter list with
+         *     no indication anything had been withdrawn.
+         */
+        get: operations["read_conclusions_graph_conclusions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -431,6 +486,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AssertionOut
+         * @description One claim, with its two time axes flattened for a reader.
+         *
+         *     ``ends`` is a rendered string rather than the raw bound, because the three
+         *     states a bound can be in — a date, open, unknown — are the distinction the
+         *     whole temporal layer rests on, and a JSON ``null`` on the wire cannot carry
+         *     it. A client receiving ``null`` would have to know that the open sentinel is
+         *     a particular timestamp in the year 9999 to tell "still true" from "nobody
+         *     knows", which is exactly the knowledge an API should not require.
+         */
+        AssertionOut: {
+            /** Assertion Id */
+            assertion_id: string;
+            /** Dst */
+            dst: string;
+            /** Ends */
+            ends: string;
+            /** Reason */
+            reason: string | null;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Rel */
+            rel: string;
+            /** Src */
+            src: string;
+            /** Starts */
+            starts: string | null;
+            /** Trust */
+            trust: string;
+        };
         /** BatchQueued */
         BatchQueued: {
             /** Job Id */
@@ -444,6 +533,58 @@ export interface components {
             batch_id: number | null;
             /** Rejected */
             rejected: components["schemas"]["RejectionOut"][];
+        };
+        /**
+         * ConclusionOut
+         * @description A belief the system drew, and the claims it rests on.
+         *
+         *     ``evidence`` is always populated. A conclusion whose grounds a person cannot
+         *     follow is one they can only take on faith, which is the opposite of the point
+         *     — and the mandatory link is what makes it possible to say *why* something
+         *     went stale rather than only that it did.
+         */
+        ConclusionOut: {
+            /** Conclusion Id */
+            conclusion_id: string;
+            /** Confidence */
+            confidence: number;
+            /** Derived By */
+            derived_by: string;
+            /** Evidence */
+            evidence: string[];
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Statement */
+            statement: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * ConflictOut
+         * @description Two claims a rule says cannot both hold, and how sure we are.
+         *
+         *     ``state`` is one of conflict, possible or explained. A client should render
+         *     all three differently: the first is a contradiction, the second is missing
+         *     dates, and the third is an assumption someone can disagree with.
+         *
+         *     ``sentence`` travels with it because a constraint here is a hypothesis about
+         *     the user's world rather than a rule the system is entitled to enforce — a
+         *     person cannot contest what they cannot read.
+         */
+        ConflictOut: {
+            /** Left */
+            left: string;
+            /** Right */
+            right: string;
+            /** Rule */
+            rule: string;
+            /** Sentence */
+            sentence: string;
+            /** State */
+            state: string;
         };
         /**
          * ExtractionProgressOut
@@ -460,6 +601,18 @@ export interface components {
             latest_seq: number;
             /** Through Seq */
             through_seq: number;
+        };
+        /**
+         * GraphOut
+         * @description Everything currently believed, and what disagrees with what.
+         */
+        GraphOut: {
+            /** Assertions */
+            assertions: components["schemas"]["AssertionOut"][];
+            /** Conflicts */
+            conflicts: components["schemas"]["ConflictOut"][];
+            /** Nodes */
+            nodes: components["schemas"]["NodeOut"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -538,6 +691,28 @@ export interface components {
             reason: string;
             /** Value */
             value: unknown;
+        };
+        /**
+         * NodeOut
+         * @description One thing the graph knows about.
+         */
+        NodeOut: {
+            /**
+             * First Seen
+             * Format: date-time
+             */
+            first_seen: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /**
+             * Last Seen
+             * Format: date-time
+             */
+            last_seen: string;
+            /** Node Id */
+            node_id: string;
         };
         /**
          * ProposalOut
@@ -1143,6 +1318,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TurnResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_graph_graph_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_conclusions_graph_conclusions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConclusionOut"][];
                 };
             };
             /** @description Validation Error */

@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from bacteria.app.auth.views import router as auth_router
 from bacteria.app.chat.views import router as chat_router
+from bacteria.app.graph.views import router as graph_router
 from bacteria.app.ingestion.views import router as ingestion_router
 
 CONSOLE_DIR = Path(__file__).parent / "console"
@@ -59,6 +60,7 @@ def create_app(lifespan=None, console_dir: Path | None = None) -> FastAPI:
     # tags in the order routers are added.
     app.include_router(auth_router)
     app.include_router(chat_router)
+    app.include_router(graph_router)
     app.include_router(ingestion_router)
 
     @app.get("/health", tags=["ops"])

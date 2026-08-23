@@ -31,11 +31,10 @@ import sqlalchemy
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
-from sqlmodel import Session, SQLModel
+from sqlmodel import SQLModel
 
 # Imported for the side effect of registering every table on SQLModel.metadata,
 # which is what both the schema build and the truncation below iterate over.
-from bacteria.app import models as _root_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
 from bacteria.app.chat import models as _chat_models  # noqa: F401
 from bacteria.app.core import observability
@@ -366,13 +365,3 @@ async def _engine(database_url):
     finally:
         await engine.dispose()
         get_settings.cache_clear()
-
-
-@pytest.fixture(name="sync_session")
-def _sync_session(database_url):
-    """A synchronous session, for the repositories that are still synchronous."""
-    _truncate(database_url)
-    engine = create_engine(database_url)
-    with Session(engine) as session:
-        yield session
-    engine.dispose()

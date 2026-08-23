@@ -29,7 +29,6 @@ from sqlmodel import SQLModel
 # Imported for the side effect of registering tables on SQLModel.metadata.
 # Without every model module imported here, autogenerate sees a table it does
 # not know about and cheerfully writes a migration to drop it.
-from bacteria.app import models as _root_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
 from bacteria.app.chat import models as _chat_models  # noqa: F401
 from bacteria.app.core.db import include_name

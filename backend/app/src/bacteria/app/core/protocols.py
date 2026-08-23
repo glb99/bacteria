@@ -1,83 +1,53 @@
 """The contracts features are written against, rather than against each other.
 
 Structural, not nominal: a class satisfies anything here by having the methods.
-There is no base class to inherit and nothing to register, so a repository backed
-by SQLModel, by an HTTP call, or by a dict in a test are interchangeable without
-any of them knowing this module exists.
+There is no base class to inherit and nothing to register, so a processor backed
+by a pure function, by an HTTP call, or by a dict in a test are interchangeable
+without any of them knowing this module exists.
 
-The repository protocols are deliberately one method each. A repository declares
-the two or three it actually offers and no more, so a caller needing only reads
-cannot be handed something that also deletes.
+**The four CRUD repository protocols were here and are gone, and that is the
+finding rather than a tidy-up.** ``CanRead``, ``CanCreate``, ``CanUpdate`` and
+``CanDelete`` were one method each, segregated so that a caller needing only
+reads could not be handed something that also deletes -- which is a good rule
+and was still the wrong shape here. Every repository this application actually
+grew declined it:
 
-Two things were here and were removed, because both undid that:
+- ``ApiKeyRepository`` has ``get_by_key_id``, a three-argument ``create``, and
+  ``revoke`` rather than ``delete`` -- because revocation is a timestamp, so
+  that "this key was valid until Tuesday" stays answerable.
+- ``SqlSessionRepository`` has ``create_session`` / ``get_state`` / ``commit`` /
+  ``remember`` / ``forget``, and no ``update`` at all: an update method is a
+  second write path through a store whose entire design rests on having exactly
+  one. `bacteria.agent.session.protocol` argues this at length and is the
+  protocol that has two implementations and fifty conformance tests.
+- ``IngestionRepository`` has ``persist``.
+
+So they had exactly one implementer ever -- a ``UserRepository`` that came from
+the project template, that no router ever mounted, and that was deleted with the
+``user`` table in migration ``a3f81c60b204``. Nothing was ever *written against*
+them either: no signature anywhere annotated one. That is the line worth keeping,
+because it is what separates a seam from a shape nobody chose --
+``SessionRepository`` had no implementation for a while too, and was real the
+whole time, because ``Runtime`` was written against it.
+
+Two earlier removals made the same point one step less far, and are worth
+keeping for the same reason:
 
 - ``CRUDRepository``, a composite of all four. Recombining them defeats the
-  split in a single line, and most repositories genuinely do not want all four —
-  bacteria's ``SessionStore`` is the sharp case, where an ``update`` method
-  would be a second write path through a store whose entire design rests on
-  having exactly one.
+  split in a single line.
 - ``Repository``, an empty base marker. Under structural typing a marker adds no
   constraint a checker can enforce and no capability a caller can rely on, so it
   reads as documentation while behaving as nothing.
 
-Note what these protocols do *not* say: whether a method is a coroutine. A
-synchronous implementation and an async one both satisfy them structurally, and
+Note what the protocol below does *not* say: whether a method is a coroutine. A
+synchronous implementation and an async one both satisfy it structurally, and
 only the caller's ``await`` tells the difference. Pick one convention per
 application and hold to it.
 """
 
-from typing import Any, Optional, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 DataType = TypeVar("DataType")
-CreateModelType = TypeVar("CreateModelType")
-IdType = TypeVar("IdType")
-
-
-class CanRead(Protocol[DataType, IdType]):
-    """Reads one entity by identity."""
-
-    def get_by_id(self, id: IdType) -> Optional[DataType]:
-        """Return the entity, or ``None`` when there is no such id.
-
-        ``None`` rather than an exception: "not found" is an ordinary answer to
-        a lookup. A caller that wants it to be exceptional can say so at the
-        call site far more cheaply than one that wants the reverse.
-        """
-        ...
-
-
-class CanCreate(Protocol[DataType, CreateModelType]):
-    """Creates an entity from a payload that is not one yet.
-
-    ``CreateModelType`` is separate from ``DataType`` deliberately: what a caller
-    supplies has no identity, and what comes back does. Collapsing them means
-    either inventing an id before the store assigns one, or making the id
-    optional forever on a type that always has one after creation.
-    """
-
-    def create(self, data: CreateModelType) -> DataType:
-        """Persist ``data`` and return the created entity, identity included."""
-        ...
-
-
-class CanUpdate(Protocol[DataType]):
-    """Writes back an entity that already exists."""
-
-    def update(self, entity: DataType) -> DataType:
-        """Persist changes to ``entity`` and return the stored result."""
-        ...
-
-
-class CanDelete(Protocol[IdType]):
-    """Removes an entity by identity."""
-
-    def delete(self, id: IdType) -> None:
-        """Remove the entity.
-
-        Deleting an absent id is a no-op rather than an error: the caller wanted
-        it gone, and it is.
-        """
-        ...
 
 
 class Processable(Protocol[DataType]):

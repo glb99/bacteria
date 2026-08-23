@@ -266,6 +266,19 @@ class SqlGraphRepository:
         row = await self._db.get(GraphNode, (user_id, node_id))
         return None if row is None else _to_node(row)
 
+    async def nodes(self, user_id: str) -> list[Node]:
+        """Every node in this person's graph.
+
+        Unbounded, like the rest of the reads here, and the note in the module
+        docstring about pagination applies to this one first: a graph accumulates
+        nodes faster than it accumulates anything else, because every new name is
+        one.
+        """
+        rows = (
+            await self._db.exec(select(GraphNode).where(col(GraphNode.user_id) == user_id))
+        ).all()
+        return [_to_node(row) for row in rows]
+
     async def mint_node(
         self,
         user_id: str,

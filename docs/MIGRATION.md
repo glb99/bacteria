@@ -48,7 +48,7 @@ bacteria/
       src/bacteria/app/
         core/                    cross-cutting infrastructure
           __init__.py
-          protocols.py           repository contracts
+          protocols.py           the Processable step contract
           handlers.py            Chain of Responsibility
           adapters.py            FunctionalProcessor
           settings.py            pydantic-settings; the only env reader
@@ -204,11 +204,11 @@ excludes 3.14, which is what the agent's virtualenv is currently running.
 |---|---|---|
 | `src/agent/` (an earlier broken copy) | *delete* | Broken copy — the directory was renamed but every internal import still says `from bacteria...`. Replaced by the real package. |
 | `tests/agent/` | *delete* | Ships with the package. |
-| `src/protocols.py` | `core/protocols.py` | Trimmed — see below. |
+| `src/protocols.py` | `core/protocols.py` | Trimmed — see below. Trimmed again since, to `Processable` alone. |
 | `src/handlers.py` | `core/handlers.py` | Two fixes — see below. |
 | `src/adapters.py` | `core/adapters.py` | As-is. |
-| `src/bacteria/app/models.py` | per feature | `User` is not a feature; it belongs wherever accounts land. Drop the unused `Session`, `create_engine`, `select` imports. |
-| `src/bacteria/app/repositories.py` | per feature | **Has no imports at all** — references `Session`, `User`, `UserCreate`, `UserId`, `Optional` from nowhere. Note this is *worse* than it looks on Python 3.14: PEP 649 defers annotation evaluation, so the module now imports cleanly and fails at first **call** instead of at import. Moved as-is; still to fix. |
+| `src/bacteria/app/models.py` | *deleted* | Held `User` alone, which was template scaffolding rather than a feature: nothing mounted a router for it and no credential ever resolved to a row. Deleted with the `user` table in `a3f81c60b204` — the name read as the accounts table this application deliberately does not have. |
+| `src/bacteria/app/repositories.py` | *deleted* | Went with `models.py`, taking the last synchronous repository and the `sync_session` fixture with it. Worth keeping the reason it survived so long: it had **no imports at all**, and on Python 3.13 that raised `NameError` at import — but PEP 649 defers annotation evaluation from 3.14, so it began importing cleanly and would have failed at the first *call* instead. |
 | `src/bacteria/app/services.py` | per feature | Empty today. |
 | `src/bacteria/app/dependencies.py` | `core/dependencies.py` | Empty today. |
 | `src/bacteria/app/views.py` | `<feature>/views.py` | The `/` hello route becomes a health check. |
@@ -224,6 +224,15 @@ an empty marker interface, which structural typing makes unnecessary. The second
 recombines the four segregated protocols into the god-interface that segregating
 them was meant to avoid; compose the two or three a given repository actually
 needs at its definition instead.
+
+**Since then, the four segregated protocols went too**, and the reason is more
+interesting than the one above. `CanRead`, `CanCreate`, `CanUpdate` and
+`CanDelete` were not too coarse — they were the wrong shape. Every repository
+this application grew declined them: `ApiKeyRepository` revokes rather than
+deletes, `SqlSessionRepository` has no `update` by design, `IngestionRepository`
+persists. Their only implementer was the template's `UserRepository`, deleted
+with the `user` table in `a3f81c60b204`, and no signature anywhere was ever
+annotated with one. `core/protocols.py` keeps the full account.
 
 **`core/handlers.py`** — two fixes. `_next_handler` is declared as a class
 attribute and works only because `set_next` shadows it on the instance; move it
@@ -253,8 +262,14 @@ That protocol is **not** `CRUDRepository`. `SessionStore` exposes
 `create_session` / `get_state` / `commit` / `remember` / `forget` — deliberately
 no `update`, because an update method is a second write path and
 [ADR 0004](../backend/agent/docs/adr/0004-single-commit-path.md) exists to
-guarantee there is exactly one. The generic CRUD protocols serve the
-application's own entities, where CRUD genuinely is the shape.
+guarantee there is exactly one.
+
+> The last sentence here used to read "The generic CRUD protocols serve the
+> application's own entities, where CRUD genuinely is the shape." That was
+> wrong, and it is left visible because the mistake is instructive: the CRUD
+> shape was assumed to fit the *application* because it did not fit the agent.
+> It fit neither. Every repository the application grew has domain verbs, and
+> the protocols were deleted rather than implemented.
 
 **3. Approval becomes an awaitable decision, not a prompt.**
 `tools/approval.py` reads stdin. That cannot exist in a request handler or a

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from bacteria.agent.session.store import SESSION_SCOPE, USER_SCOPE, MemoryScope
 from bacteria.app.auth.dependencies import CurrentPrincipal
+from bacteria.app.chat import review
 from bacteria.app.chat.access import load_owned_session
 from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
@@ -125,12 +126,37 @@ class MemoryEntryOut(BaseModel):
     created_at: datetime
 
 
+class HeldOut(BaseModel):
+    """An active memory a proposal would displace, and what it currently says.
+
+    The value is carried, not just the scope. Warning that something will be
+    replaced without saying what is a note that reads as informative and decides
+    nothing -- recorded in :class:`~bacteria.app.chat.review.Held` from a review
+    walk where it cost a good value.
+    """
+
+    scope: MemoryScope
+    value: Any
+
+
 class ProposalOut(BaseModel):
     """A suggested memory awaiting a decision.
 
     Carries ``source`` because it is half of the identity: two proposers may
     suggest the same ``key``, and a reviewer choosing between them needs to know
     which is which. Both are required to activate or reject one.
+
+    ``held_by`` is what makes that choice an informed one. Proposals are keyed by
+    ``(source, key)`` and active memory by ``key`` alone, so accepting a second
+    suggestion for a key *replaces* the first rather than joining it. Two
+    proposers agreeing on a key is the ordinary case rather than a corner one --
+    ``known_keys`` deliberately pushes the extractor towards keys already in use,
+    so "my name is Guillermo" routinely produces both ``("model", "name")`` and
+    ``("extractor", "name")`` -- and the collapse between them is invisible
+    unless the listing says so *before* the decision instead of after.
+
+    Empty for a proposal whose key nothing active holds, which is the common
+    case and the one where accepting costs nothing.
     """
 
     source: str
@@ -138,6 +164,7 @@ class ProposalOut(BaseModel):
     value: Any
     reason: str
     created_at: datetime
+    held_by: list[HeldOut] = []
 
 
 @router.get("/sessions", response_model=list[SessionSummaryOut])
@@ -383,18 +410,32 @@ async def read_proposals(
     A queue nobody reads is the failure mode this route enables, and it is
     recorded as such in ADR 0017 — proposals accumulate, nothing activates, and
     the agent appears to have no memory while behaving exactly as designed.
+
+    Built through :func:`~bacteria.app.chat.review.pending_from` rather than by
+    reading ``state.proposals`` here, and that was a real gap rather than tidying.
+    ``held_by`` — what accepting a proposal would replace — existed only in the
+    admin CLI's review walk, so the console listed two suggestions for one key as
+    two independent rows: accepting either silently overwrote the other, and
+    accepting both meant the second undid the first. One computation, both
+    surfaces, because two surfaces deriving it separately is how they come to
+    disagree about what a decision costs.
     """
     state = await load_owned_session(SqlSessionRepository(db), principal, session_id)
-    pending = sorted(state.proposals.items(), key=lambda item: item[1].created_at)
+
+    # Oldest first, not the ``(source, key)`` order the listing is built in. A
+    # review queue is worked through in the order things arrived; the grouping of
+    # rivals is `held_by`'s job and does not need them adjacent.
+    entries = sorted(review.pending_from(state).entries, key=lambda entry: entry.created_at)
     return [
         ProposalOut(
-            source=source,
-            key=key,
+            source=entry.source,
+            key=entry.key,
             value=entry.value,
             reason=entry.reason,
             created_at=entry.created_at,
+            held_by=[HeldOut(scope=held.scope, value=held.value) for held in entry.held_by],
         )
-        for (source, key), entry in pending
+        for entry in entries
     ]
 
 

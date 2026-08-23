@@ -128,16 +128,45 @@ function renderRunMeta(payload: Record<string, unknown>): HTMLElement {
   return list;
 }
 
-function renderProposal(proposal: Proposal): HTMLElement {
+/**
+ * How many suggestions in this listing want the same key.
+ *
+ * Two proposers finding one fact is the ordinary case, not a corner one: the
+ * model's `remember` tool proposes mid-turn, the extraction job proposes from
+ * the transcript afterwards, and `known_keys` deliberately pushes the second
+ * towards the key the first already used. Left unmarked, they read as two
+ * unrelated facts that happen to be spelled alike, and a reviewer accepts both.
+ */
+function rivalsByKey(proposals: Proposal[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const proposal of proposals) {
+    counts.set(proposal.key, (counts.get(proposal.key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function renderProposal(proposal: Proposal, rivals: number): HTMLElement {
   const item = document.createElement("li");
   item.className = "proposal";
 
   const head = document.createElement("header");
   head.append(text("code", proposal.key), text("span", proposal.source, "source"));
+  if (rivals > 1) head.append(text("span", `${rivals} for this key`, "rival"));
   item.append(head);
 
   item.append(text("p", JSON.stringify(proposal.value), "value"));
   item.append(text("p", proposal.reason, "note"));
+
+  // What accepting would destroy, named with its value. Active memory is keyed
+  // by `key` alone while proposals are keyed by `(source, key)`, so this accept
+  // replaces rather than joins -- and there is no history table, so the previous
+  // value is gone the instant the button is pressed. Saying only *that* a
+  // replacement will happen is what let a strictly worse phrasing of a fact get
+  // promoted over a good one; the value is the part that makes it a decision.
+  for (const held of proposal.held_by ?? []) {
+    const replaced = `accepting replaces ${held.scope} memory: ${JSON.stringify(held.value)}`;
+    item.append(text("p", replaced, "replaces"));
+  }
 
   const actions = document.createElement("div");
   actions.className = "actions";
@@ -211,10 +240,11 @@ export async function refresh(): Promise<void> {
   );
   transcript.scrollTop = transcript.scrollHeight;
 
+  const rivals = rivalsByKey(proposals);
   queue.replaceChildren(
     ...(proposals.length === 0
       ? [text("li", "Nothing waiting for a decision.", "note")]
-      : proposals.map(renderProposal)),
+      : proposals.map((proposal) => renderProposal(proposal, rivals.get(proposal.key) ?? 1))),
   );
   queueCount.textContent = String(proposals.length);
 

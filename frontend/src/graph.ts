@@ -17,6 +17,10 @@ type Node = {
   value: unknown;
   scope: "session" | "user" | "proposed";
   cluster: string;
+  /** Who suggested it. Only on proposals; active memory carries its own. */
+  source?: string;
+  /** Something else on this graph claims the same key. See {@link markContested}. */
+  contested?: boolean;
 };
 
 type Layout = "cluster" | "scope";
@@ -60,9 +64,29 @@ function toNodes(memory: MemoryEntry[], proposals: Proposal[]): Node[] {
     value: proposal.value,
     scope: "proposed",
     cluster: clusterOf(proposal.key),
+    source: proposal.source,
   }));
 
-  return [...active, ...proposed];
+  return markContested([...active, ...proposed]);
+}
+
+/**
+ * Flag every node whose key another node also claims.
+ *
+ * Drawn without this, the graph's most misleading picture is its most common
+ * one: "my name is Guillermo" produces a proposal from the model's `remember`
+ * tool and a second from the extraction job, both keyed `name` because
+ * `known_keys` steers them onto one key on purpose. Two identical boxes in one
+ * cluster read as two facts. They are one fact and one slot -- active memory is
+ * keyed by `key` alone -- so accepting the second overwrites the first.
+ *
+ * Marked rather than merged. Which phrasing survives is a person's judgement
+ * (ADR 0017), and collapsing them here would make it for them, invisibly.
+ */
+function markContested(nodes: Node[]): Node[] {
+  const claims = new Map<string, number>();
+  for (const node of nodes) claims.set(node.key, (claims.get(node.key) ?? 0) + 1);
+  return nodes.map((node) => ({ ...node, contested: (claims.get(node.key) ?? 0) > 1 }));
 }
 
 /** Group nodes into the columns a layout puts them in. */
@@ -114,10 +138,15 @@ function render(nodes: Node[]): void {
       const list = document.createElement("ul");
       for (const node of members.sort((a, b) => a.key.localeCompare(b.key))) {
         const item = document.createElement("li");
-        item.className = `node ${node.scope}`;
+        item.className = `node ${node.scope}${node.contested ? " contested" : ""}`;
         item.append(text("code", node.key));
         item.append(text("span", JSON.stringify(node.value), "value"));
         if (node.scope !== "session") item.append(text("span", node.scope, "tag"));
+        // The source is what tells two proposals for one key apart. Without it
+        // they are the same box twice and the rail below is the only place the
+        // difference exists.
+        if (node.source) item.append(text("span", node.source, "tag source"));
+        if (node.contested) item.append(text("span", "one slot", "tag contested"));
         list.append(item);
       }
       column.append(list);

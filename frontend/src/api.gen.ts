@@ -162,6 +162,15 @@ export interface paths {
          *     A queue nobody reads is the failure mode this route enables, and it is
          *     recorded as such in ADR 0017 — proposals accumulate, nothing activates, and
          *     the agent appears to have no memory while behaving exactly as designed.
+         *
+         *     Built through :func:`~bacteria.app.chat.review.pending_from` rather than by
+         *     reading ``state.proposals`` here, and that was a real gap rather than tidying.
+         *     ``held_by`` — what accepting a proposal would replace — existed only in the
+         *     admin CLI's review walk, so the console listed two suggestions for one key as
+         *     two independent rows: accepting either silently overwrote the other, and
+         *     accepting both meant the second undid the first. One computation, both
+         *     surfaces, because two surfaces deriving it separately is how they come to
+         *     disagree about what a decision costs.
          */
         get: operations["read_proposals_chat_sessions__session_id__memory_proposals_get"];
         put?: never;
@@ -458,6 +467,24 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * HeldOut
+         * @description An active memory a proposal would displace, and what it currently says.
+         *
+         *     The value is carried, not just the scope. Warning that something will be
+         *     replaced without saying what is a note that reads as informative and decides
+         *     nothing -- recorded in :class:`~bacteria.app.chat.review.Held` from a review
+         *     walk where it cost a good value.
+         */
+        HeldOut: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "session" | "user";
+            /** Value */
+            value: unknown;
+        };
+        /**
          * KeyExchange
          * @description The one thing the browser sends, once.
          */
@@ -519,6 +546,18 @@ export interface components {
          *     Carries ``source`` because it is half of the identity: two proposers may
          *     suggest the same ``key``, and a reviewer choosing between them needs to know
          *     which is which. Both are required to activate or reject one.
+         *
+         *     ``held_by`` is what makes that choice an informed one. Proposals are keyed by
+         *     ``(source, key)`` and active memory by ``key`` alone, so accepting a second
+         *     suggestion for a key *replaces* the first rather than joining it. Two
+         *     proposers agreeing on a key is the ordinary case rather than a corner one --
+         *     ``known_keys`` deliberately pushes the extractor towards keys already in use,
+         *     so "my name is Guillermo" routinely produces both ``("model", "name")`` and
+         *     ``("extractor", "name")`` -- and the collapse between them is invisible
+         *     unless the listing says so *before* the decision instead of after.
+         *
+         *     Empty for a proposal whose key nothing active holds, which is the common
+         *     case and the one where accepting costs nothing.
          */
         ProposalOut: {
             /**
@@ -526,6 +565,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Held By
+             * @default []
+             */
+            held_by: components["schemas"]["HeldOut"][];
             /** Key */
             key: string;
             /** Reason */

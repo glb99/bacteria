@@ -26,6 +26,7 @@ how a terminal is drawn.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Mapping
 
 from bacteria.agent.session.store import (
@@ -33,6 +34,7 @@ from bacteria.agent.session.store import (
     USER_SCOPE,
     MemoryEntry,
     MemoryScope,
+    SessionState,
     UnknownSessionError,
 )
 from bacteria.app.chat.repository import SqlSessionRepository
@@ -83,6 +85,7 @@ class PendingEntry:
     key: str
     value: Any
     reason: str
+    created_at: datetime
     held_by: tuple[Held, ...] = ()
 
 
@@ -165,13 +168,20 @@ class Discarded:
 # --- The operations ----------------------------------------------------------
 
 
-async def pending(repository: SqlSessionRepository, session_id: str) -> Pending | NoSuchSession:
-    """What is waiting for a decision, and what each one would replace."""
-    try:
-        state = await repository.get_state(session_id)
-    except UnknownSessionError:
-        return NoSuchSession(session_id)
+def pending_from(state: SessionState) -> Pending:
+    """The listing, computed from a state a caller already holds.
 
+    Separate from :func:`pending` because the HTTP surface loads the same state
+    for a different reason -- ``load_owned_session`` reads it to check ownership
+    -- and asking the repository for it again would be a second read of a thing
+    already in hand. That is the whole reason this is a function rather than a
+    step inside the one below.
+
+    It is also the part worth being pure. ``held_by`` is the answer to "what
+    would accepting this destroy", and it is derived entirely from the state: no
+    surface should be computing it, and two surfaces computing it separately is
+    how they come to disagree.
+    """
     active = {SESSION_SCOPE: state.memory, USER_SCOPE: state.user_memory}
     return Pending(
         tuple(
@@ -180,6 +190,7 @@ async def pending(repository: SqlSessionRepository, session_id: str) -> Pending 
                 key=key,
                 value=entry.value,
                 reason=entry.reason,
+                created_at=entry.created_at,
                 held_by=tuple(
                     Held(scope, active[scope][key].value)
                     for scope in SCOPES
@@ -189,6 +200,16 @@ async def pending(repository: SqlSessionRepository, session_id: str) -> Pending 
             for (source, key), entry in sorted(state.proposals.items())
         )
     )
+
+
+async def pending(repository: SqlSessionRepository, session_id: str) -> Pending | NoSuchSession:
+    """What is waiting for a decision, and what each one would replace."""
+    try:
+        state = await repository.get_state(session_id)
+    except UnknownSessionError:
+        return NoSuchSession(session_id)
+
+    return pending_from(state)
 
 
 async def accept(

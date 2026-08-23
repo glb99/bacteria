@@ -22,6 +22,7 @@ export type SessionSummary = components["schemas"]["SessionSummaryOut"];
 export type TranscriptEntry = components["schemas"]["TranscriptEntry"];
 export type MemoryEntry = components["schemas"]["MemoryEntryOut"];
 export type Proposal = components["schemas"]["ProposalOut"];
+export type Held = components["schemas"]["HeldOut"];
 export type ExtractionProgress = components["schemas"]["ExtractionProgressOut"];
 
 /** Raised when the API refuses the session, so callers can send the user back to sign-in. */

@@ -22,12 +22,13 @@ path — the agent's ADR 0017 boundary, unchanged by any of this.
 """
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Sequence
 
 from bacteria.app.graph.conclusions import Conclusion, stale_after
 from bacteria.app.graph.constraints import SEEDED, Conflict, FunctionalConstraint
+from bacteria.app.graph.identity import Node
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -61,6 +62,36 @@ class Outcome:
         noise nobody reads.
         """
         return any(c.state == "conflict" for c in self.conflicts) or bool(self.stale)
+
+
+async def refer_to(
+    repository: SqlGraphRepository, user_id: str, kind: str, label: str, *, now: datetime
+) -> Node:
+    """The node this name refers to, creating one the first time it is heard.
+
+    The only way an assertion should acquire a node id. Callers that mint their
+    own would each decide separately when two mentions are the same thing, and
+    "which Diane" would be answered differently by the extractor and the review
+    surface.
+
+    Exact match on a normalized name, and nothing cleverer — see
+    :mod:`bacteria.app.graph.identity` for why the conservative direction is the
+    safe one. Splitting a person across two nodes is fixed later by asserting a
+    link; collapsing two people into one is not fixable at all.
+
+    ``last_seen`` moves on every mention, including the first, so a node that has
+    only ever been mentioned once still says when.
+    """
+    existing = await repository.node_named(user_id, kind, label)
+    if existing is None:
+        return await repository.mint_node(user_id, kind, label, now=now)
+    await repository.touch_node(user_id, existing.node_id, now=now)
+    # Rebuilt rather than returned as read: `existing` was loaded before the
+    # touch and still carries the old `last_seen`. Handing that back would give a
+    # caller a value that disagrees with the row it names, which is the class of
+    # bug the detached-reads rule exists to prevent and which this reintroduced
+    # by updating after reading.
+    return replace(existing, last_seen=now)
 
 
 async def observe(

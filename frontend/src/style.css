@@ -19,6 +19,24 @@
   box-sizing: border-box;
 }
 
+/* `hidden` must actually hide. The browser's own stylesheet says
+   `[hidden] { display: none }`, and **any** author `display` declaration beats
+   it — author styles win over user-agent styles regardless of specificity. Both
+   tab panels set `display` on an ID selector, so `element.hidden = true` set the
+   attribute and changed nothing: clicking `graph` left the chat panel on screen
+   and rendered the graph below it, off the bottom of a `height: 100%` viewport.
+   It read as the tab doing nothing at all.
+
+   `!important` rather than a more specific selector, and it is the right tool
+   here rather than a shortcut. Beating an ID needs an ID, so the alternative is
+   enumerating `#tab-chat[hidden], #tab-graph[hidden], ...` and remembering to
+   extend it for every future panel — a rule that silently stops covering the
+   thing it was written for. "Hidden means hidden" is exactly the kind of
+   absolute `!important` exists for. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   height: 100vh;

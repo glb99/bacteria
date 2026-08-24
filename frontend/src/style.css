@@ -596,3 +596,57 @@ code {
   font-family: ui-monospace, monospace;
   font-size: 0.85rem;
 }
+
+/* A claim as a sentence rather than a row of cells. The direction is drawn,
+   because "self pet Canija" and "Canija pet self" are different facts and a
+   reader cannot tell which one a table row means. */
+.claim {
+  margin: 0 0 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.claim .end {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.claim .arrow {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+/* Says what the tab is before showing anything. The most surprising fact about
+   this screen — that none of it reaches the model — was previously written
+   down only in an ADR. */
+.preamble {
+  margin: 0 0 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.preamble strong {
+  color: var(--text);
+}
+
+/* The counts answer a question about the project, not about the person's
+   memory, so they fold away. They were the largest thing on the screen. */
+.diagnostic {
+  margin-top: 1rem;
+}
+
+.diagnostic summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.diagnostic .verdict {
+  margin-top: 0.6rem;
+}

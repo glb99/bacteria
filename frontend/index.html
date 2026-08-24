@@ -73,6 +73,14 @@
       </section>
 
       <section id="tab-graph" class="tab-panel" hidden>
+        <p class="preamble">
+          What the agent has worked out from your conversations.
+          <strong>None of this is sent to the model</strong> — it is what the
+          system believes about your world, not what it says. Facts it may
+          repeat back live under <em>chat</em>, and a person has approved each
+          one.
+        </p>
+
         <div class="graph-controls">
           <span class="label">layout</span>
           <div id="graph-layout" class="segmented">
@@ -83,7 +91,10 @@
         </div>
 
         <div id="graph" class="graph"></div>
-        <dl id="graph-verdict" class="verdict"></dl>
+        <details class="diagnostic">
+          <summary>Diagnostics</summary>
+          <dl id="graph-verdict" class="verdict"></dl>
+        </details>
       </section>
     </main>
 

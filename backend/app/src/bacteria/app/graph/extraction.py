@@ -148,6 +148,12 @@ class ExtractionResult:
             unknown kind, or over the cap. Counted rather than ignored, because
             a model reliably returning claims this rejects is a prompt problem
             that otherwise looks like a quiet one.
+        duplicates: Well-formed claims the log already believed, so nothing was
+            written. Kept separate from ``dropped`` because they are not the same
+            problem: a drop says the model produced something unusable, a
+            duplicate says it produced something true that is already known. A
+            high count here is the transcript restating itself, which is normal —
+            it becomes interesting only if it is most of the run.
         conflicts: Contradictions the write revealed, so a caller can log that a
             person may have something to look at.
         through_seq: The watermark after this run.
@@ -156,6 +162,7 @@ class ExtractionResult:
     examined: int = 0
     recorded: int = 0
     dropped: int = 0
+    duplicates: int = 0
     conflicts: int = 0
     through_seq: int = -1
 
@@ -225,7 +232,9 @@ async def extract_assertions(
     trust = _trust_of(messages)
     repository = SqlGraphRepository(db)
     assertions = [
-        await _to_assertion(repository, session.user_id, claim, trust=trust, now=now)
+        await _to_assertion(
+            repository, session.user_id, claim, trust=trust, now=now, session_id=session_id
+        )
         for claim in claims
     ]
     outcome = await observe(repository, assertions, now=now)
@@ -238,8 +247,9 @@ async def extract_assertions(
 
     return ExtractionResult(
         examined=len(messages),
-        recorded=len(assertions),
+        recorded=outcome.recorded,
         dropped=dropped,
+        duplicates=len(assertions) - outcome.recorded,
         conflicts=len([c for c in outcome.conflicts if c.state == "conflict"]),
         through_seq=reached,
     )
@@ -252,6 +262,7 @@ async def _to_assertion(
     *,
     trust: Trust,
     now: datetime,
+    session_id: str,
 ) -> Assertion:
     """Resolve both ends to nodes and turn a tense into a valid interval.
 
@@ -265,6 +276,13 @@ async def _to_assertion(
     unknown errs toward under-claiming, which is the recoverable direction. The
     model's answer is kept in ``attrs`` so the distinction survives for whenever
     that bound exists.
+
+    **``session_id`` is recorded and ``run_id`` is not**, and the difference is
+    what can honestly be said rather than what is available. A claim came from
+    exactly one session. It came from a *slice*, which may span several agent
+    runs, so naming one of them would attribute the claim to whichever run
+    happened to be last — the same per-slice attribution problem ``trust`` has,
+    but silent, because a run id looks precise in a way a trust tier does not.
     """
     src = await _node_id(repository, user_id, claim["src"], now=now)
     dst = await _node_id(repository, user_id, claim["dst"], now=now)
@@ -280,6 +298,7 @@ async def _to_assertion(
         valid=valid,
         recorded_at=now,
         trust=trust,
+        session_id=session_id,
         attrs={
             "reason": claim["reason"],
             "tense": claim["tense"],

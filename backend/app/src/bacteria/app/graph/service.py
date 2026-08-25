@@ -32,6 +32,7 @@ from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
+from bacteria.app.graph.temporal import Interval
 
 
 @dataclass(frozen=True)
@@ -46,8 +47,14 @@ class Outcome:
 
     ``inferred`` and ``stale`` are genuinely deltas: they are things that just
     happened and would otherwise have to be discovered by polling.
+
+    ``recorded`` is how many claims were written, which is not how many were
+    handed in: a claim the log already believes is not written again. A caller
+    reporting a count from the length of its own list would be counting its
+    intentions.
     """
 
+    recorded: int = 0
     conflicts: list[Conflict] = field(default_factory=list)
     inferred: list[Conclusion] = field(default_factory=list)
     stale: list[Conclusion] = field(default_factory=list)
@@ -134,18 +141,83 @@ async def observe(
     rather than as it was plus a pending change. Evaluating first would make a
     conflict between two assertions in the same batch invisible.
 
+    **A claim the log already believes is not written again.** The reasons are in
+    :func:`_unrepeated`; the consequence here is that ``recorded`` may be smaller
+    than the batch, and that the rules still run either way — a caller asked what
+    these claims collide with, and the answer does not depend on whether writing
+    them was necessary.
+
     Safe to call twice; :func:`_reconcile` says why.
     """
     if not assertions:
         return Outcome()
 
-    await repository.record(assertions)
-
     owner = assertions[0].user_id
+
+    # Two reads of the same projection, and they are not one read used twice: this
+    # one must see the world *before* the write to tell a repeat from a new claim,
+    # and `_reconcile`'s must see it after, or a conflict between two claims in
+    # this batch is invisible.
+    fresh = _unrepeated(assertions, await repository.current(owner))
+    if fresh:
+        await repository.record(fresh)
+
     conflicts, inferred = await _reconcile(
         repository, owner, {a.rel for a in assertions}, constraints, now
     )
-    return Outcome(conflicts=conflicts, inferred=inferred)
+    return Outcome(recorded=len(fresh), conflicts=conflicts, inferred=inferred)
+
+
+def _unrepeated(assertions: Sequence[Assertion], believed: Sequence[Assertion]) -> list[Assertion]:
+    """The claims that say something the log does not already believe.
+
+    **A deterministic assertion id does not give this**, and assuming it did is
+    how the log filled with copies. That id is hashed from the claim *and the
+    run's timestamp*, deliberately, so that a genuine second observation on a
+    later day does not collide with the first — which means it collapses a
+    *retried job* and never a fact mentioned again next week. Those are two
+    different questions and only one of them had an answer.
+
+    A repeat is not news about the world. Writing it appends a row saying what
+    the log already says, and since every copy is believed, the projection then
+    returns N identical edges for one relationship. Three "my mum" mentions in
+    one afternoon produced three.
+
+    The key is the claim and its valid interval, and both halves are deliberate:
+
+    - **``valid`` is in it**, because the same triple over a different span is not
+      a repeat. "She is their CTO" and "she was their CTO until February" are
+      different claims, and collapsing them would discard the correction. What
+      *should* happen there is a revision, and nothing produces one from an
+      extraction yet — so today the second lands beside the first and the
+      constraint layer reports it.
+    - **``trust`` is not in it**, because a claim arriving through a different
+      channel is news about the channel rather than about the world. The cost is
+      real and worth naming: a third-party row is not upgraded when the user
+      later says the same thing themselves, so the tier records the first way a
+      claim arrived rather than the best. Recording a second row to carry that
+      would make the log grow on provenance changes, which is not what it is a
+      log of.
+
+    Repeats *within* one batch are dropped too. The database would have collapsed
+    those anyway — same instant, same id, and ``record`` ignores primary-key
+    conflicts — but silently, leaving the count above claiming writes that never
+    happened.
+    """
+    seen = {_claim_of(a) for a in believed}
+    fresh: list[Assertion] = []
+    for assertion in assertions:
+        key = _claim_of(assertion)
+        if key in seen:
+            continue
+        seen.add(key)
+        fresh.append(assertion)
+    return fresh
+
+
+def _claim_of(assertion: Assertion) -> tuple[str, str, str, str, Interval]:
+    """What makes two assertions the same claim, for the purpose above."""
+    return (assertion.user_id, assertion.src, assertion.rel, assertion.dst, assertion.valid)
 
 
 async def revise(
@@ -179,7 +251,10 @@ async def revise(
         await repository.set_status(owner, conclusion.conclusion_id, "stale")
 
     conflicts, inferred = await _reconcile(repository, owner, {replacement.rel}, constraints, now)
-    return Outcome(conflicts=conflicts, inferred=inferred, stale=now_stale)
+    # One: the replacement. A revision writes unconditionally — it is a
+    # correction, so the claim it states is by definition not one the log
+    # already believes.
+    return Outcome(recorded=1, conflicts=conflicts, inferred=inferred, stale=now_stale)
 
 
 async def _reconcile(

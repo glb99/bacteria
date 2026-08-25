@@ -51,6 +51,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.agent.model.protocol import SendsMessages
 from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
 from bacteria.app.graph.catalogue import Relation, resolve, vocabulary
+from bacteria.app.graph.dates import parse_bound
 from bacteria.app.graph.log import Assertion, Trust
 from bacteria.app.graph.models import GraphExtraction
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -78,6 +79,8 @@ Return ONLY a JSON array, with no prose and no code fence. Each element:
    "rel": "...",
    "dst": {"label": "...", "kind": "..."},
    "tense": "current" | "past" | "unknown",
+   "since": "YYYY-MM-DD" | null,
+   "until": "YYYY-MM-DD" | null,
    "reason": "..."}
 
   src, dst - the two things related. `label` is the name as written; `kind` is
@@ -92,6 +95,13 @@ Return ONLY a JSON array, with no prose and no code fence. Each element:
               "unknown" - the relationship is named without saying whether it
                           holds. "Diane and Acme came up in the meeting."
               Choose from how it is said, not from what seems likely.
+  since,    - when the relationship began and ended, ONLY if the transcript says
+  until       so in words. "2019", "2019-03" and "2019-03-04" are all fine; give
+              exactly as much as was said and no more.
+              Use null unless a date was stated. Do NOT work one out from "for
+              years", "a while ago", "last February" or anything else relative —
+              null is the correct answer for all of those and is expected far
+              more often than a date.
   reason    - the words that support it, quoted or closely paraphrased, so a
               person can check the claim against the transcript.
 
@@ -337,7 +347,7 @@ async def _to_assertion(
     src = await _node_id(repository, user_id, claim["src"], now=now)
     dst = await _node_id(repository, user_id, claim["dst"], now=now)
 
-    valid = Interval(None, OPEN_ENDED) if claim["tense"] == "current" else Interval(None, None)
+    valid = _interval(claim)
 
     return Assertion(
         assertion_id=_assertion_id(user_id, src, claim["rel"], dst, now),
@@ -351,6 +361,34 @@ async def _to_assertion(
         session_id=session_id,
         attrs=_attrs(claim),
     )
+
+
+def _interval(claim: dict[str, Any]) -> Interval:
+    """Fold a tense and any stated dates into the span a claim held.
+
+    The two say different things and both are kept. **Tense decides the end only
+    when no date was given**: "she is their CTO" ends open, "she was" ends
+    unknown. A stated ``until`` is more specific than either and wins — including
+    over ``current``, which is not a contradiction but the ordinary case of "she
+    is CTO until March".
+
+    A start needs no such rule. Nothing about a tense implies when something
+    began, which is why ``valid_from`` was null on every row: it had no source at
+    all until this field existed.
+
+    **An end before its start is dropped rather than swapped.** Reversing it
+    would invent a claim nobody made, and the pair is evidence the model was
+    guessing — the honest response is to keep the triple and lose both bounds.
+    """
+    since = parse_bound(claim.get("since"))
+    until = parse_bound(claim.get("until"))
+
+    if since is not None and until is not None and until < since:
+        since, until = None, None
+
+    if until is None and claim["tense"] == "current":
+        until = OPEN_ENDED
+    return Interval(since, until)
 
 
 def _attrs(claim: dict[str, Any]) -> dict[str, Any]:
@@ -369,6 +407,13 @@ def _attrs(claim: dict[str, Any]) -> dict[str, Any]:
     }
     if "proposed_rel" in claim:
         attrs["proposed_rel"] = claim["proposed_rel"]
+    # The words behind a bound, kept because resolving "2019" to the first of
+    # January is a decision this code made and not something anyone said. The
+    # column cannot hold the difference between a year and a day; this can, and a
+    # reader checking why a succession landed where it did needs it.
+    for bound in ("since", "until"):
+        if claim.get(bound):
+            attrs[f"{bound}_said"] = claim[bound]
     return attrs
 
 
@@ -517,6 +562,12 @@ def _clean(item: Any) -> Optional[dict[str, Any]]:
             "dst": ends["dst"],
             "rel": rel.strip()[:_MAX_LABEL_CHARS],
             "tense": tense,
+            # Carried as the model wrote them and read by `_interval`. A bound
+            # that does not parse is not a reason to lose the claim: every row
+            # written before this field existed has no bounds at all and is
+            # useful, so an unreadable date leaves the claim exactly as well off.
+            "since": item.get("since"),
+            "until": item.get("until"),
             "reason": reason.strip()[:_MAX_LABEL_CHARS],
         }
     )

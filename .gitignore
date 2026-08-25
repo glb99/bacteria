@@ -39,3 +39,7 @@ backend/app/src/bacteria/app/console/
 frontend/openapi.json
 
 node_modules/
+
+# Playwright browser binaries and its run output.
+frontend/test-results/
+frontend/playwright-report/

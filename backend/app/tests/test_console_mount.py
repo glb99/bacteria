@@ -109,3 +109,30 @@ def test_the_default_location_is_inside_the_installed_package():
 
     assert (package_root / "views.py").is_file()
     assert CONSOLE_DIR.name == "console"
+
+
+def test_the_entry_point_is_never_reused_without_asking(tmp_path, backend_options):
+    """A stale index.html pins a browser to a build that no longer exists.
+
+    Asset names are content hashes, so the entry point is the one file whose
+    staleness is silent and total: the page loads, runs old code, and reports
+    nothing. Without a `Cache-Control` header a browser may reuse it heuristically
+    — which is what happened, and cost several rounds of debugging a defect that
+    had already been fixed.
+    """
+    (tmp_path / "index.html").write_text("<!doctype html>", encoding="utf-8")
+
+    with TestClient(create_app(console_dir=tmp_path), backend_options=backend_options) as client:
+        assert client.get("/").headers["cache-control"] == "no-cache"
+
+
+def test_a_hashed_asset_is_kept_for_a_year(tmp_path, backend_options):
+    """Its name changes when its content does, so the old answer is never wrong."""
+    (tmp_path / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-abc123.js").write_text("//", encoding="utf-8")
+
+    with TestClient(create_app(console_dir=tmp_path), backend_options=backend_options) as client:
+        header = client.get("/assets/index-abc123.js").headers["cache-control"]
+
+    assert "immutable" in header

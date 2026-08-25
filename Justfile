@@ -170,6 +170,23 @@ console-check: console-types
 # This is the same set CI runs, in the same order, and that is the point: a gate
 # you can only satisfy by pushing is a gate that trains people to push.
 
+# Not in `check-all`, and that is a decision rather than an oversight: it needs a
+# serving process and a key, so a gate that ran it would fail for everyone whose
+# server happens to be down. It belongs beside `smoke` -- the other recipe that
+# exercises the real path rather than a fixture -- and is run deliberately.
+#
+# Three defects reached shipped code before this existed: a tab that did nothing,
+# a confirmation that could be armed forever and never fired, and a link nobody
+# could complete. All three were event wiring, which a type checker cannot see
+# and which `smoke` never looked at, because it asserts the console is *served*
+# rather than that it works.
+
+# Drive the console in a real browser, against a running server
+[group('qa')]
+e2e key:
+    cd frontend && BACTERIA_KEY={{ key }} npm run e2e
+
+
 # Perform all checks
 [group('qa')]
 check-all: lint test-agent cov typing audit-ci console-check console-build

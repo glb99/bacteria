@@ -24,3 +24,4 @@ conventions do not qualify.
 | [0005](0005-a-browser-holds-a-session-not-a-key.md) | A browser exchanges a key for an expiring, HttpOnly session cookie | Accepted |
 | [0006](0006-the-memory-graph-is-an-assertion-log.md) | Build the memory graph as an assertion log with two time axes, in its own feature package | Proposed |
 | [0007](0007-the-relation-vocabulary-is-a-catalogue.md) | Govern `rel` with a seeded catalogue, an unratified tail, and derived canonicality | Proposed |
+| [0008](0008-preferences-are-assertions.md) | Hold preferences as assertions: a functional relation to a value node, the relation being the memory key | Proposed |

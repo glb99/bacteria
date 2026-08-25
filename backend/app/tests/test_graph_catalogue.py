@@ -113,4 +113,17 @@ def test_the_prompt_block_names_every_relation_and_reads_its_direction():
     for relation in CATALOGUE:
         assert relation.name in block
         assert relation.sentence in block
-    assert "mother_of" in block, "a reader needs to see which spellings are taken"
+    assert "works_for" in block, "a synonym is worth offering"
+
+
+def test_the_prompt_block_does_not_advertise_a_converse_alias():
+    """Offering ``mother_of`` under "<src>'s mother is <dst>" invites the flip.
+
+    The alias exists to recognize a name the model reaches for unasked, and the
+    swap undoes it. Listing it as an alternative spelling would encourage the one
+    thing the catalogue is there to prevent.
+    """
+    block = vocabulary()
+
+    assert "mother_of" not in block
+    assert "employs" not in block

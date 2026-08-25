@@ -252,7 +252,11 @@ def vocabulary() -> str:
     """
     lines = []
     for relation in CATALOGUE:
-        alternatives = ", ".join(alias.name for alias in relation.aliases)
-        suffix = f" (also: {alternatives})" if alternatives else ""
+        # Converse aliases are deliberately not advertised. They exist to
+        # recognize a name a model reaches for unasked, and listing `mother_of`
+        # under a sentence reading "<src>'s mother is <dst>" would invite exactly
+        # the inversion the flag exists to undo.
+        synonyms = ", ".join(alias.name for alias in relation.aliases if not alias.converse)
+        suffix = f" (also: {synonyms})" if synonyms else ""
         lines.append(f"  {relation.name} - {relation.sentence}{suffix}")
     return "\n".join(lines)

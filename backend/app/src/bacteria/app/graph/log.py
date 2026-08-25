@@ -27,6 +27,15 @@ from typing import Any, Iterable, Literal, Optional
 
 from bacteria.app.graph.temporal import Interval
 
+Closure = Literal["superseded", "retracted"]
+"""Which act ended belief in a claim.
+
+A correction and a rejection both close ``recorded_until``, and only this
+says which happened. It is the difference between "we know better now" and
+"a person said no", and a system that cannot tell them apart cannot report
+how often its extractor is wrong.
+"""
+
 Trust = Literal["user", "third-party", "inferred"]
 """Where a claim came from, which gates its *influence* and never its storage.
 
@@ -64,6 +73,7 @@ class Assertion:
     valid: Interval
     recorded_at: datetime
     recorded_until: Optional[datetime] = None
+    closed_by: Optional[Closure] = None
     trust: Trust = "user"
     attrs: dict[str, Any] | None = None
     session_id: Optional[str] = None
@@ -102,6 +112,26 @@ def current(assertions: Iterable[Assertion]) -> list[Assertion]:
     return [a for a in assertions if a.recorded_until is None]
 
 
+def retract(old: Assertion, *, at: datetime) -> Assertion:
+    """Close belief in a claim, replacing it with nothing.
+
+    The sibling ``supersede`` named and did not write. A correction states what
+    is true instead; this states only that the claim should not be believed.
+
+    **It is a statement about belief, not about the world.** *"The extractor got
+    that wrong"* closes a row; *"elena is not my mother"* is a negative fact and
+    this is not it — the graph has no representation for negation, and using this
+    as one would make every correction of an extraction error read as a claim
+    about a person.
+
+    Nothing is deleted. The row keeps its valid interval, its provenance and its
+    evidence links, and :func:`state_at` still reconstructs the belief held
+    before the correction. That is what makes a rejection recorded rather than
+    absent.
+    """
+    return replace(old, recorded_until=at, closed_by="retracted")
+
+
 def supersede(
     old: Assertion, *, assertion_id: str, valid: Interval, at: datetime
 ) -> tuple[Assertion, Assertion]:
@@ -117,15 +147,11 @@ def supersede(
     different triple is a new assertion, not a supersession, and callers that
     reach for this to express one are asking the wrong question.
 
-    Not built:
-        Retraction without replacement — "that was never true", which closes
-        belief and states nothing in its place. It belongs here as a sibling and
-        is not written because nothing proposes one yet: extraction only ever
-        adds, and the review surface that would let a person say it does not
-        exist. Anything that needs it before then should add it here rather than
-        passing a sentinel through ``valid``.
+    Its sibling is :func:`retract`, which closes belief and states nothing in its
+    place. The two differ in ``closed_by`` as well as in shape, because "we know
+    better now" and "a person said no" are different facts about the same row.
     """
     return (
-        replace(old, recorded_until=at),
+        replace(old, recorded_until=at, closed_by="superseded"),
         replace(old, assertion_id=assertion_id, valid=valid, recorded_at=at, recorded_until=None),
     )

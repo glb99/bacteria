@@ -61,7 +61,9 @@ class Relation:
     asked the model to "keep the same direction every time" across calls that
     cannot see each other, which is not a thing it can do.
 
-    ``src_kind`` and ``dst_kind`` are a signature, and an asymmetric one catches
+    ``src_kind`` and ``dst_kind`` are a signature, and ``None`` means *any* — used
+    by ``same_as``, which relates two things of whatever kind they both are, and
+    so has no single pair to state. An asymmetric signature catches
     an inverted claim outright — ``employer (person → organization)`` cannot be
     stated backwards without the kinds disagreeing. A symmetric one catches
     nothing, which is why :attr:`functional` and not the signature is what admits
@@ -86,11 +88,25 @@ class Relation:
 
     name: str
     sentence: str
-    src_kind: str
-    dst_kind: str
+    src_kind: Optional[str]
+    dst_kind: Optional[str]
     functional: bool
     invariant: Optional[str] = None
     aliases: tuple[Alias, ...] = ()
+    extractable: bool = True
+    """May the extractor propose this relation?
+
+    True for everything a transcript can state. False for the one relation a
+    person must assert themselves: ``same_as``, because ADR 0006's asymmetry says
+    splitting one thing across two nodes is recoverable and **collapsing two
+    things into one is not**. A model proposing merges from the vocabulary it is
+    handed would be doing exactly the irreversible thing, one plausible guess at
+    a time.
+
+    This is the point where the catalogue stops being one list. It answers two
+    questions — *what may be recorded* and *what may be suggested* — and they had
+    the same answer until identity arrived.
+    """
 
 
 @dataclass(frozen=True)
@@ -154,6 +170,14 @@ CATALOGUE: tuple[Relation, ...] = (
         dst_kind="person",
         functional=True,
         aliases=(Alias("father_of", converse=True),),
+    ),
+    Relation(
+        name="same_as",
+        sentence="<src> and <dst> are the same thing",
+        src_kind=None,
+        dst_kind=None,
+        functional=False,
+        extractable=False,
     ),
     Relation(
         name="lives_in",
@@ -252,10 +276,15 @@ def vocabulary() -> str:
     """
     lines = []
     for relation in CATALOGUE:
+        # A relation the extractor may not propose is not offered to it. `same_as`
+        # is the case: a model suggesting merges would be guessing in the one
+        # direction ADR 0006 calls unrecoverable.
         # Converse aliases are deliberately not advertised. They exist to
         # recognize a name a model reaches for unasked, and listing `mother_of`
         # under a sentence reading "<src>'s mother is <dst>" would invite exactly
         # the inversion the flag exists to undo.
+        if not relation.extractable:
+            continue
         synonyms = ", ".join(alias.name for alias in relation.aliases if not alias.converse)
         suffix = f" (also: {synonyms})" if synonyms else ""
         lines.append(f"  {relation.name} - {relation.sentence}{suffix}")

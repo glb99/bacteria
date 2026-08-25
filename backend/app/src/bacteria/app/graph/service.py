@@ -32,7 +32,8 @@ from bacteria.app.graph.constraints import Conflict, conflicts_for
 from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
-from bacteria.app.graph.repository import SqlGraphRepository
+from bacteria.app.graph.log import retract as log_retract
+from bacteria.app.graph.repository import SqlGraphRepository, UnknownNodeError
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
 
@@ -312,6 +313,200 @@ async def revise(
     return Outcome(recorded=1, conflicts=conflicts, inferred=inferred, stale=now_stale)
 
 
+class LabelTakenError(ValueError):
+    """A rename would give two nodes of one kind the same name.
+
+    Refused rather than allowed, and the reason is ADR 0006's asymmetry rather
+    than tidiness. ``node_named`` matches on ``(kind, normalized label)``, so two
+    matching nodes make every later mention resolve to whichever the database
+    returns first — an arbitrary answer to "which Diane", drifting toward
+    collapsing two people into one, which is the direction that cannot be undone.
+
+    The refusal is the negotiation, not a dead end: two nodes that *should* share
+    a name are two nodes to link, and :func:`link` is the way to say so.
+    """
+
+    def __init__(self, label: str, node_id: str) -> None:
+        super().__init__(f"{label!r} already names node {node_id}")
+        self.label = label
+        self.node_id = node_id
+
+
+async def rename(
+    repository: SqlGraphRepository, user_id: str, node_id: str, label: str, *, now: datetime
+) -> Node:
+    """Correct what a node is called.
+
+    The missing half of the reserved owner node, whose id is derived from the
+    user id *precisely so* that its label stays correctable — and which nothing
+    corrected until now, leaving every graph owned by someone called "self".
+
+    **A label is a display name, not a record.** What a person is called is a
+    fact and belongs in the log; this is what to draw. So there is no history
+    here and none is lost, which is why this is an update in a package that
+    otherwise never overwrites anything.
+
+    Raises :class:`LabelTakenError` when another node of the same kind already
+    carries the name.
+    """
+    existing = await repository.node_named(
+        user_id, (await _node(repository, user_id, node_id)).kind, label
+    )
+    if existing is not None and existing.node_id != node_id:
+        raise LabelTakenError(label, existing.node_id)
+    return await repository.relabel_node(user_id, node_id, label)
+
+
+async def link(
+    repository: SqlGraphRepository,
+    user_id: str,
+    left: str,
+    right: str,
+    *,
+    assertion_id: str,
+    now: datetime,
+) -> Outcome:
+    """Say that two nodes are the same thing, without merging them.
+
+    ADR 0006's identity rule, finally given a writer: nodes are **linked, never
+    merged**. Both keep their ids, their labels and every assertion recorded
+    against them, and the claim that they are one thing is an assertion like any
+    other — provenanced, contestable, retractable, and usable as evidence.
+
+    That is what makes minting a node per distinct name safe. Splitting one
+    person across two nodes is recoverable *because this exists*; it was the
+    missing half of an argument the design had been making since the beginning.
+
+    **Refuses two kinds.** A person is not an organization, and a claim that they
+    are the same thing is a mistake rather than a merge — the kinds are the one
+    check available here, since nothing else can tell a bold identification from
+    a slip.
+
+    Nothing in the read surface reads the link yet, so the first use of this
+    changes nothing visible. That is correct and will look like a bug.
+    """
+    one, other = await _node(repository, user_id, left), await _node(repository, user_id, right)
+    if one.kind != other.kind:
+        raise MismatchedKindsError(one.kind, other.kind)
+
+    claim = Assertion(
+        assertion_id=assertion_id,
+        user_id=user_id,
+        src=one.node_id,
+        dst=other.node_id,
+        rel="same_as",
+        # Open-ended: two things that are the same thing did not become so, and
+        # an unknown start would make the claim undecidable against every other
+        # claim about either of them.
+        valid=Interval(None, OPEN_ENDED),
+        recorded_at=now,
+        trust="user",
+    )
+    return await observe(repository, [claim], now=now)
+
+
+class MismatchedKindsError(ValueError):
+    """A link between two different kinds of thing."""
+
+    def __init__(self, one: str, other: str) -> None:
+        super().__init__(f"cannot link a {one} to a {other}")
+
+
+async def _node(repository: SqlGraphRepository, user_id: str, node_id: str) -> Node:
+    found = await repository.node(user_id, node_id)
+    if found is None:
+        raise UnknownNodeError(node_id)
+    return found
+
+
+async def retract(
+    repository: SqlGraphRepository,
+    assertion: Assertion,
+    *,
+    now: datetime,
+    relations: Sequence[Relation] = CATALOGUE,
+) -> Outcome:
+    """Stop believing a claim, without stating anything in its place.
+
+    The counterpart to :func:`revise`, and it shares that function's real work:
+    everything resting on the claim has to be marked, because a belief whose
+    premise has gone is not thereby wrong — it is unexamined, which is a
+    different state and the one worth showing a person.
+
+    ``recorded`` is zero. Nothing was written; a row was closed, and a caller
+    counting writes should not be told otherwise.
+
+    **The rules run afterwards**, for the same reason :func:`observe` runs them
+    after its write: retracting one of two contradictory claims is precisely how
+    a conflict stops existing, and evaluating first would report the state the
+    owner was trying to leave.
+    """
+    owner = assertion.user_id
+    dependents = await repository.depending_on(owner, [assertion.assertion_id])
+
+    await repository.close(log_retract(assertion, at=now))
+
+    now_stale = stale_after(dependents, [assertion.assertion_id])
+    for conclusion in now_stale:
+        await repository.set_status(owner, conclusion.conclusion_id, "stale")
+
+    conflicts, inferred = await _reconcile(repository, owner, {assertion.rel}, relations, now)
+    return Outcome(conflicts=conflicts, inferred=inferred, stale=now_stale)
+
+
+async def reject(
+    repository: SqlGraphRepository,
+    owner: str,
+    conclusion_id: str,
+    *,
+    now: datetime,
+    relations: Sequence[Relation] = CATALOGUE,
+) -> Outcome:
+    """Withdraw an inferred belief the owner disagrees with.
+
+    A status change, where :func:`retract` closes a row, and the asymmetry is
+    worth knowing rather than inheriting: a conclusion is a *derived belief and
+    may be recomputed*, so moving its status loses nothing — the log still holds
+    everything it was drawn from. An assertion is a *record of what was claimed*,
+    so mutating one would lose the claim. Two tables, two policies, and the
+    criterion is recomputability rather than importance.
+
+    The conflict the conclusion was explaining returns to ``possible``, which is
+    the honest state it was in before anyone assumed anything — and
+    :func:`_reconcile` will not now propose the same explanation again. See
+    :func:`_already_considered`.
+    """
+    await repository.set_status(owner, conclusion_id, "retracted")
+
+    believed = await repository.current(owner)
+    conflicts, inferred = await _reconcile(
+        repository, owner, {a.rel for a in believed}, relations, now
+    )
+    return Outcome(conflicts=conflicts, inferred=inferred)
+
+
+def _already_considered(conclusions: Sequence[Conclusion], pair: set[str], derived_by: str) -> bool:
+    """Has this exact inference been drawn before, whatever became of it?
+
+    **Status is deliberately not consulted**, and that is the whole point. A
+    retracted conclusion makes its conflict ``possible`` again, and ``_reconcile``
+    infers on ``possible`` conflicts — so without this, rejecting an explanation
+    caused the very next extraction touching that relation to record a fresh
+    active copy of it. The owner's "no" was undone by the next thing they said
+    about the subject, silently.
+
+    That is the re-proposal failure the model predicts for merge suggestions —
+    *a rejection that merely deletes leaves the same similarity proposing the
+    same merge forever* — reached from the other direction. A rejection has to be
+    remembered, not merely applied.
+
+    Keyed on the evidence pair rather than on the conflict, because a conclusion
+    is identified by what it rests on. New evidence is a new inference and should
+    be proposed again; the same two premises are the question already answered.
+    """
+    return any(c.derived_by == derived_by and pair <= set(c.evidence) for c in conclusions)
+
+
 async def _reconcile(
     repository: SqlGraphRepository,
     owner: str,
@@ -352,6 +547,10 @@ async def _reconcile(
     for relation in applicable:
         for conflict in conflicts_for(relation, believed, conclusions=conclusions):
             if conflict.state != "possible":
+                continue
+            if _already_considered(
+                conclusions, {conflict.left, conflict.right}, "constraint-inference"
+            ):
                 continue
             succession = infer_succession(
                 believed, relation, labels=labels, conclusion_id=str(uuid.uuid4()), now=now

@@ -355,6 +355,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/graph/assertions/{assertion_id}/retract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retract Assertion
+         * @description Stop believing a claim.
+         *
+         *     A `POST` to a verb rather than a `DELETE` of the resource, because nothing is
+         *     deleted: the row stays, its belief interval closes, and `state_at` still
+         *     reconstructs what was believed before. `DELETE` would name the wrong act, and
+         *     a route's shape is the first thing anyone reads about what it does.
+         */
+        post: operations["retract_assertion_graph_assertions__assertion_id__retract_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/graph/conclusions": {
         parameters: {
             query?: never;
@@ -374,6 +399,78 @@ export interface paths {
         get: operations["read_conclusions_graph_conclusions_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/graph/conclusions/{conclusion_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Conclusion
+         * @description Withdraw an inferred belief the owner disagrees with.
+         *
+         *     The conflict it was explaining returns to *possible*, which is the honest
+         *     state it held before anyone assumed anything — and it will not be explained
+         *     the same way again.
+         */
+        post: operations["reject_conclusion_graph_conclusions__conclusion_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/graph/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link Nodes
+         * @description Say two nodes are the same thing.
+         *
+         *     201, because this creates an assertion — the link is a claim like any other
+         *     and can be retracted through the route above, which is the whole argument for
+         *     linking rather than merging.
+         */
+        post: operations["link_nodes_graph_links_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/graph/nodes/{node_id}/rename": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Node
+         * @description Correct what a node is called.
+         *
+         *     409 when the name is taken, and the message is the point: two nodes that
+         *     should share a name are two nodes to link, so the refusal is an invitation
+         *     rather than a wall.
+         */
+        post: operations["rename_node_graph_nodes__node_id__rename_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -649,6 +746,16 @@ export interface components {
             key: string;
         };
         /**
+         * LinkIn
+         * @description Two nodes the owner says are one thing.
+         */
+        LinkIn: {
+            /** Left */
+            left: string;
+            /** Right */
+            right: string;
+        };
+        /**
          * MemoryEntryOut
          * @description One stored fact, with enough to judge and to delete it.
          *
@@ -715,6 +822,23 @@ export interface components {
             node_id: string;
         };
         /**
+         * OutcomeOut
+         * @description What a write changed, and what it left for a person to look at.
+         *
+         *     The same shape for all four verbs, because a caller's next move is the same
+         *     whichever it was: redraw, and show what now needs attention. Carrying the
+         *     engine's `Outcome` through rather than returning 204 is what lets the console
+         *     update without re-fetching the graph to discover it should.
+         */
+        OutcomeOut: {
+            /** Conflicts */
+            conflicts: components["schemas"]["ConflictOut"][];
+            /** Inferred */
+            inferred: components["schemas"]["ConclusionOut"][];
+            /** Stale */
+            stale: components["schemas"]["ConclusionOut"][];
+        };
+        /**
          * ProposalOut
          * @description A suggested memory awaiting a decision.
          *
@@ -764,6 +888,14 @@ export interface components {
             };
             /** Reason */
             reason: string;
+        };
+        /**
+         * RenameIn
+         * @description What a node should be called instead.
+         */
+        RenameIn: {
+            /** Label */
+            label: string;
         };
         /** SessionCreated */
         SessionCreated: {
@@ -1362,6 +1494,39 @@ export interface operations {
             };
         };
     };
+    retract_assertion_graph_assertions__assertion_id__retract_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assertion_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     read_conclusions_graph_conclusions_get: {
         parameters: {
             query?: never;
@@ -1380,6 +1545,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConclusionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_conclusion_graph_conclusions__conclusion_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conclusion_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_nodes_graph_links_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_node_graph_nodes__node_id__rename_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeOut"];
                 };
             };
             /** @description Validation Error */

@@ -63,6 +63,61 @@ class Selection:
         return max(self.considered - len(self.chosen), 0)
 
 
+@dataclass(frozen=True)
+class Candidates:
+    """What a supplier found, with the two scopes still apart.
+
+    **Separate rather than merged, and that is a decision about who decides.**
+    Precedence — session beats user on a shared key — is assembly's policy, and a
+    supplier returning one dict would be deciding it in the host, where a second
+    host would decide it again and eventually differently. So the scopes arrive
+    as they were found and :func:`_merge_scopes` collapses them where it always
+    has.
+
+    ``considered`` is the ADR 0022 invariant and does not survive by accident. A
+    supplier that queried two hundred rows and returned twelve must say two
+    hundred, or a memory the owner deliberately preserved stops reaching the
+    model with nothing recording that it had.
+    """
+
+    session: dict[str, MemoryEntry] = field(default_factory=dict)
+    user: dict[str, MemoryEntry] = field(default_factory=dict)
+    considered: int = 0
+
+
+@runtime_checkable
+class SuppliesMemoryCandidates(Protocol):
+    """Narrowing, which happens before ranking and is the host's half.
+
+    Selection is two stages with different natures: **narrow, then rank.**
+    Narrowing is asynchronous, does I/O, and belongs to whoever owns the data.
+    Ranking stays synchronous and pure, in :class:`RetrievesMemory`.
+
+    Asynchronous where ``RetrievesMemory`` is not, and the asymmetry is the
+    point: a strategy is a rule and a supplier is a query. It sits beside
+    ``SessionRepository`` in the set of things a host provides.
+
+    **A supplier returns ``MemoryEntry`` values and nothing else, and that is a
+    security boundary rather than a typing convenience.** Everything a model is
+    shown must have passed through ``remember`` or ``activate`` — through a
+    person, by ADR 0017. A supplier able to return arbitrary text could put
+    content into a system prompt that nobody confirmed, arriving through a
+    component that looks like plumbing rather than like a write.
+
+    Put as a rule, because the type only enforces it here and the temptation will
+    arrive elsewhere: **an index ranks; it does not speak.**
+    """
+
+    async def candidates(self, session_id: str, user_text: str, limit: int) -> Candidates:
+        """The entries worth ranking for this message.
+
+        ``limit`` is a hint about how many will survive ranking, not a promise
+        about the return: a supplier may return more and let the strategy choose,
+        and must report everything it considered either way.
+        """
+        ...
+
+
 @runtime_checkable
 class RetrievesMemory(Protocol):
     """A rule for picking which memories a turn should see.

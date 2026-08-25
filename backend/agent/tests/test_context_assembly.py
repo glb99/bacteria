@@ -3,7 +3,12 @@
 from datetime import datetime, timezone
 
 from bacteria.agent.context.assembly import assemble_context
-from bacteria.agent.context.retrieval import RecentMemory, RetrievesMemory, Selection
+from bacteria.agent.context.retrieval import (
+    Candidates,
+    RecentMemory,
+    RetrievesMemory,
+    Selection,
+)
 from bacteria.agent.session.store import MemoryEntry, SessionStore, TranscriptItem
 
 
@@ -297,3 +302,72 @@ async def test_a_zero_memory_limit_shows_no_memory_rather_than_all_of_it():
     context = assemble_context(state, user_text="hi", memory_limit=0)
 
     assert context.system is None
+
+
+async def _state_with(memory: dict[str, MemoryEntry]):
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+    for key, entry in memory.items():
+        await store.remember(session.session_id, key, entry.value, entry.reason)
+    return await store.get_state(session.session_id)
+
+
+def _entry(value: str) -> MemoryEntry:
+    return MemoryEntry(value=value, reason="recorded in a test")
+
+
+async def test_a_supplier_narrows_what_the_strategy_ever_sees():
+    """The stage ADR 0024 named and 0022 declined to build.
+
+    Without one, every memory in state is a candidate and the strategy ranks the
+    lot. With one, the host has already decided what is worth ranking — which is
+    the only way a graph could ever influence what a model is told.
+    """
+    state = await _state_with({"tone": _entry("concise"), "pet": _entry("Canija")})
+    supplied = Candidates(session={"tone": _entry("concise")}, considered=40)
+
+    context = assemble_context(state, "hello", candidates=supplied)
+
+    assert context.memories_included == 1
+    assert "Canija" not in (context.system or ""), "state is not consulted when a supplier ran"
+
+
+async def test_the_suppliers_own_count_is_what_gets_recorded():
+    """ADR 0022's invariant, which does not survive by accident.
+
+    A supplier that read forty rows and returned one must say forty. Reporting
+    the size of what it handed back would erase the omission the field exists to
+    make visible — a memory the owner preserved dropping out with nothing saying
+    so.
+    """
+    state = await _state_with({})
+    supplied = Candidates(session={"tone": _entry("concise")}, considered=40)
+
+    context = assemble_context(state, "hello", candidates=supplied)
+
+    assert context.memories_considered == 40
+
+
+async def test_precedence_stays_assembly_s_rule():
+    """The scopes arrive apart so that session-beats-user is decided here.
+
+    A supplier returning one merged dict would be deciding it in the host, where
+    a second host would decide it again and eventually differently.
+    """
+    supplied = Candidates(
+        session={"tone": _entry("concise")},
+        user={"tone": _entry("thorough")},
+        considered=2,
+    )
+
+    context = assemble_context(await _state_with({}), "hello", candidates=supplied)
+
+    assert "concise" in (context.system or "")
+    assert "thorough" not in (context.system or "")
+
+
+async def test_without_a_supplier_nothing_changes():
+    """The parameter is optional and the default is the behaviour that shipped."""
+    state = await _state_with({"tone": _entry("concise")})
+
+    assert assemble_context(state, "hello").memories_included == 1

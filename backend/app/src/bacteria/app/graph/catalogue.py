@@ -172,6 +172,24 @@ CATALOGUE: tuple[Relation, ...] = (
         aliases=(Alias("father_of", converse=True),),
     ),
     Relation(
+        name="tone",
+        invariant="A person prefers one tone at a time.",
+        sentence="<src> prefers <dst> answers",
+        src_kind="person",
+        dst_kind="value",
+        functional=True,
+        aliases=(Alias("prefers_tone"), Alias("style")),
+    ),
+    Relation(
+        name="language",
+        invariant="A person is written to in one language at a time.",
+        sentence="<src> is written to in <dst>",
+        src_kind="person",
+        dst_kind="value",
+        functional=True,
+        aliases=(Alias("speaks"), Alias("prefers_language")),
+    ),
+    Relation(
         name="same_as",
         sentence="<src> and <dst> are the same thing",
         src_kind=None,
@@ -205,9 +223,26 @@ because a person has two parents and so nothing can check it. The less common
 than re-earned. They are corporate, they appeared in **zero** real rows, and they
 stay because removing them is a separate decision from governing the field.
 
+``tone`` and ``language`` are the first entries that point at a *value* rather
+than a thing, and they are what makes a preference representable at all. Their
+names are the memory keys: one slot per key and one ``dst`` per ``(src, rel)`` at
+a time are the same statement, which is why a preference needs no keying
+mechanism of its own.
+
 Everything else starts as tail — ``owns``, ``pet``, ``parent``, ``knows`` — and is
 promoted by the rule of three once it recurs, which is a change to this literal.
 """
+
+
+def preferences() -> tuple[Relation, ...]:
+    """The relations a projection may turn into keyed memory.
+
+    Functional and pointing at a value: the first because a key holds one answer,
+    the second because a key holds a *word* rather than a reference to something
+    else in the graph. ``mother`` is functional and is not a preference; ``pet``
+    points at a thing and is not either.
+    """
+    return tuple(r for r in CATALOGUE if r.functional and r.dst_kind == "value")
 
 
 _BY_NAME: dict[str, Relation] = {relation.name: relation for relation in CATALOGUE}

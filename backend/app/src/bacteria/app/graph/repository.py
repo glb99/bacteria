@@ -86,6 +86,8 @@ def _to_assertion(row: GraphAssertion) -> Assertion:
         trust=row.trust,  # ty: ignore[invalid-argument-type]
         attrs=row.attrs or None,
         closed_by=row.closed_by,  # ty: ignore[invalid-argument-type]
+        origin=row.origin,  # ty: ignore[invalid-argument-type]
+        scope=row.scope,  # ty: ignore[invalid-argument-type]
         session_id=row.session_id,
         run_id=row.run_id,
     )
@@ -105,6 +107,8 @@ def _to_row(assertion: Assertion) -> GraphAssertion:
         recorded_until=assertion.recorded_until,
         trust=assertion.trust,
         closed_by=assertion.closed_by,
+        origin=assertion.origin,
+        scope=assertion.scope,
         session_id=assertion.session_id,
         run_id=assertion.run_id,
     )

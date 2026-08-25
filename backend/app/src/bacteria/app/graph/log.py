@@ -36,6 +36,22 @@ says which happened. It is the difference between "we know better now" and
 how often its extractor is wrong.
 """
 
+Origin = Literal["stated", "inferred"]
+"""Did anybody mean this claim, or did something work it out?
+
+The distinction a projection needs before it may put a claim in front of a model,
+and the one ``trust`` cannot make: that says which channel a claim arrived
+through, which is nearly always ``third-party`` and says nothing about whether
+anyone asserted it.
+
+An extractor writes ``inferred``, always. ``stated`` is reached only by an act of
+the owner's, which is what keeps *memory is written by the owner, not the model*
+true of a system where the model does most of the writing.
+"""
+
+Scope = Literal["user", "session"]
+"""Where a claim applies, which is not where it came from."""
+
 Trust = Literal["user", "third-party", "inferred"]
 """Where a claim came from, which gates its *influence* and never its storage.
 
@@ -74,6 +90,8 @@ class Assertion:
     recorded_at: datetime
     recorded_until: Optional[datetime] = None
     closed_by: Optional[Closure] = None
+    origin: Origin = "inferred"
+    scope: Scope = "user"
     trust: Trust = "user"
     attrs: dict[str, Any] | None = None
     session_id: Optional[str] = None

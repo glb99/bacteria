@@ -108,4 +108,37 @@ def _mount_console(app: FastAPI, directory: Path) -> None:
     if not (directory / "index.html").is_file():
         return
 
-    app.mount("/", StaticFiles(directory=directory, html=True), name="console")
+    app.mount("/", _Console(directory=directory, html=True), name="console")
+
+
+class _Console(StaticFiles):
+    """``StaticFiles`` that says how long each file may be kept.
+
+    **Without this, a browser decides for itself, and it decides wrongly here.**
+    The entry point came back carrying only an etag and a last-modified date, and
+    a response with no ``Cache-Control`` is *heuristically* cacheable: a browser
+    may reuse it without revalidating for a fraction of its age. Since the asset
+    filenames are content hashes, a stale ``index.html`` pins the page to a build
+    that no longer exists on disk — and the page then shows old behaviour with no
+    error anywhere, which reads as a bug that was never fixed.
+
+    That cost several rounds of debugging a defect that had already been fixed,
+    so the rule is stated rather than left to a heuristic:
+
+    - **the entry point is never reused without asking.** ``no-cache`` still
+      permits a 304, so this is one conditional request rather than a download.
+    - **hashed assets are kept for a year.** A new build produces new names, so
+      the old answer can never be the wrong one.
+
+    Judged by name rather than by content type: ``index.html`` is the only file
+    Vite emits unhashed, and a rule about *which file it is* survives a change of
+    type that a rule about types would not.
+    """
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):  # type: ignore[no-untyped-def]
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        hashed = "/assets/" in str(full_path).replace("\\", "/")
+        response.headers["cache-control"] = (
+            "public, max-age=31536000, immutable" if hashed else "no-cache"
+        )
+        return response

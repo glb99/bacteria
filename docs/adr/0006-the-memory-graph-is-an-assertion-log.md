@@ -2,7 +2,37 @@
 
 ## Status
 
-Proposed — 2026-08-23.
+Accepted — 2026-08-23. Phases one and two shipped; **phase three is unbuilt**.
+
+The condition this record set for itself — Proposed until something implements
+it — is met: the schema, the engine, identity, extraction, the deferred job and a
+read-only HTTP surface all run against real conversations, and
+[ADR 0007](0007-the-relation-vocabulary-is-a-catalogue.md) amends it from
+experience. §8's retrieval — similarity resolving an anchor, traversal doing the
+work — is not built, so the kill criterion in §9 cannot yet be run. *Accepted*
+names the decision, not the finished state.
+
+Five things came out of building it rather than out of arguing about it:
+
+- **The open sentinel is `datetime.max`, not an infinity value.** Postgres accepts
+  `'infinity'::timestamptz` and psycopg 3 refuses to read it back, raising rather
+  than degrading — fatal to every Python caller, and invisible until the first
+  open-ended fact was read. A sentinel at the extreme of a type depends on the
+  *driver*, not only on the database.
+- **Evidence cannot cite a constraint**, because a constraint had no row to point
+  at. §6 says the rule is named in the conclusion's statement instead. ADR 0007
+  dissolves it by making functionality a property of a relation.
+- **Idempotence is implemented, not implied.** A deterministic assertion id does
+  not make a repeated write harmless — an identical primary key raises — and a
+  deterministic id collapses a *retried job*, never a fact mentioned again next
+  week. Both needed writing.
+- **A revision is when an explanation becomes possible**, so inference runs from
+  revision as well as observation. The first version had revision merely report,
+  which is backwards: learning that a role ended in February is exactly what
+  gives a successor a boundary to have started at.
+- **A personal graph must contain the person.** The owner needs a reserved node
+  whose id is derived from the user id rather than allocated, or two concurrent
+  first mentions make two of them and the graph's owner is several people.
 
 **Amends [ADR 0002](0002-the-memory-graph-is-postgres-tables.md) rather than
 superseding it.** Everything 0002 decided about *which database* stands, and that
@@ -13,8 +43,9 @@ which package owns them. 0002's phase one shipped. Its phase two — "nodes, edg
 traversal" — is unbuilt, and this record changes the shape of it before anything
 depends on it.
 
-Depends on the agent's ADR 0024, which decides how this reaches the agent and
-stays Proposed until something implements it.
+Depends on the agent's ADR 0024, which decides how this reaches the agent. That
+dependency is the unbuilt part: nothing supplies memory candidates from the graph
+yet, which is the same gap as phase three above.
 
 ## Context
 

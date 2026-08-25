@@ -76,10 +76,10 @@ A new `app/graph/catalogue.py` holds one entry per canonical relation:
 @dataclass(frozen=True)
 class Relation:
     name: str
-    sentence: str          # "<src> works for <dst>" — read to the model and to a person
+    sentence: str  # "<src> works for <dst>" — read to the model and to a person
     src_kind: str
     dst_kind: str
-    functional: bool       # one at a time
+    functional: bool  # one at a time
     aliases: tuple[Alias, ...] = ()
 ```
 

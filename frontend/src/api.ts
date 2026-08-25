@@ -163,6 +163,20 @@ export const retractAssertion = (assertionId: string) =>
     }),
   );
 
+/**
+ * Endorse a claim, so a prompt may be told it.
+ *
+ * The only act here that keeps something. The rest take away, which is why the
+ * console could be complete-looking and still leave the graph unable to say
+ * anything to the model it belongs to.
+ */
+export const confirmAssertion = (assertionId: string) =>
+  unwrap(
+    api.POST("/graph/assertions/{assertion_id}/confirm", {
+      params: { path: { assertion_id: assertionId } },
+    }),
+  );
+
 export const rejectConclusion = (conclusionId: string) =>
   unwrap(
     api.POST("/graph/conclusions/{conclusion_id}/reject", {

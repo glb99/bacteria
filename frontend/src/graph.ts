@@ -35,6 +35,7 @@
  */
 
 import {
+  confirmAssertion,
   linkNodes,
   readConclusions,
   readGraph,
@@ -295,8 +296,19 @@ function renderClaims(
       // Where it came from, in the words that produced it. This is what makes a
       // wrong claim contestable rather than merely visible.
       if (assertion.reason) item.append(text("p", `from: “${assertion.reason}”`, "note"));
-      // The claim is the unit a person disagrees with, so the affordance is on
-      // it rather than in a panel that would make them match ids by eye.
+      // The claim is the unit a person agrees or disagrees with, so both
+      // affordances are on it rather than in a panel that would make them match
+      // ids by eye.
+      //
+      // Confirm is not offered on a claim already confirmed. A button that
+      // reports success and writes nothing teaches a person that the act is
+      // pointless, which is worse for the one act that fills the graph than for
+      // any of the ones that empty it.
+      if (assertion.origin !== "stated") {
+        item.append(action("confirm", "quiet", () => confirmAssertion(assertion.assertion_id)));
+      } else {
+        item.append(text("span", "confirmed", "tag"));
+      }
       item.append(
         confirmable("retract", () => retractAssertion(assertion.assertion_id)),
       );

@@ -22,6 +22,8 @@ from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import (
     LabelTakenError,
     MismatchedKindsError,
+    claims_for,
+    confirm,
     link,
     observe,
     owner,
@@ -556,3 +558,81 @@ async def test_ratifying_what_the_model_guessed_is_not_a_repeat(repo):
 
     assert outcome.recorded == 1
     assert [(p.key, p.value) for p in await preferences_for(repo, USER)] == [("tone", "concise")]
+
+
+async def test_confirming_makes_a_claim_speakable_without_losing_the_proposal(repo):
+    """The half of curation nobody had built.
+
+    Every other act on this graph removes. This keeps -- and it is what a
+    supplier needs, since a supplier may return only what a person confirmed.
+    """
+    guessed = _cto("g1", "person:diane", Interval(None, OPEN_ENDED), W1)
+    await observe(repo, [guessed], now=W1)
+    assert await claims_for(repo, USER) == [], "nothing is speakable yet"
+
+    await confirm(repo, guessed, assertion_id="c1", now=W3)
+
+    spoken = await claims_for(repo, USER)
+    assert [c.assertion_id for c in spoken] == ["c1"]
+    believed = {a.assertion_id: a.origin for a in await repo.current(USER)}
+    assert believed == {"g1": "inferred", "c1": "stated"}, "the proposal survives"
+
+
+async def test_confirming_twice_writes_nothing_the_second_time(repo):
+    """Saying yes twice is one yes, which the repeat rule already knew."""
+    guessed = _cto("g1", "person:diane", Interval(None, OPEN_ENDED), W1)
+    await observe(repo, [guessed], now=W1)
+    await confirm(repo, guessed, assertion_id="c1", now=W3)
+
+    again = await confirm(repo, guessed, assertion_id="c2", now=W4)
+
+    assert again.recorded == 0
+    assert len(await claims_for(repo, USER)) == 1
+
+
+async def test_a_confirmed_claim_reads_as_a_sentence(repo):
+    """Node ids are for the engine; this text is for a person or a model.
+
+    Rendered from the catalogue, so a fact reads the way the vocabulary says it
+    reads and cannot drift from how a conclusion renders the same relation.
+    """
+    acme = await repo.mint_node(USER, "organization", "Acme", now=W1)
+    diane = await repo.mint_node(USER, "person", "Diane", now=W1)
+    claim = Assertion(
+        assertion_id="g1",
+        user_id=USER,
+        src=acme.node_id,
+        rel="cto",
+        dst=diane.node_id,
+        valid=Interval(None, OPEN_ENDED),
+        recorded_at=W1,
+        attrs={"reason": "they said Diane runs engineering"},
+    )
+    await observe(repo, [claim], now=W1)
+
+    await confirm(repo, claim, assertion_id="c1", now=W3)
+
+    spoken = await claims_for(repo, USER)
+    assert spoken[0].statement == "Diane is the CTO of Acme"
+    assert spoken[0].reason == "they said Diane runs engineering"
+
+
+async def test_an_unconfirmed_claim_never_becomes_a_candidate(repo):
+    """The rule the whole record rests on: an index ranks, it does not speak."""
+    await observe(repo, [_cto("g1", "person:diane", Interval(None, OPEN_ENDED), W1)], now=W1)
+
+    assert await claims_for(repo, USER) == []
+
+
+async def test_anchors_narrow_to_claims_touching_those_nodes(repo):
+    """What a supplier will use once it has resolved a message to some nodes."""
+    other = _cto("g2", "person:bob", Interval(None, OPEN_ENDED), W1)
+    first = _cto("g1", "person:diane", Interval(None, OPEN_ENDED), W1)
+    await observe(repo, [first], now=W1)
+    await confirm(repo, first, assertion_id="c1", now=W3)
+    await observe(repo, [other], now=W3)
+    await confirm(repo, other, assertion_id="c2", now=W4)
+
+    narrowed = await claims_for(repo, USER, anchors=["person:diane"])
+
+    assert [c.assertion_id for c in narrowed] == ["c1"]

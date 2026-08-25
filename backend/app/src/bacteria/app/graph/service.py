@@ -26,7 +26,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
-from bacteria.app.graph.catalogue import CATALOGUE, Relation
+from bacteria.app.graph.catalogue import CATALOGUE, Relation, lookup, read_as
 from bacteria.app.graph.catalogue import preferences as preference_relations
 from bacteria.app.graph.conclusions import Conclusion, stale_after
 from bacteria.app.graph.constraints import Conflict, conflicts_for
@@ -521,6 +521,81 @@ def _preference(rel: str, claim: Assertion, labels: dict[str, str]) -> Preferenc
     )
 
 
+@dataclass(frozen=True)
+class Claim:
+    """One confirmed fact, as a sentence and the words behind it.
+
+    ``statement`` is rendered from the catalogue rather than assembled here, so a
+    fact reads the way the vocabulary says it reads — the same renderer ADR 0009
+    uses for a conclusion, for the same reason: this text is for a person, or for
+    a model, and node ids are for neither.
+
+    ``assertion_id`` is the key a supplier will hand back. Unique, stable, and
+    never displayed, so nothing has to invent one — which is the trap widening
+    the keyed projection would have walked into.
+    """
+
+    assertion_id: str
+    statement: str
+    reason: str
+    subject: str
+    object: str
+
+
+async def claims_for(
+    repository: SqlGraphRepository,
+    user_id: str,
+    *,
+    anchors: Sequence[str] = (),
+) -> list[Claim]:
+    """The facts this person has confirmed, optionally narrowed to some nodes.
+
+    **The second function that decides what may be spoken, and there must never
+    be a third.** ADR 0010 §5 wanted one; ADR 0011 accepts two because the keyed
+    projection and a per-turn candidate list are different shapes, and one
+    function serving both would need a flag — which is how *speakable* and *not
+    speakable* come to depend on reading a call site correctly.
+
+    So the rule is stated rather than left to a reader: ``origin == "stated"``,
+    here and in :func:`preferences_for`, and nowhere else.
+
+    ``anchors`` narrows to claims touching those nodes at either end. Empty means
+    everything confirmed, which is what a caller comparing against recency wants
+    — narrowing is the supplier's job and this is the read it narrows.
+    """
+    labels = {node.node_id: node.label for node in await repository.nodes(user_id)}
+    wanted = set(anchors)
+
+    found: list[Claim] = []
+    for assertion in await repository.current(user_id):
+        if assertion.origin != "stated":
+            continue
+        relation = lookup(assertion.rel)
+        if relation is None:
+            # Tail relations are excluded, and not to be tidy: the sentence a
+            # claim renders with comes from the catalogue, so a relation without
+            # one cannot be written down for a model without inventing phrasing
+            # nobody approved.
+            continue
+        if wanted and assertion.src not in wanted and assertion.dst not in wanted:
+            continue
+        attrs = assertion.attrs or {}
+        found.append(
+            Claim(
+                assertion_id=assertion.assertion_id,
+                statement=read_as(
+                    relation,
+                    labels.get(assertion.src, assertion.src),
+                    labels.get(assertion.dst, assertion.dst),
+                ),
+                reason=str(attrs.get("reason") or "confirmed by the owner"),
+                subject=assertion.src,
+                object=assertion.dst,
+            )
+        )
+    return sorted(found, key=lambda c: c.statement)
+
+
 async def proposals_from(
     repository: SqlGraphRepository,
     user_id: str,
@@ -555,6 +630,47 @@ async def proposals_from(
             continue
         found.append(_preference(claim.rel, claim, labels))
     return sorted(found, key=lambda p: (p.key, p.value))
+
+
+async def confirm(
+    repository: SqlGraphRepository,
+    assertion: Assertion,
+    *,
+    assertion_id: str,
+    now: datetime,
+    relations: Sequence[Relation] = CATALOGUE,
+) -> Outcome:
+    """Endorse a claim the extractor proposed, making it speakable.
+
+    **The half of curation nobody built.** Every other act on this graph takes
+    something away — retract, reject, rename onto a name that displaces another.
+    This is the one that keeps something, and it is what a supplier needs: a
+    supplier may return only what a person confirmed, so until now anchor
+    resolution would have traversed correctly and found nothing it was allowed to
+    hand over.
+
+    **Appends rather than flipping a flag.** The proposal stays exactly where it
+    was and the two rows differ in ``origin``, because ratification is not a
+    property of a claim — it is the owner making the claim, and the log records
+    events. ``_unrepeated`` keys on ``origin`` precisely so this is not swallowed
+    as a restatement of what the model already said.
+
+    A second confirmation of the same claim writes nothing and reports nothing
+    written, which is what the repeat rule is for: saying yes twice is one yes.
+    """
+    stated = replace(
+        assertion,
+        assertion_id=assertion_id,
+        origin="stated",
+        # The owner is the one confirming, whatever channel the claim arrived
+        # through. `trust` records the channel and would be a lie here if it kept
+        # saying `third-party` about a sentence a person just endorsed.
+        trust="user",
+        recorded_at=now,
+        recorded_until=None,
+        closed_by=None,
+    )
+    return await observe(repository, [stated], now=now, relations=relations)
 
 
 async def retract(

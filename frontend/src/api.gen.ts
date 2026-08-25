@@ -355,6 +355,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/graph/assertions/{assertion_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Assertion
+         * @description Endorse a claim the extractor proposed, so a prompt may be told it.
+         *
+         *     The only act on this graph that *keeps* something. Everything else takes
+         *     away, which is why its absence was invisible: the graph worked, quietly,
+         *     without ever mattering.
+         *
+         *     Appends rather than editing. The proposal stays and the two rows differ in
+         *     ``origin``, so the log records the endorsement as its own event — and
+         *     confirming twice writes nothing, because saying yes twice is one yes.
+         */
+        post: operations["confirm_assertion_graph_assertions__assertion_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/graph/assertions/{assertion_id}/retract": {
         parameters: {
             query?: never;
@@ -601,6 +629,8 @@ export interface components {
             dst: string;
             /** Ends */
             ends: string;
+            /** Origin */
+            origin: string;
             /** Reason */
             reason: string | null;
             /**
@@ -1481,6 +1511,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GraphOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_assertion_graph_assertions__assertion_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assertion_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeOut"];
                 };
             };
             /** @description Validation Error */

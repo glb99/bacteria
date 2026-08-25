@@ -326,6 +326,20 @@ def vocabulary() -> str:
     return "\n".join(lines)
 
 
+def read_as(relation: Relation, src: str, dst: str) -> str:
+    """One claim as a sentence, from the catalogue's own template.
+
+    Takes labels rather than an assertion, so this module keeps knowing nothing
+    about the log — and so the two callers that need it, a conclusion's statement
+    and a confirmed fact's, cannot render the same relation differently.
+
+    The first version of the conclusion renderer built statements from node ids
+    and produced *"1385501d-… took over cto of dcaad500-…"*: correct, and
+    unusable by the person expected to disagree with it.
+    """
+    return relation.sentence.replace("<src>", src).replace("<dst>", dst)
+
+
 PROMOTION_THRESHOLD = 3
 """How often a relation must recur before it is worth asking about.
 

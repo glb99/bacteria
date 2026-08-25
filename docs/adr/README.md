@@ -25,3 +25,4 @@ conventions do not qualify.
 | [0006](0006-the-memory-graph-is-an-assertion-log.md) | Build the memory graph as an assertion log with two time axes, in its own feature package | Proposed |
 | [0007](0007-the-relation-vocabulary-is-a-catalogue.md) | Govern `rel` with a seeded catalogue, an unratified tail, and derived canonicality | Proposed |
 | [0008](0008-preferences-are-assertions.md) | Hold preferences as assertions: a functional relation to a value node, the relation being the memory key | Proposed |
+| [0009](0009-the-graph-is-correctable.md) | Give the graph a write surface: retract, rename, link, reject -- as service verbs behind thin routes | Proposed |

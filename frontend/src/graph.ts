@@ -61,57 +61,85 @@ let layout: Layout = "subject";
 let pendingLink: string | null = null;
 
 /**
- * A button that performs one act and redraws.
+ * Run one act, then redraw.
  *
  * Errors are surfaced on the page rather than thrown into an event handler,
  * where an unhandled rejection would be invisible to the person who just clicked
  * and appear only in a browser console they are not reading. That failure has
  * already happened once in this file's history.
  */
-function action(label: string, className: string, run: () => Promise<unknown>): HTMLButtonElement {
+function perform(button: HTMLButtonElement, run: () => Promise<unknown>): void {
+  button.disabled = true;
+  void run()
+    .then(() => refresh(currentSessionId))
+    .catch((failure: unknown) => {
+      button.disabled = false;
+      report(failure instanceof Error ? failure.message : String(failure));
+    });
+}
+
+function act(label: string, className: string): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `act ${className}`;
   button.textContent = label;
-  button.addEventListener("click", () => {
-    button.disabled = true;
-    void run()
-      .then(() => refresh(currentSessionId))
-      .catch((failure: unknown) => {
-        button.disabled = false;
-        report(failure instanceof Error ? failure.message : String(failure));
-      });
-  });
+  return button;
+}
+
+/** A button that acts on the click. */
+function action(label: string, className: string, run: () => Promise<unknown>): HTMLButtonElement {
+  const button = act(label, className);
+  button.addEventListener("click", () => perform(button, run));
   return button;
 }
 
 /**
- * A destructive act that asks once, in place.
+ * A destructive act that asks once, in place. The second click is the one that acts.
  *
- * The second click is the one that happens. Any other click on the page resets
- * it, so an abandoned "sure?" does not sit there waiting to catch someone later.
+ * **One listener, and the reset skips this button.** The first version wired two
+ * listeners onto one element and relied on their order, then reset itself from a
+ * `document` handler registered with `capture: true` — which fires on the way
+ * *down*, before the event reaches the button. So the confirming click disarmed
+ * it first and the handler, finding it unarmed, armed it again. It could be
+ * armed forever and never fired.
+ *
+ * Now the click that arms and the click that confirms both stop propagating, so
+ * neither reaches the reset; every other click on the page does.
+ *
+ * **At most one button is armed at a time**, tracked here rather than per
+ * button. Arming a second one cannot rely on the document reset, because that
+ * click stops propagating too — so without this, a row abandoned mid-confirm
+ * stays armed and its next click acts immediately, which is the trap the
+ * confirmation exists to prevent.
  */
+let disarmArmed: (() => void) | null = null;
+
 function confirmable(label: string, run: () => Promise<unknown>): HTMLButtonElement {
-  const button = action(label, "danger", run);
-  const armed = () => button.dataset["armed"] === "yes";
-  button.addEventListener(
-    "click",
-    (event) => {
-      if (armed()) return;
-      event.stopImmediatePropagation();
-      button.dataset["armed"] = "yes";
-      button.textContent = "sure?";
-      document.addEventListener(
-        "click",
-        () => {
-          delete button.dataset["armed"];
-          button.textContent = label;
-        },
-        { capture: true, once: true },
-      );
-    },
-    { capture: true },
-  );
+  const button = act(label, "danger");
+  let armed = false;
+
+  const disarm = (): void => {
+    armed = false;
+    button.textContent = label;
+    if (disarmArmed === disarm) disarmArmed = null;
+  };
+
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (armed) {
+      document.removeEventListener("click", disarm);
+      disarm();
+      perform(button, run);
+      return;
+    }
+    disarmArmed?.();
+    armed = true;
+    button.textContent = "sure?";
+    disarmArmed = disarm;
+    // An abandoned "sure?" must not sit there waiting to catch someone later.
+    document.addEventListener("click", disarm, { once: true });
+  });
+
   return button;
 }
 

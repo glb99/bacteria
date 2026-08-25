@@ -90,3 +90,92 @@ def parse_bound(text: object) -> Optional[datetime]:
             # regex cannot see this and the constructor can.
             return None
     return None
+
+
+_MONTHS = (
+    # Longest first, so the alternation cannot match a prefix and stop.
+    "january",
+    "february",
+    "march",
+    "april",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+    "sept",
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "may",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "oct",
+    "nov",
+    "dec",
+)
+
+_DATE_IN_PROSE = re.compile(
+    r"\b(?:" + "|".join(_MONTHS) + r")\b|\b(?:19|20)\d{2}\b|\b\d{1,2}/\d{1,2}\b",
+    re.IGNORECASE,
+)
+"""A month, a plausible year, or a numeric day/month.
+
+**Whole words, and the first version was not.** Matching month *prefixes* —
+``mar\\w*`` — made "Marta took over as CTO" carry a date, because the successor's
+name begins with one. The one example this guard exists for defeated it, and a
+test written from that example is what said so.
+
+"May" remains genuinely ambiguous with a name and is kept, because a reason that
+says only "May" and licenses a bound is rarer than one that means the month.
+"""
+
+
+def stated_in(reason: object) -> bool:
+    """Do the words supporting a claim contain a date at all?
+
+    **The guard that stops an inferred boundary entering the log as a fact.** The
+    first real conversation after dates were added produced this pair:
+
+    ==============================  =================  =======
+    reason                          bound              stated
+    ==============================  =================  =======
+    "Diane left Acme in Feb 2026"   ``until 2026-02``  yes
+    "Marta took over as CTO"        ``since 2026-02``  **no**
+    ==============================  =================  =======
+
+    Nobody said when Marta started. The model worked it out — from exactly the
+    reasoning :func:`~bacteria.app.graph.inference.infer_succession` exists to
+    perform, and having been told in the prompt not to.
+
+    That matters more than a merely wrong date would. When the engine infers a
+    boundary it writes a *conclusion*: confidence 0.6, evidence on both premises,
+    withdrawn when either moves. When the model infers one it writes an
+    **assertion**, indistinguishable from something observed — an assumed value
+    entering the log through a side door. And it conceals itself, because
+    supplying the boundary removes the precondition the engine needed in order to
+    propose it properly: the better the model gets at guessing, the less the
+    defeasible machinery ever runs.
+
+    So the check is on the *supporting words*, which the model quotes rather than
+    composes. Presence, not agreement: a reason mentioning any date licenses the
+    bounds on that claim, and a reason mentioning none licenses nothing.
+
+    Not built:
+        Agreement between the words and the value. A reason saying "in 2019"
+        licenses a bound of ``2024-03``, and one date in the words licenses both
+        a ``since`` and an ``until``. The failure seen in practice is a reason
+        with *no* date, and a stricter check would start refusing paraphrases —
+        this field is "quoted or closely paraphrased", not a quotation.
+
+        Months in any language but English. A Spanish reason carrying "febrero"
+        and no year loses its bound. That is under-claiming, the recoverable
+        direction, and the alternative is a list of languages with no principled
+        end.
+    """
+    return isinstance(reason, str) and _DATE_IN_PROSE.search(reason) is not None

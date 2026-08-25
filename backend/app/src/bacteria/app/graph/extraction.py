@@ -51,7 +51,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.agent.model.protocol import SendsMessages
 from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
 from bacteria.app.graph.catalogue import Relation, resolve, vocabulary
-from bacteria.app.graph.dates import parse_bound
+from bacteria.app.graph.dates import parse_bound, stated_in
 from bacteria.app.graph.log import Assertion, Trust
 from bacteria.app.graph.models import GraphExtraction
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -376,12 +376,20 @@ def _interval(claim: dict[str, Any]) -> Interval:
     began, which is why ``valid_from`` was null on every row: it had no source at
     all until this field existed.
 
+    **A bound the supporting words do not carry is refused.** See
+    :func:`~bacteria.app.graph.dates.stated_in`: a model that works a boundary out
+    writes it as an assertion, where the engine working the same boundary out
+    writes a defeasible conclusion. The first is indistinguishable from an
+    observation and the second is not, so the guess has to be caught before it
+    lands rather than reasoned about afterwards.
+
     **An end before its start is dropped rather than swapped.** Reversing it
     would invent a claim nobody made, and the pair is evidence the model was
     guessing — the honest response is to keep the triple and lose both bounds.
     """
-    since = parse_bound(claim.get("since"))
-    until = parse_bound(claim.get("until"))
+    supported = stated_in(claim.get("reason"))
+    since = parse_bound(claim.get("since")) if supported else None
+    until = parse_bound(claim.get("until")) if supported else None
 
     if since is not None and until is not None and until < since:
         since, until = None, None
@@ -411,9 +419,18 @@ def _attrs(claim: dict[str, Any]) -> dict[str, Any]:
     # January is a decision this code made and not something anyone said. The
     # column cannot hold the difference between a year and a day; this can, and a
     # reader checking why a succession landed where it did needs it.
+    #
+    # A refused bound is recorded too, under its own key. It is how often the
+    # model invented a date having been told not to -- a rate worth being able to
+    # count rather than a failure worth hiding, and the only evidence that the
+    # instruction is not being followed.
+    supported = stated_in(claim.get("reason"))
     for bound in ("since", "until"):
-        if claim.get(bound):
-            attrs[f"{bound}_said"] = claim[bound]
+        raw = claim.get(bound)
+        if not raw:
+            continue
+        accepted = supported and parse_bound(raw) is not None
+        attrs[f"{bound}_said" if accepted else f"{bound}_refused"] = raw
     return attrs
 
 

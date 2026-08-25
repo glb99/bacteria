@@ -33,7 +33,7 @@ from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
-from bacteria.app.graph.temporal import Interval
+from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
 
 @dataclass(frozen=True)
@@ -159,7 +159,8 @@ async def observe(
     # one must see the world *before* the write to tell a repeat from a new claim,
     # and `_reconcile`'s must see it after, or a conflict between two claims in
     # this batch is invisible.
-    fresh = _unrepeated(assertions, await repository.current(owner))
+    believed = await repository.current(owner)
+    fresh = _unassumed(_unrepeated(assertions, believed), believed)
     if fresh:
         await repository.record(fresh)
 
@@ -167,6 +168,59 @@ async def observe(
         repository, owner, {a.rel for a in assertions}, relations, now
     )
     return Outcome(recorded=len(fresh), conflicts=conflicts, inferred=inferred)
+
+
+def _unassumed(assertions: Sequence[Assertion], believed: Sequence[Assertion]) -> list[Assertion]:
+    """Take back a start the model worked out from another claim's end.
+
+    **The signature is exact and needs no language at all**: a claim whose
+    ``valid.start`` equals another believed claim's ``valid.end``, for the same
+    ``(user_id, src, rel)`` and a different ``dst``, is a *succession* — and
+    performing one is :func:`~bacteria.app.graph.inference.infer_succession`'s
+    job, not the extractor's.
+
+    It matters which of them does it. The engine writes a **conclusion**:
+    confidence 0.6, evidence on both premises, withdrawn when either moves. The
+    extractor writes an **assertion**, which is indistinguishable from something
+    observed — an assumed value in the log, which the whole conclusions table
+    exists to prevent.
+
+    And the extractor doing it is self-concealing. ``infer_succession`` needs an
+    open claim whose start is *unknown*; supplying the start removes its
+    precondition, so the boundary lands as a fact and nothing ever proposes it as
+    an assumption. Stripping the start here restores the precondition, and the
+    same date arrives through the path that marks it as a guess.
+
+    **Two earlier attempts read prose and both were talked around.** Checking the
+    model's ``reason`` for a date checks its output against its own output — it
+    responded by writing "[in February 2026]" into the justification. Checking the
+    transcript fails too, because the date was genuinely there, attached to the
+    other clause of the same sentence. Only the arithmetic is unarguable.
+
+    **A genuinely stated start that happens to coincide is demoted**, and that is
+    the accepted cost. "Diane left in February and Marta started in February" is
+    two stated facts, and this turns the second into an assumption carrying the
+    same date. Nothing can tell that apart from the guess, and the asymmetry
+    decides it: an assumption recorded as a fact cannot be spotted afterwards,
+    where a fact recorded as an assumption is visible, cited, and one confirmation
+    away from being restated. ``since_said`` keeps the model's word either way.
+    """
+    ends: dict[tuple[str, str, str], set[datetime]] = {}
+    for a in [*believed, *assertions]:
+        if a.valid.end is not None and a.valid.end != OPEN_ENDED:
+            ends.setdefault((a.user_id, a.src, a.rel), set()).add(a.valid.end)
+
+    stripped: list[Assertion] = []
+    for a in assertions:
+        boundary = a.valid.start
+        others = ends.get((a.user_id, a.src, a.rel), set())
+        # `!= a.valid.end` keeps a closed claim whose own end is its own start
+        # out of this: that is a zero-length interval, which is a different
+        # defect and not a succession.
+        if boundary is not None and boundary in others and boundary != a.valid.end:
+            a = replace(a, valid=Interval(None, a.valid.end))
+        stripped.append(a)
+    return stripped
 
 
 def _unrepeated(assertions: Sequence[Assertion], believed: Sequence[Assertion]) -> list[Assertion]:
@@ -285,6 +339,14 @@ async def _reconcile(
     conclusions = await repository.depending_on(owner, [a.assertion_id for a in believed])
     applicable = [r for r in relations if r.name in affected]
 
+    # Read once, and only when a rule might fire: this is the only thing in the
+    # reconciliation that needs a node's *name* rather than its id, and it needs
+    # it so that a conclusion's statement is readable by the person expected to
+    # disagree with it.
+    labels = (
+        {node.node_id: node.label for node in await repository.nodes(owner)} if applicable else {}
+    )
+
     conflicts: list[Conflict] = []
     inferred: list[Conclusion] = []
     for relation in applicable:
@@ -292,7 +354,7 @@ async def _reconcile(
             if conflict.state != "possible":
                 continue
             succession = infer_succession(
-                believed, relation, conclusion_id=str(uuid.uuid4()), now=now
+                believed, relation, labels=labels, conclusion_id=str(uuid.uuid4()), now=now
             )
             if succession is None:
                 continue

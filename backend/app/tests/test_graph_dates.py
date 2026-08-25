@@ -12,8 +12,8 @@ Pure — no database, no model, no fixtures.
 
 from datetime import datetime, timezone
 
-from bacteria.app.graph.dates import parse_bound
-from bacteria.app.graph.extraction import _interval
+from bacteria.app.graph.dates import parse_bound, stated_in
+from bacteria.app.graph.extraction import _attrs, _interval
 from bacteria.app.graph.temporal import OPEN_ENDED
 
 
@@ -64,8 +64,8 @@ def test_anything_that_is_not_a_string_is_refused():
     assert parse_bound(2019) is None
 
 
-def claim(tense, since=None, until=None):
-    return {"tense": tense, "since": since, "until": until}
+def claim(tense, since=None, until=None, reason="in 2019"):
+    return {"tense": tense, "since": since, "until": until, "reason": reason}
 
 
 def test_tense_decides_the_end_when_no_date_was_given():
@@ -109,3 +109,53 @@ def test_an_unreadable_date_leaves_the_claim_no_worse_off():
 
     assert interval.start is None
     assert interval.end == OPEN_ENDED
+
+
+def test_supporting_words_carrying_a_date_license_a_bound():
+    for reason in ("Diane left Acme in February 2026", "she joined in 2019", "on 3/4"):
+        assert stated_in(reason), reason
+
+
+def test_supporting_words_carrying_no_date_license_nothing():
+    for reason in ("Marta took over as CTO", "she works there", "", None):
+        assert not stated_in(reason), reason
+
+
+def test_the_bound_the_model_invented_is_refused():
+    """The live case, verbatim from the first real conversation after dates.
+
+    Nobody said when Marta started. The model worked it out -- from the same
+    reasoning `infer_succession` exists to perform, having been told not to. That
+    boundary landed as an assertion, indistinguishable from an observation, where
+    the engine would have written a defeasible conclusion.
+    """
+    invented = _interval(claim("current", since="2026-02", reason="Marta took over as CTO"))
+
+    assert invented.start is None
+    assert invented.end == OPEN_ENDED
+
+
+def test_the_bound_the_transcript_stated_survives():
+    """The other half of the same pair, which must keep working."""
+    stated = _interval(claim("past", until="2026-02", reason="Diane left Acme in February 2026"))
+
+    assert stated.end == datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+
+def test_a_refused_bound_is_recorded_as_refused():
+    """How often the model invents a date is a rate worth counting.
+
+    It is also the only evidence that an instruction the prompt gives is not
+    being followed, which is not a thing to discover twice.
+    """
+    attrs = _attrs(claim("current", since="2026-02", reason="Marta took over as CTO"))
+
+    assert attrs["since_refused"] == "2026-02"
+    assert "since_said" not in attrs
+
+
+def test_an_accepted_bound_is_recorded_as_said():
+    attrs = _attrs(claim("past", until="2026-02", reason="Diane left in February 2026"))
+
+    assert attrs["until_said"] == "2026-02"
+    assert "until_refused" not in attrs

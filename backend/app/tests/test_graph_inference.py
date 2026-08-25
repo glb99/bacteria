@@ -19,6 +19,13 @@ NOW = datetime(2026, 5, 25, tzinfo=timezone.utc)
 JAN = datetime(2026, 1, 15, tzinfo=timezone.utc)
 FEB = datetime(2026, 2, 15, tzinfo=timezone.utc)
 
+LABELS = {
+    "org:acme": "Acme",
+    "person:diane": "Diane",
+    "person:marta": "Marta",
+    "person:bob": "Bob",
+}
+
 ONE_CTO = Relation(
     name="cto",
     sentence="<dst> is the CTO of <src>",
@@ -48,7 +55,7 @@ OPEN_AND_UNDATED = _role("a2", "person:bob", Interval(None, OPEN_ENDED))
 def test_it_infers_when_exactly_one_role_ended_and_one_is_open():
     """The case it is for, so the refusals below mean something."""
     result = infer_succession(
-        [ENDED_IN_FEBRUARY, OPEN_AND_UNDATED], ONE_CTO, conclusion_id="c", now=NOW
+        [ENDED_IN_FEBRUARY, OPEN_AND_UNDATED], ONE_CTO, labels=LABELS, conclusion_id="c", now=NOW
     )
 
     assert result is not None
@@ -67,6 +74,7 @@ def test_it_declines_when_two_roles_have_ended():
         infer_succession(
             [ENDED_IN_FEBRUARY, also_ended, OPEN_AND_UNDATED],
             ONE_CTO,
+            labels=LABELS,
             conclusion_id="c",
             now=NOW,
         )
@@ -86,6 +94,7 @@ def test_it_declines_when_two_roles_are_open_and_undated():
         infer_succession(
             [ENDED_IN_FEBRUARY, OPEN_AND_UNDATED, another_open],
             ONE_CTO,
+            labels=LABELS,
             conclusion_id="c",
             now=NOW,
         )
@@ -106,6 +115,7 @@ def test_it_declines_when_a_third_role_spans_the_boundary():
         infer_succession(
             [ENDED_IN_FEBRUARY, OPEN_AND_UNDATED, interim],
             ONE_CTO,
+            labels=LABELS,
             conclusion_id="c",
             now=NOW,
         )
@@ -123,7 +133,9 @@ def test_it_declines_across_two_peoples_graphs():
     someone_elses = _role("a3", "person:bob", Interval(None, OPEN_ENDED), user="u2")
 
     assert (
-        infer_succession([ENDED_IN_FEBRUARY, someone_elses], ONE_CTO, conclusion_id="c", now=NOW)
+        infer_succession(
+            [ENDED_IN_FEBRUARY, someone_elses], ONE_CTO, labels=LABELS, conclusion_id="c", now=NOW
+        )
         is None
     )
 
@@ -149,9 +161,46 @@ def test_it_ignores_claims_no_longer_believed():
     result = infer_succession(
         [superseded, ENDED_IN_FEBRUARY, OPEN_AND_UNDATED],
         ONE_CTO,
+        labels=LABELS,
         conclusion_id="c",
         now=NOW,
     )
 
     assert result is not None, "the superseded row should not have counted as a third holder"
     assert result.boundary == FEB
+
+
+def test_the_statement_names_things_a_person_recognizes():
+    """A conclusion is read in order to be *disagreed with*, so it must be legible.
+
+    The first real conclusion this system ever drew read "1385501d-... took over
+    cto of dcaad500-..." -- correct, and unusable. Node ids are what the engine
+    works in; a statement is the one thing here written for a person.
+    """
+    succession = infer_succession(
+        [ENDED_IN_FEBRUARY, OPEN_AND_UNDATED],
+        ONE_CTO,
+        labels=LABELS,
+        conclusion_id="c",
+        now=NOW,
+    )
+
+    assert succession is not None
+    statement = succession.conclusion.statement
+    assert "Bob" in statement and "Acme" in statement and "Diane" in statement
+    assert "person:" not in statement and "org:" not in statement
+    assert "assumed" in statement, "and it must not read as something observed"
+
+
+def test_an_unknown_label_falls_back_to_the_id_rather_than_failing():
+    """A badly named conclusion beats a conclusion that could not be written."""
+    succession = infer_succession(
+        [ENDED_IN_FEBRUARY, OPEN_AND_UNDATED],
+        ONE_CTO,
+        labels={},
+        conclusion_id="c",
+        now=NOW,
+    )
+
+    assert succession is not None
+    assert "person:bob" in succession.conclusion.statement

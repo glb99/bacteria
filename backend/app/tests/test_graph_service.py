@@ -220,3 +220,46 @@ async def test_a_claim_repeated_inside_one_batch_is_written_once(repo):
 
     assert outcome.recorded == 1
     assert len(await repo.current(USER)) == 1
+
+
+async def test_a_succession_the_model_performed_is_taken_back_and_re_derived(repo):
+    """The live failure, verbatim: "Diane left in February 2026, Marta took over".
+
+    The extractor gave Marta a start equal to Diane's end. Nobody stated it -- the
+    model performed the succession itself, which the prompt forbids and which two
+    prose-reading guards failed to catch, the second because the model wrote the
+    date into its own justification.
+
+    It matters which side does it. An extractor writing that boundary produces an
+    assertion, indistinguishable from an observation. The engine writing it
+    produces a conclusion carrying confidence and evidence -- and supplying the
+    start is what removed the engine's precondition, so the guess also silenced
+    the machinery that would have marked it as one.
+    """
+    outcome = await observe(
+        repo,
+        [
+            _cto("d1", "person:diane", Interval(None, FEBRUARY), W1),
+            _cto("m1", "person:marta", Interval(FEBRUARY, OPEN_ENDED), W1),
+        ],
+        now=W1,
+    )
+
+    believed = {a.assertion_id: a for a in await repo.current(USER)}
+    assert believed["m1"].valid.start is None, "the assumed start must not be a fact"
+    assert believed["d1"].valid.end == FEBRUARY, "the stated end is untouched"
+
+    assert len(outcome.inferred) == 1, "and the same boundary arrives as an assumption"
+    conclusion = outcome.inferred[0]
+    assert conclusion.confidence < 1.0
+    assert set(conclusion.evidence) == {"d1", "m1"}
+
+
+async def test_a_start_matching_nothing_survives(repo):
+    """Only the succession signature is stripped, not every stated start."""
+    await observe(repo, [_cto("d1", "person:diane", Interval(None, FEBRUARY), W1)], now=W1)
+
+    await observe(repo, [_cto("m1", "person:marta", Interval(W3, OPEN_ENDED), W4)], now=W4)
+
+    believed = {a.assertion_id: a for a in await repo.current(USER)}
+    assert believed["m1"].valid.start == W3

@@ -280,3 +280,44 @@ async def test_a_claim_restated_in_a_later_run_is_not_recorded_twice(db):
 
     assert (result.recorded, result.duplicates) == (0, 1)
     assert len(await SqlGraphRepository(db).current(USER)) == 1
+
+
+async def test_an_extracted_preference_is_proposed_and_never_spoken(db):
+    """The whole containment, in one row.
+
+    Everything the extractor writes is `inferred`, so a preference it hears is a
+    proposal and reaches no prompt until a person states it. Without this the
+    model would be writing its own memory, which is the one thing the agent's
+    ADR 0016 forbids.
+    """
+    client = FakeClient(
+        json.dumps(
+            [
+                {
+                    "src": {"label": "self", "kind": "person"},
+                    "rel": "tone",
+                    "dst": {"label": "concise", "kind": "value"},
+                    "tense": "current",
+                    "reason": "they asked for short answers",
+                }
+            ]
+        )
+    )
+
+    await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
+
+    claims = [a for a in await SqlGraphRepository(db).current(USER) if a.rel == "tone"]
+
+    assert len(claims) == 1
+    assert claims[0].origin == "inferred", "a proposal, not a memory"
+    assert claims[0].scope == "session", "it belongs to the conversation it was heard in"
+
+
+async def test_an_extracted_fact_stays_scoped_to_the_person(db):
+    """A fact is about the world and holds wherever they go; a preference is not."""
+    client = FakeClient(json.dumps([_claim("Acme", "cto", "Diane")]))
+
+    await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
+
+    stored = await SqlGraphRepository(db).current(USER)
+    assert stored[0].scope == "user"

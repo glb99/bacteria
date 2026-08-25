@@ -129,3 +129,29 @@ def test_a_merge_the_model_proposed_is_dropped_entirely():
     other = {"label": "Diana Mercer", "kind": "person"}
 
     assert _clean(claim(PERSON, "same_as", other)) is None
+
+
+def test_a_catalogue_preference_survives_the_attribute_rule():
+    """The prompt forbids attributes and the catalogue lists two of them.
+
+    A preferred tone *is* an attribute, so the rule and the vocabulary block
+    contradicted each other until the catalogue became the exception: an
+    attribute is extractable exactly when a known relationship covers it.
+    """
+    cleaned = _clean(claim(SELF, "tone", {"label": "concise", "kind": "value"}))
+
+    assert cleaned is not None
+    assert cleaned["rel"] == "tone"
+
+
+def test_a_preference_alias_canonicalizes_like_any_other():
+    cleaned = _clean(claim(SELF, "prefers_tone", {"label": "concise", "kind": "value"}))
+
+    assert cleaned is not None
+    assert cleaned["rel"] == "tone"
+    assert cleaned["proposed_rel"] == "prefers_tone"
+
+
+def test_a_preference_pointing_at_a_thing_is_refused():
+    """`tone` is person → value, so an object that is a person cannot be one."""
+    assert _clean(claim(SELF, "tone", PERSON)) is None

@@ -23,3 +23,4 @@ conventions do not qualify.
 | [0004](0004-authentication-is-shared-authorization-lives-next-to-the-resource.md) | Authenticate once at the edge; decide authorization next to the resource | Accepted |
 | [0005](0005-a-browser-holds-a-session-not-a-key.md) | A browser exchanges a key for an expiring, HttpOnly session cookie | Accepted |
 | [0006](0006-the-memory-graph-is-an-assertion-log.md) | Build the memory graph as an assertion log with two time axes, in its own feature package | Proposed |
+| [0007](0007-the-relation-vocabulary-is-a-catalogue.md) | Govern `rel` with a seeded catalogue, an unratified tail, and derived canonicality | Proposed |

@@ -43,7 +43,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.agent.session.store import (
     OWNER,
     SESSION_SCOPE,
-    USER_SCOPE,
     MemoryEntry,
     MemoryScope,
     Session,
@@ -52,6 +51,7 @@ from bacteria.agent.session.store import (
     TranscriptItemKind,
     UnknownSessionError,
 )
+from bacteria.app.chat.memory import MemoryStore, TableMemoryStore
 from bacteria.app.chat.models import (
     ChatMemoryEntry,
     ChatMemoryExtraction,
@@ -162,8 +162,14 @@ class SqlSessionRepository:
             work is — for a request, that is the dependency that opened it.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, memory: Optional[MemoryStore] = None) -> None:
         self._db = session
+        # Defaulted rather than required, so every existing call site is
+        # unchanged and the seam costs nothing to ignore. A caller that wants the
+        # graph's memory passes one; ADR 0010 puts that choice in configuration
+        # rather than per request, because a store chosen per call makes "which
+        # memory answered" unanswerable exactly when the two disagree.
+        self._memory: MemoryStore = memory or TableMemoryStore(session)
 
     async def create_session(self, user_id: str) -> Session:
         row = ChatSession(session_id=str(uuid.uuid4()), user_id=user_id)
@@ -272,27 +278,12 @@ class SqlSessionRepository:
                 .order_by(ChatTranscriptItem.seq)  # ty: ignore[invalid-argument-type]
             )
         ).all()
-        memories = (
-            await self._db.exec(
-                select(ChatMemoryEntry).where(ChatMemoryEntry.session_id == session_id)
-            )
-        ).all()
-        proposals = (
-            await self._db.exec(
-                select(ChatMemoryProposal).where(ChatMemoryProposal.session_id == session_id)
-            )
-        ).all()
-        # Selected by the owner of *this* session and by nothing else. This is
-        # the only query in the application that reaches rows not keyed by
-        # `session_id`, so it is the only one where a wrong predicate would show
-        # one person another's memory rather than merely the wrong conversation.
-        # `row.user_id` comes from the session already loaded above, which the
-        # route has already checked the caller owns.
-        user_memories = (
-            await self._db.exec(
-                select(ChatUserMemoryEntry).where(ChatUserMemoryEntry.user_id == row.user_id)
-            )
-        ).all()
+        # Through the port, so that where a keyed memory comes from is a choice
+        # rather than a fact about this class. `row.user_id` comes from the
+        # session already loaded above, which the route has checked the caller
+        # owns -- the store is told rather than looking it up, so there is one
+        # place that decision is made.
+        remembered = await self._memory.entries(session_id, row.user_id)
 
         # Plain dataclasses, never the ORM rows themselves. See the module
         # docstring: this is the detached-read guarantee, not a formality.
@@ -320,37 +311,9 @@ class SqlSessionRepository:
                 for item in items
             ],
             working_state=dict(row.working_state),
-            memory={
-                entry.key: MemoryEntry(
-                    value=entry.value["value"],
-                    reason=entry.reason,
-                    source=entry.source,
-                    created_at=_as_utc(entry.created_at),
-                )
-                for entry in memories
-            },
-            user_memory={
-                entry.key: MemoryEntry(
-                    value=entry.value["value"],
-                    reason=entry.reason,
-                    source=entry.source,
-                    created_at=_as_utc(entry.created_at),
-                )
-                for entry in user_memories
-            },
-            # Keyed by (source, key), matching the table's own primary key.
-            # Which collection a row lands in is decided by which table it came
-            # from -- there is no status column to filter on and therefore none
-            # to forget to filter on.
-            proposals={
-                (entry.source, entry.key): MemoryEntry(
-                    value=entry.value["value"],
-                    reason=entry.reason,
-                    source=entry.source,
-                    created_at=_as_utc(entry.created_at),
-                )
-                for entry in proposals
-            },
+            memory=remembered.memory,
+            user_memory=remembered.user_memory,
+            proposals=remembered.proposals,
         )
 
     async def commit(
@@ -403,77 +366,6 @@ class SqlSessionRepository:
             self._db.add(row)
 
         await self._db.commit()
-
-    async def remember(
-        self,
-        session_id: str,
-        key: str,
-        value: Any,
-        reason: str,
-        source: str = OWNER,
-        scope: MemoryScope = SESSION_SCOPE,
-    ) -> MemoryEntry:
-        row = await self._require(session_id)
-
-        if scope == USER_SCOPE:
-            entry = await self._write_user_memory(
-                row.user_id, key=key, value=value, reason=reason, source=source
-            )
-            await self._db.commit()
-            return entry
-
-        # The timestamp is taken once and used for both the row and the returned
-        # entry, rather than left to the column default on the insert path. The
-        # caller is handed the same value that was stored; deriving it twice is
-        # how the two paths would come to differ by microseconds.
-        now = datetime.now(timezone.utc)
-        existing = await self._db.get(ChatMemoryEntry, (session_id, key))
-        if existing is not None:
-            existing.source = source
-            # Overwrite by key: updating a memory is a write, not an append.
-            existing.value = {"value": value}
-            existing.reason = reason
-            # `created_at` is refreshed, not preserved, and the two are not
-            # interchangeable. The agent's in-memory store builds a whole new
-            # MemoryEntry here, so its timestamp moves; leaving this one alone
-            # made the two implementations disagree about the same call.
-            #
-            # Refreshing is also the behaviour the bound needs. Assembly shows
-            # the model the most recent entries by this field, so a preserved
-            # timestamp would let a memory the owner just rewrote age out and
-            # stay invisible -- the one outcome nobody could explain.
-            existing.created_at = now
-            # Cleared, because this write did not come from a prompt. Leaving the
-            # previous value would attribute an owner's sentence to the extractor
-            # wording that proposed the fact it replaced.
-            existing.prompt_version = None
-            self._db.add(existing)
-        else:
-            self._db.add(
-                ChatMemoryEntry(
-                    session_id=session_id,
-                    key=key,
-                    value={"value": value},
-                    reason=reason,
-                    source=source,
-                    created_at=now,
-                )
-            )
-
-        await self._db.commit()
-        return MemoryEntry(value=value, reason=reason, source=source, created_at=now)
-
-    async def forget(self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE) -> None:
-        row = await self._require(session_id)
-
-        if scope == USER_SCOPE:
-            existing = await self._db.get(ChatUserMemoryEntry, (row.user_id, key))
-        else:
-            existing = await self._db.get(ChatMemoryEntry, (session_id, key))
-        if existing is not None:
-            await self._db.delete(existing)
-            await self._db.commit()
-        # Absent key is a no-op: the caller wanted it gone, and it is.
 
     async def known_keys(self, session_id: str) -> KnownKeys:
         """Every key this conversation's memory already uses, split by standing.
@@ -555,6 +447,24 @@ class SqlSessionRepository:
             )
         ).one()
 
+    async def remember(
+        self,
+        session_id: str,
+        key: str,
+        value: Any,
+        reason: str,
+        source: str = OWNER,
+        scope: MemoryScope = SESSION_SCOPE,
+    ) -> MemoryEntry:
+        row = await self._require(session_id)
+        return await self._memory.remember(
+            session_id, row.user_id, key, value, reason, source, scope
+        )
+
+    async def forget(self, session_id: str, key: str, scope: MemoryScope = SESSION_SCOPE) -> None:
+        row = await self._require(session_id)
+        await self._memory.forget(session_id, row.user_id, key, scope)
+
     async def propose(
         self,
         session_id: str,
@@ -564,171 +474,31 @@ class SqlSessionRepository:
         source: str,
         prompt_version: str | None = None,
     ) -> None:
-        """Write a suggestion into the proposals table. Reaches no model.
+        """Write a suggestion where proposals live. Reaches no model.
 
         ``prompt_version`` is an optional extra this implementation accepts and
-        the agent's ``SessionRepository`` does not declare — the same latitude
-        ``known_keys`` and ``count_proposals`` take. A proposer that has a
-        version supplies it; one that does not is unaffected, and a second host
-        implementing the protocol owes nothing.
+        the agent's ``SessionRepository`` does not declare -- the same latitude
+        ``known_keys`` and ``count_proposals`` take.
         """
         await self._require(session_id)
-
-        existing = await self._db.get(ChatMemoryProposal, (session_id, source, key))
-        if existing is not None:
-            # Replaces this source's own earlier suggestion for the key, which
-            # is what makes a retried job idempotent rather than accumulative.
-            # A *different* source proposing the same key is a different row.
-            existing.value = {"value": value}
-            existing.reason = reason
-            existing.created_at = datetime.now(timezone.utc)
-            # Overwritten with the caller's value including when that value is
-            # None, because this row is now the newer proposer's. Keeping a
-            # previous version would attribute a re-proposal to wording that did
-            # not produce it -- which is the one thing this column exists to
-            # prevent.
-            existing.prompt_version = prompt_version
-            self._db.add(existing)
-        else:
-            self._db.add(
-                ChatMemoryProposal(
-                    session_id=session_id,
-                    source=source,
-                    key=key,
-                    value={"value": value},
-                    reason=reason,
-                    prompt_version=prompt_version,
-                )
-            )
-
-        await self._db.commit()
-
-    async def _write_user_memory(
-        self,
-        user_id: str,
-        key: str,
-        value: Any,
-        reason: str,
-        source: str,
-        prompt_version: str | None = None,
-    ) -> MemoryEntry:
-        """Upsert one user-scoped entry. Does not commit.
-
-        Shared by ``remember`` and ``activate`` so the two cannot drift on
-        overwrite semantics — which is exactly how the session-scoped versions
-        drifted on ``created_at`` once already. Refreshing the timestamp is the
-        behaviour the assembly bound needs: it shows the most recent entries, so
-        a memory the owner just rewrote must not be at risk of ageing out.
-
-        ``prompt_version`` travels with the value it describes and is therefore
-        overwritten unconditionally, ``None`` included: an owner rewriting a fact
-        an extractor proposed is not still that extractor's wording, and keeping
-        the old version would attribute a human's sentence to a prompt.
-        """
-        now = datetime.now(timezone.utc)
-        existing = await self._db.get(ChatUserMemoryEntry, (user_id, key))
-        if existing is not None:
-            existing.value = {"value": value}
-            existing.reason = reason
-            existing.source = source
-            existing.created_at = now
-            existing.prompt_version = prompt_version
-            self._db.add(existing)
-        else:
-            self._db.add(
-                ChatUserMemoryEntry(
-                    user_id=user_id,
-                    key=key,
-                    value={"value": value},
-                    reason=reason,
-                    source=source,
-                    created_at=now,
-                    prompt_version=prompt_version,
-                )
-            )
-        return MemoryEntry(value=value, reason=reason, source=source, created_at=now)
+        await self._memory.propose(session_id, key, value, reason, source, prompt_version)
 
     async def activate(
         self, session_id: str, source: str, key: str, scope: MemoryScope = SESSION_SCOPE
     ) -> MemoryEntry:
-        """Move a proposal into active memory, in one transaction.
-
-        Both writes commit together or neither does. A partial application here
-        is the one outcome with no honest reading: a proposal deleted without
-        the memory appearing loses a suggestion nobody can recover, and a memory
-        written without the proposal cleared leaves a reviewer approving the
-        same thing forever.
+        """Move a proposal into active memory.
 
         Raises:
             KeyError: No such proposal. Matches the in-memory store rather than
-                silently creating a memory from nothing, which would let a stale
-                review page conjure a fact nobody just read.
+                silently creating a memory from nothing.
         """
         row = await self._require(session_id)
-
-        proposal = await self._db.get(ChatMemoryProposal, (session_id, source, key))
-        if proposal is None:
-            raise KeyError((source, key))
-
-        if scope == USER_SCOPE:
-            entry = await self._write_user_memory(
-                row.user_id,
-                key=key,
-                value=proposal.value["value"],
-                reason=proposal.reason,
-                source=proposal.source,
-                prompt_version=proposal.prompt_version,
-            )
-            await self._db.delete(proposal)
-            await self._db.commit()
-            return entry
-
-        activated = MemoryEntry(
-            value=proposal.value["value"],
-            reason=proposal.reason,
-            source=proposal.source,
-            created_at=datetime.now(timezone.utc),
-        )
-        existing = await self._db.get(ChatMemoryEntry, (session_id, key))
-        if existing is not None:
-            # Activation is where competing proposals collapse onto one key --
-            # the reviewer chose this one, so it replaces whatever held it.
-            existing.value = proposal.value
-            existing.reason = proposal.reason
-            existing.source = proposal.source
-            existing.created_at = activated.created_at
-            # Carried across activation, which is the whole reason this column is
-            # on the shared base rather than on the proposal table: "which wording
-            # produced the memories people actually accepted" is the question that
-            # says whether changing a prompt helped, and discarding the version at
-            # the moment of acceptance is precisely where it would be lost.
-            existing.prompt_version = proposal.prompt_version
-            self._db.add(existing)
-        else:
-            self._db.add(
-                ChatMemoryEntry(
-                    session_id=session_id,
-                    key=key,
-                    value=proposal.value,
-                    reason=proposal.reason,
-                    source=proposal.source,
-                    created_at=activated.created_at,
-                    prompt_version=proposal.prompt_version,
-                )
-            )
-        await self._db.delete(proposal)
-
-        await self._db.commit()
-        return activated
+        return await self._memory.activate(session_id, row.user_id, source, key, scope)
 
     async def reject(self, session_id: str, source: str, key: str) -> None:
         """Discard a proposal. A no-op if it is not there, matching ``forget``."""
         await self._require(session_id)
-
-        existing = await self._db.get(ChatMemoryProposal, (session_id, source, key))
-        if existing is not None:
-            await self._db.delete(existing)
-            await self._db.commit()
+        await self._memory.reject(session_id, source, key)
 
     async def _require(self, session_id: str, *, lock: bool = False) -> ChatSession:
         """Load the session row or raise the agent's own error type.

@@ -80,10 +80,10 @@ Not built:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
-from bacteria.agent.context.retrieval import RecentMemory, RetrievesMemory
+from bacteria.agent.context.retrieval import Candidates, RecentMemory, RetrievesMemory
 from bacteria.agent.session.store import MemoryEntry, SessionState
 
 DEFAULT_WINDOW = 20
@@ -138,6 +138,7 @@ def assemble_context(
     window_size: int = DEFAULT_WINDOW,
     memory_limit: int = DEFAULT_MEMORY_LIMIT,
     retriever: RetrievesMemory | None = None,
+    candidates: Candidates | None = None,
 ) -> AssembledContext:
     """Build the working set for one turn.
 
@@ -176,9 +177,20 @@ def assemble_context(
     messages = [{"role": item.payload["role"], "content": item.payload["text"]} for item in recent]
     messages.append({"role": "user", "content": user_text})
 
+    # Narrowed by the host if a supplier ran, otherwise everything in state.
+    # **This function never awaits**, which is why the supplier is called in the
+    # runtime and its result passed in: the one function that answers "what was
+    # the model shown" must stay readable in a sitting, and a database call in
+    # the middle of it would not be.
+    narrowed = _merge_scopes(state) if candidates is None else _merge(candidates)
     selection = (retriever or RecentMemory()).select(
-        query=user_text, limit=memory_limit, candidates=_merge_scopes(state)
+        query=user_text, limit=memory_limit, candidates=narrowed
     )
+    if candidates is not None:
+        # The supplier's own count wins. It queried a population this function
+        # cannot see, and reporting the size of what it handed back would erase
+        # exactly the omission ADR 0022 exists to have made visible.
+        selection = replace(selection, considered=candidates.considered)
     # `or None` so that an empty selection yields no system prompt rather than
     # an empty one, which some providers reject outright.
     return AssembledContext(
@@ -188,6 +200,11 @@ def assemble_context(
         memories_considered=selection.considered,
         retrieval_strategy=selection.strategy,
     )
+
+
+def _merge(candidates: Candidates) -> dict[str, MemoryEntry]:
+    """Collapse a supplier's two scopes, by the rule below and no other."""
+    return {**candidates.user, **candidates.session}
 
 
 def _merge_scopes(state: SessionState) -> dict[str, MemoryEntry]:

@@ -177,6 +177,24 @@ class GraphAssertion(SQLModel, table=True):
     session_id: Optional[str] = Field(default=None, index=True)
     run_id: Optional[str] = Field(default=None, index=True)
 
+    closed_by: Optional[str] = Field(default=None)
+    """Which act ended belief in this claim, or ``None`` while it is believed.
+
+    ``superseded`` when a correction replaced it, ``retracted`` when a person
+    said it should not be believed. Both set ``recorded_until`` and nothing else
+    told them apart — recoverable only by checking whether a same-triple
+    assertion appeared at the same instant, which is fragile and would stop
+    working silently the moment anything else wrote at that instant.
+
+    The distinction is what makes a rejection a *recorded fact* rather than an
+    absence, which is the property ADR 0009 rests on and the reason this is a
+    column rather than something inferred at read time.
+
+    No companion actor column. In a personal graph the only thing that may
+    retract is the owner, and a column that can hold exactly one value records
+    nothing. That changes when a graph has more than one writer.
+    """
+
 
 class GraphConclusion(SQLModel, table=True):
     """A belief the system drew rather than was told.

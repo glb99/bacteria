@@ -85,6 +85,7 @@ def _to_assertion(row: GraphAssertion) -> Assertion:
         recorded_until=_optional_utc(row.recorded_until),
         trust=row.trust,  # ty: ignore[invalid-argument-type]
         attrs=row.attrs or None,
+        closed_by=row.closed_by,  # ty: ignore[invalid-argument-type]
         session_id=row.session_id,
         run_id=row.run_id,
     )
@@ -103,6 +104,7 @@ def _to_row(assertion: Assertion) -> GraphAssertion:
         recorded_at=assertion.recorded_at,
         recorded_until=assertion.recorded_until,
         trust=assertion.trust,
+        closed_by=assertion.closed_by,
         session_id=assertion.session_id,
         run_id=assertion.run_id,
     )
@@ -213,10 +215,11 @@ class SqlGraphRepository:
         than computing it, so the decision about *what* the correction says stays
         in the pure layer where it can be tested without a database.
 
-        ``recorded_until`` is the only column this class ever updates, and that is
-        the whole of the append-only claim: the values in a row never change, and
-        closing an interval is bookkeeping about a belief rather than an edit to
-        what was claimed.
+        ``recorded_until`` and ``closed_by`` are the only columns this class ever
+        updates, and both are bookkeeping about a belief rather than edits to what
+        was claimed — which is the whole of the append-only claim. The second says
+        *which act* closed the first, because a correction and a rejection are
+        otherwise indistinguishable after the fact.
 
         Both writes are flushed, not committed. A caller that fails between this
         and its commit leaves neither — which matters more than usual here,
@@ -229,9 +232,38 @@ class SqlGraphRepository:
         if row.user_id != closed.user_id:
             raise UnknownAssertionError(closed.assertion_id)
         row.recorded_until = closed.recorded_until
+        row.closed_by = closed.closed_by
         self._db.add(row)
         self._db.add(_to_row(replacement))
         await self._db.flush()
+
+    async def close(self, closed: Assertion) -> None:
+        """Close belief in a claim, with nothing stated in its place.
+
+        :meth:`supersede` without the replacement. Separate rather than an
+        optional argument, because a caller reaching for one is answering a
+        different question — *this is wrong* rather than *this is what is right* —
+        and a signature that made the replacement optional would let the two be
+        confused at the call site.
+        """
+        row = await self._db.get(GraphAssertion, closed.assertion_id)
+        if row is None or row.user_id != closed.user_id:
+            raise UnknownAssertionError(closed.assertion_id)
+        row.recorded_until = closed.recorded_until
+        row.closed_by = closed.closed_by
+        self._db.add(row)
+        await self._db.flush()
+
+    async def assertion(self, user_id: str, assertion_id: str) -> Assertion:
+        """One claim by id, refusing another owner's exactly as if it were absent.
+
+        The 404-not-403 rule ``chat/access.py`` gives: a caller able to tell "no
+        such assertion" from "not yours" can enumerate the second by guessing.
+        """
+        row = await self._db.get(GraphAssertion, assertion_id)
+        if row is None or row.user_id != user_id:
+            raise UnknownAssertionError(assertion_id)
+        return _to_assertion(row)
 
     async def node_named(self, user_id: str, kind: str, label: str) -> Optional[Node]:
         """The node this person already has for this exact name, if any.

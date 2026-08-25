@@ -18,7 +18,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.log import Assertion, supersede
 from bacteria.app.graph.repository import SqlGraphRepository
-from bacteria.app.graph.service import observe, revise
+from bacteria.app.graph.service import observe, reject, retract, revise
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
 W1 = datetime(2026, 5, 4, tzinfo=timezone.utc)
@@ -263,3 +263,93 @@ async def test_a_start_matching_nothing_survives(repo):
 
     believed = {a.assertion_id: a for a in await repo.current(USER)}
     assert believed["m1"].valid.start == W3
+
+
+async def test_retracting_one_of_two_claims_ends_the_conflict(repo):
+    """The act the console could ask for and had no way to perform.
+
+    A person looking at two mothers for themselves is not correcting a fact --
+    they are saying one row should not be believed. That is a statement about
+    belief rather than about the world, which is why it closes a row rather than
+    asserting a negative.
+    """
+    claims = [
+        _cto("a1", "person:diane", Interval(None, OPEN_ENDED), W1),
+        _cto("a2", "person:bob", Interval(None, OPEN_ENDED), W1),
+    ]
+    first = await observe(repo, claims, now=W1)
+    assert [c.state for c in first.conflicts] == ["conflict"]
+
+    outcome = await retract(repo, claims[1], now=W3)
+
+    assert outcome.conflicts == [], "the disagreement is gone, not merely quieter"
+    assert outcome.recorded == 0, "nothing was written; a row was closed"
+    assert [a.assertion_id for a in await repo.current(USER)] == ["a1"]
+
+
+async def test_a_retracted_claim_says_which_act_closed_it(repo):
+    """`recorded_until` alone cannot tell a correction from a rejection.
+
+    Which matters for the only question anyone will ask of these rows: how often
+    was the extractor wrong, as opposed to how often did the world change.
+    """
+    claim = _cto("a1", "person:diane", Interval(None, OPEN_ENDED), W1)
+    await observe(repo, [claim], now=W1)
+
+    await retract(repo, claim, now=W3)
+
+    closed = await repo.assertion(USER, "a1")
+    assert closed.closed_by == "retracted"
+    assert closed.recorded_until == W3
+
+
+async def test_retracting_a_premise_stales_what_rested_on_it(repo):
+    """A belief whose premise is gone is unexamined, not wrong -- and must say so."""
+    ended = _cto("a1", "person:diane", Interval(None, FEBRUARY), W1)
+    await observe(repo, [ended], now=W1)
+    outcome = await observe(
+        repo, [_cto("a2", "person:bob", Interval(None, OPEN_ENDED), W3)], now=W3
+    )
+    assert len(outcome.inferred) == 1
+
+    retracted = await retract(repo, ended, now=W4)
+
+    assert [c.conclusion_id for c in retracted.stale] == [outcome.inferred[0].conclusion_id]
+
+
+async def test_a_rejected_conclusion_is_not_proposed_again(repo):
+    """The bug this fix exists for, and it was live.
+
+    Rejecting an explanation returns its conflict to `possible`, and `_reconcile`
+    infers on `possible` conflicts -- so a fresh active copy of the very
+    conclusion the owner had just refused was recorded **inside the rejection
+    itself**, before it returned. Not on some later extraction: immediately.
+
+    Asserted on the stored conclusions rather than on the outcome, because the
+    outcome looks correct either way once a new explanation exists.
+    """
+    await observe(repo, [_cto("a1", "person:diane", Interval(None, FEBRUARY), W1)], now=W1)
+    first = await observe(repo, [_cto("a2", "person:bob", Interval(None, OPEN_ENDED), W3)], now=W3)
+    assert len(first.inferred) == 1
+
+    await reject(repo, USER, first.inferred[0].conclusion_id, now=W4)
+
+    # Anything that re-runs the rules. A re-extraction restating what the log
+    # already believes does it: `_unrepeated` drops the claim, `_reconcile` runs.
+    again = await observe(repo, [_cto("a2", "person:bob", Interval(None, OPEN_ENDED), W3)], now=W4)
+    assert again.recorded == 0, "nothing new was said; only the rules re-ran"
+
+    believed = await repo.current(USER)
+    stored = await repo.depending_on(USER, [a.assertion_id for a in believed])
+    live = [c for c in stored if c.status == "active"]
+    assert live == [], "a rejection has to be remembered, not merely applied"
+
+
+async def test_rejecting_an_explanation_returns_the_conflict_to_undecided(repo):
+    """Honest, rather than resolved: it is the state it was in before anyone assumed."""
+    await observe(repo, [_cto("a1", "person:diane", Interval(None, FEBRUARY), W1)], now=W1)
+    first = await observe(repo, [_cto("a2", "person:bob", Interval(None, OPEN_ENDED), W3)], now=W3)
+
+    outcome = await reject(repo, USER, first.inferred[0].conclusion_id, now=W4)
+
+    assert [c.state for c in outcome.conflicts] == ["possible"]

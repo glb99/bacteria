@@ -32,6 +32,7 @@ from bacteria.app.graph.constraints import Conflict, conflicts_for
 from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
+from bacteria.app.graph.log import retract as log_retract
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
@@ -312,6 +313,94 @@ async def revise(
     return Outcome(recorded=1, conflicts=conflicts, inferred=inferred, stale=now_stale)
 
 
+async def retract(
+    repository: SqlGraphRepository,
+    assertion: Assertion,
+    *,
+    now: datetime,
+    relations: Sequence[Relation] = CATALOGUE,
+) -> Outcome:
+    """Stop believing a claim, without stating anything in its place.
+
+    The counterpart to :func:`revise`, and it shares that function's real work:
+    everything resting on the claim has to be marked, because a belief whose
+    premise has gone is not thereby wrong — it is unexamined, which is a
+    different state and the one worth showing a person.
+
+    ``recorded`` is zero. Nothing was written; a row was closed, and a caller
+    counting writes should not be told otherwise.
+
+    **The rules run afterwards**, for the same reason :func:`observe` runs them
+    after its write: retracting one of two contradictory claims is precisely how
+    a conflict stops existing, and evaluating first would report the state the
+    owner was trying to leave.
+    """
+    owner = assertion.user_id
+    dependents = await repository.depending_on(owner, [assertion.assertion_id])
+
+    await repository.close(log_retract(assertion, at=now))
+
+    now_stale = stale_after(dependents, [assertion.assertion_id])
+    for conclusion in now_stale:
+        await repository.set_status(owner, conclusion.conclusion_id, "stale")
+
+    conflicts, inferred = await _reconcile(repository, owner, {assertion.rel}, relations, now)
+    return Outcome(conflicts=conflicts, inferred=inferred, stale=now_stale)
+
+
+async def reject(
+    repository: SqlGraphRepository,
+    owner: str,
+    conclusion_id: str,
+    *,
+    now: datetime,
+    relations: Sequence[Relation] = CATALOGUE,
+) -> Outcome:
+    """Withdraw an inferred belief the owner disagrees with.
+
+    A status change, where :func:`retract` closes a row, and the asymmetry is
+    worth knowing rather than inheriting: a conclusion is a *derived belief and
+    may be recomputed*, so moving its status loses nothing — the log still holds
+    everything it was drawn from. An assertion is a *record of what was claimed*,
+    so mutating one would lose the claim. Two tables, two policies, and the
+    criterion is recomputability rather than importance.
+
+    The conflict the conclusion was explaining returns to ``possible``, which is
+    the honest state it was in before anyone assumed anything — and
+    :func:`_reconcile` will not now propose the same explanation again. See
+    :func:`_already_considered`.
+    """
+    await repository.set_status(owner, conclusion_id, "retracted")
+
+    believed = await repository.current(owner)
+    conflicts, inferred = await _reconcile(
+        repository, owner, {a.rel for a in believed}, relations, now
+    )
+    return Outcome(conflicts=conflicts, inferred=inferred)
+
+
+def _already_considered(conclusions: Sequence[Conclusion], pair: set[str], derived_by: str) -> bool:
+    """Has this exact inference been drawn before, whatever became of it?
+
+    **Status is deliberately not consulted**, and that is the whole point. A
+    retracted conclusion makes its conflict ``possible`` again, and ``_reconcile``
+    infers on ``possible`` conflicts — so without this, rejecting an explanation
+    caused the very next extraction touching that relation to record a fresh
+    active copy of it. The owner's "no" was undone by the next thing they said
+    about the subject, silently.
+
+    That is the re-proposal failure the model predicts for merge suggestions —
+    *a rejection that merely deletes leaves the same similarity proposing the
+    same merge forever* — reached from the other direction. A rejection has to be
+    remembered, not merely applied.
+
+    Keyed on the evidence pair rather than on the conflict, because a conclusion
+    is identified by what it rests on. New evidence is a new inference and should
+    be proposed again; the same two premises are the question already answered.
+    """
+    return any(c.derived_by == derived_by and pair <= set(c.evidence) for c in conclusions)
+
+
 async def _reconcile(
     repository: SqlGraphRepository,
     owner: str,
@@ -352,6 +441,10 @@ async def _reconcile(
     for relation in applicable:
         for conflict in conflicts_for(relation, believed, conclusions=conclusions):
             if conflict.state != "possible":
+                continue
+            if _already_considered(
+                conclusions, {conflict.left, conflict.right}, "constraint-inference"
+            ):
                 continue
             succession = infer_succession(
                 believed, relation, labels=labels, conclusion_id=str(uuid.uuid4()), now=now

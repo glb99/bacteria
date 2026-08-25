@@ -27,3 +27,4 @@ conventions do not qualify.
 | [0008](0008-preferences-are-assertions.md) | Hold preferences as assertions: a functional relation to a value node, the relation being the memory key | Proposed |
 | [0009](0009-the-graph-is-correctable.md) | Give the graph a write surface: retract, rename, link, reject -- as service verbs behind thin routes | Proposed |
 | [0010](0010-memory-has-a-port.md) | Give memory a port so the graph can back it, selected by configuration, without replacing the repository | Proposed |
+| [0011](0011-a-confirmed-fact-may-be-spoken.md) | Let the owner confirm an extracted fact, making it a retrieval candidate but never a key | Proposed |

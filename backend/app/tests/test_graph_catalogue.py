@@ -85,6 +85,13 @@ def test_every_functional_relation_can_state_its_rule():
         assert relation.invariant, f"{relation.name} is functional and states no rule"
 
 
+def test_only_the_identity_relation_is_withheld_from_the_extractor():
+    """If this ever lists a second name, the reason wants stating in the record."""
+    withheld = [r.name for r in CATALOGUE if not r.extractable]
+
+    assert withheld == ["same_as"]
+
+
 def test_a_relation_states_a_rule_only_when_it_has_one():
     for relation in CATALOGUE:
         if not relation.functional:
@@ -112,9 +119,22 @@ def test_the_prompt_block_names_every_relation_and_reads_its_direction():
     block = vocabulary()
 
     for relation in CATALOGUE:
+        if not relation.extractable:
+            continue
         assert relation.name in block
         assert relation.sentence in block
     assert "works_for" in block, "a synonym is worth offering"
+
+
+def test_the_prompt_block_never_offers_a_merge():
+    """`same_as` is canonical and must not reach the extractor's vocabulary.
+
+    ADR 0006's asymmetry: splitting one thing across two nodes is recoverable,
+    collapsing two into one is not. A model handed `same_as` would be guessing in
+    the direction that cannot be undone, one plausible suggestion at a time.
+    """
+    assert is_canonical("same_as")
+    assert "same_as" not in vocabulary()
 
 
 def test_the_prompt_block_does_not_advertise_a_converse_alias():

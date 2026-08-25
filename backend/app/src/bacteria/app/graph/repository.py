@@ -353,6 +353,27 @@ class SqlGraphRepository:
         await self._db.flush()
         return node
 
+    async def relabel_node(self, user_id: str, node_id: str, label: str) -> Node:
+        """Give a node a different name.
+
+        A plain update, and the only one in this class that changes a value
+        rather than bookkeeping — which is allowed because a label is a *display
+        name* and not a record. What something is called is a fact about the
+        world and belongs in the log as an assertion; this column is what to draw
+        on the node, and overwriting it loses nothing that was ever kept here.
+
+        Refusing a duplicate is the caller's job, not this one's: the rule is
+        about identity rather than storage, and ``mint_node`` deliberately allows
+        two nodes to share a name because two people really can.
+        """
+        row = await self._db.get(GraphNode, (user_id, node_id))
+        if row is None:
+            raise UnknownNodeError(node_id)
+        row.label = label
+        self._db.add(row)
+        await self._db.flush()
+        return _to_node(row)
+
     async def touch_node(self, user_id: str, node_id: str, *, now: datetime) -> None:
         """Note that this thing came up again.
 

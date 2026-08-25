@@ -118,3 +118,14 @@ def test_the_tail_is_not_kind_checked():
 
     assert cleaned is not None
     assert cleaned["rel"] == "interlocutor"
+
+
+def test_a_merge_the_model_proposed_is_dropped_entirely():
+    """Not demoted to the tail: a tail `same_as` is still a guessed merge.
+
+    It would sit in the log looking like a claim somebody made, which is the one
+    thing identity linking must never be.
+    """
+    other = {"label": "Diana Mercer", "kind": "person"}
+
+    assert _clean(claim(PERSON, "same_as", other)) is None

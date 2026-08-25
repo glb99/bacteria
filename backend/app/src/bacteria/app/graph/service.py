@@ -33,7 +33,7 @@ from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.log import retract as log_retract
-from bacteria.app.graph.repository import SqlGraphRepository
+from bacteria.app.graph.repository import SqlGraphRepository, UnknownNodeError
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
 
@@ -311,6 +311,112 @@ async def revise(
     # correction, so the claim it states is by definition not one the log
     # already believes.
     return Outcome(recorded=1, conflicts=conflicts, inferred=inferred, stale=now_stale)
+
+
+class LabelTakenError(ValueError):
+    """A rename would give two nodes of one kind the same name.
+
+    Refused rather than allowed, and the reason is ADR 0006's asymmetry rather
+    than tidiness. ``node_named`` matches on ``(kind, normalized label)``, so two
+    matching nodes make every later mention resolve to whichever the database
+    returns first — an arbitrary answer to "which Diane", drifting toward
+    collapsing two people into one, which is the direction that cannot be undone.
+
+    The refusal is the negotiation, not a dead end: two nodes that *should* share
+    a name are two nodes to link, and :func:`link` is the way to say so.
+    """
+
+    def __init__(self, label: str, node_id: str) -> None:
+        super().__init__(f"{label!r} already names node {node_id}")
+        self.label = label
+        self.node_id = node_id
+
+
+async def rename(
+    repository: SqlGraphRepository, user_id: str, node_id: str, label: str, *, now: datetime
+) -> Node:
+    """Correct what a node is called.
+
+    The missing half of the reserved owner node, whose id is derived from the
+    user id *precisely so* that its label stays correctable — and which nothing
+    corrected until now, leaving every graph owned by someone called "self".
+
+    **A label is a display name, not a record.** What a person is called is a
+    fact and belongs in the log; this is what to draw. So there is no history
+    here and none is lost, which is why this is an update in a package that
+    otherwise never overwrites anything.
+
+    Raises :class:`LabelTakenError` when another node of the same kind already
+    carries the name.
+    """
+    existing = await repository.node_named(
+        user_id, (await _node(repository, user_id, node_id)).kind, label
+    )
+    if existing is not None and existing.node_id != node_id:
+        raise LabelTakenError(label, existing.node_id)
+    return await repository.relabel_node(user_id, node_id, label)
+
+
+async def link(
+    repository: SqlGraphRepository,
+    user_id: str,
+    left: str,
+    right: str,
+    *,
+    assertion_id: str,
+    now: datetime,
+) -> Outcome:
+    """Say that two nodes are the same thing, without merging them.
+
+    ADR 0006's identity rule, finally given a writer: nodes are **linked, never
+    merged**. Both keep their ids, their labels and every assertion recorded
+    against them, and the claim that they are one thing is an assertion like any
+    other — provenanced, contestable, retractable, and usable as evidence.
+
+    That is what makes minting a node per distinct name safe. Splitting one
+    person across two nodes is recoverable *because this exists*; it was the
+    missing half of an argument the design had been making since the beginning.
+
+    **Refuses two kinds.** A person is not an organization, and a claim that they
+    are the same thing is a mistake rather than a merge — the kinds are the one
+    check available here, since nothing else can tell a bold identification from
+    a slip.
+
+    Nothing in the read surface reads the link yet, so the first use of this
+    changes nothing visible. That is correct and will look like a bug.
+    """
+    one, other = await _node(repository, user_id, left), await _node(repository, user_id, right)
+    if one.kind != other.kind:
+        raise MismatchedKindsError(one.kind, other.kind)
+
+    claim = Assertion(
+        assertion_id=assertion_id,
+        user_id=user_id,
+        src=one.node_id,
+        dst=other.node_id,
+        rel="same_as",
+        # Open-ended: two things that are the same thing did not become so, and
+        # an unknown start would make the claim undecidable against every other
+        # claim about either of them.
+        valid=Interval(None, OPEN_ENDED),
+        recorded_at=now,
+        trust="user",
+    )
+    return await observe(repository, [claim], now=now)
+
+
+class MismatchedKindsError(ValueError):
+    """A link between two different kinds of thing."""
+
+    def __init__(self, one: str, other: str) -> None:
+        super().__init__(f"cannot link a {one} to a {other}")
+
+
+async def _node(repository: SqlGraphRepository, user_id: str, node_id: str) -> Node:
+    found = await repository.node(user_id, node_id)
+    if found is None:
+        raise UnknownNodeError(node_id)
+    return found
 
 
 async def retract(

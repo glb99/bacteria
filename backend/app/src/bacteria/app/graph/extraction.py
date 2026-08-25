@@ -625,6 +625,12 @@ def _canonicalize(claim: dict[str, Any]) -> Optional[dict[str, Any]]:
         return claim
 
     relation = resolution.relation
+    if not relation.extractable:
+        # The catalogue knows this relation and the extractor may not propose it.
+        # `same_as` is the case, and dropping rather than demoting to the tail is
+        # deliberate: a tail `same_as` would still be a merge the model guessed,
+        # sitting in the log looking like a claim someone made.
+        return None
     if resolution.swap:
         claim = {**claim, "src": claim["dst"], "dst": claim["src"]}
 
@@ -641,7 +647,14 @@ def _canonicalize(claim: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 def _fits(relation: Relation, claim: dict[str, Any]) -> bool:
     """Do this claim's ends have the kinds the relation says they should?"""
-    return claim["src"]["kind"] == relation.src_kind and claim["dst"]["kind"] == relation.dst_kind
+    return _side_fits(claim["src"]["kind"], relation.src_kind) and _side_fits(
+        claim["dst"]["kind"], relation.dst_kind
+    )
+
+
+def _side_fits(kind: str, expected: Optional[str]) -> bool:
+    """``None`` accepts any kind — see :class:`~bacteria.app.graph.catalogue.Relation`."""
+    return expected is None or kind == expected
 
 
 async def _watermark(db: AsyncSession, session_id: str) -> int:

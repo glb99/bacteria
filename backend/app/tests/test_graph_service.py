@@ -18,7 +18,17 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.log import Assertion, supersede
 from bacteria.app.graph.repository import SqlGraphRepository
-from bacteria.app.graph.service import observe, reject, retract, revise
+from bacteria.app.graph.service import (
+    LabelTakenError,
+    MismatchedKindsError,
+    link,
+    observe,
+    owner,
+    reject,
+    rename,
+    retract,
+    revise,
+)
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
 W1 = datetime(2026, 5, 4, tzinfo=timezone.utc)
@@ -353,3 +363,81 @@ async def test_rejecting_an_explanation_returns_the_conflict_to_undecided(repo):
     outcome = await reject(repo, USER, first.inferred[0].conclusion_id, now=W4)
 
     assert [c.state for c in outcome.conflicts] == ["possible"]
+
+
+async def test_the_owner_can_finally_be_given_their_name(repo):
+    """The half of the reserved owner node that was never built.
+
+    Its id is derived from the user id *precisely so* that the label stays
+    correctable, and nothing corrected it -- leaving every graph owned by
+    somebody called "self".
+    """
+    me = await owner(repo, USER, now=W1)
+    assert me.label == "self"
+
+    renamed = await rename(repo, USER, me.node_id, "Guillermo", now=W3)
+
+    assert renamed.label == "Guillermo"
+    assert renamed.node_id == me.node_id, "the id never moves; that is the point"
+
+
+async def test_a_rename_onto_a_taken_name_is_refused(repo):
+    """The hazard that makes rename and link inseparable.
+
+    `node_named` matches on kind and normalized label, so two matching nodes make
+    every later mention resolve to whichever the database returns first -- an
+    arbitrary answer to "which Diane", drifting toward the one direction ADR 0006
+    says cannot be undone.
+    """
+    me = await owner(repo, USER, now=W1)
+    await repo.mint_node(USER, "person", "Guillermo", now=W1)
+
+    with pytest.raises(LabelTakenError):
+        await rename(repo, USER, me.node_id, "Guillermo", now=W3)
+
+
+async def test_a_rename_to_the_name_it_already_has_is_not_a_collision(repo):
+    me = await owner(repo, USER, now=W1)
+    await rename(repo, USER, me.node_id, "Guillermo", now=W3)
+
+    again = await rename(repo, USER, me.node_id, "Guillermo", now=W4)
+
+    assert again.label == "Guillermo"
+
+
+async def test_linking_two_nodes_records_a_claim_and_merges_nothing(repo):
+    """ADR 0006's identity rule, finally given a writer.
+
+    Both nodes keep their ids and their assertions. What is added is a claim that
+    they are one thing -- provenanced, contestable and retractable like any
+    other, which is exactly what makes minting a node per distinct name safe.
+    """
+    me = await owner(repo, USER, now=W1)
+    duplicate = await repo.mint_node(USER, "person", "Guillermo", now=W1)
+
+    await link(repo, USER, me.node_id, duplicate.node_id, assertion_id="l1", now=W3)
+
+    assert len(await repo.nodes(USER)) == 2, "linked, never merged"
+    claim = await repo.assertion(USER, "l1")
+    assert claim.rel == "same_as"
+    assert {claim.src, claim.dst} == {me.node_id, duplicate.node_id}
+
+
+async def test_a_link_across_two_kinds_is_refused(repo):
+    """A person is not an organization, and saying so is a slip rather than a merge."""
+    person = await repo.mint_node(USER, "person", "Acme", now=W1)
+    org = await repo.mint_node(USER, "organization", "Acme", now=W1)
+
+    with pytest.raises(MismatchedKindsError):
+        await link(repo, USER, person.node_id, org.node_id, assertion_id="l1", now=W3)
+
+
+async def test_a_link_can_be_retracted_like_any_other_claim(repo):
+    """Which is the whole argument for linking rather than merging."""
+    me = await owner(repo, USER, now=W1)
+    duplicate = await repo.mint_node(USER, "person", "Guillermo", now=W1)
+    await link(repo, USER, me.node_id, duplicate.node_id, assertion_id="l1", now=W3)
+
+    await retract(repo, await repo.assertion(USER, "l1"), now=W4)
+
+    assert [a.assertion_id for a in await repo.current(USER)] == []

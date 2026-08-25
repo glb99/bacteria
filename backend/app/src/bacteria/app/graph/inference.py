@@ -23,7 +23,7 @@ guard has to catch, and leaves retraction with nothing to un-write.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Mapping, Optional, Sequence
 
 from bacteria.app.graph.catalogue import Relation
 from bacteria.app.graph.conclusions import Conclusion
@@ -55,14 +55,42 @@ class Succession:
     boundary: datetime
 
 
+def _read(relation: Relation, assertion: Assertion, labels: Mapping[str, str]) -> str:
+    """One claim as a sentence a person can read, from the catalogue's template.
+
+    The first version of this module built statements out of node ids and the
+    bare relation name, which produced *"1385501d-… took over cto of dcaad500-…"*
+    in the first real conclusion this system ever drew. Correct, and unusable.
+
+    A conclusion's statement is the thing someone reads in order to **disagree**
+    with it — the whole point of a defeasible belief being recorded rather than
+    applied — so it is held to the same standard as a constraint's ``invariant``,
+    which was split out of ``sentence`` for exactly this reason.
+
+    Falls back to an id when a label is missing, because a statement that names a
+    node badly is still better than a conclusion that could not be written.
+    """
+    return relation.sentence.replace("<src>", labels.get(assertion.src, assertion.src)).replace(
+        "<dst>", labels.get(assertion.dst, assertion.dst)
+    )
+
+
 def infer_succession(
     assertions: Iterable[Assertion],
     relation: Relation,
     *,
+    labels: Mapping[str, str],
     conclusion_id: str,
     now: datetime,
 ) -> Optional[Succession]:
     """Propose that an undated claim began when the dated one it displaces ended.
+
+    ``labels`` is passed in rather than looked up, so this module still knows
+    nothing about storage. The names are **frozen into the statement** at the
+    moment of concluding, and a later rename does not rewrite it — which is
+    deliberate and matches the log: a conclusion records what was concluded then,
+    in the words that were current then, the same way ``attrs`` keeps the
+    transcript's phrasing rather than a paraphrase of it.
 
     Returns ``None`` whenever the situation is not unambiguous, which is most of
     the time. Three guardrails, each rejecting a case where the inference would
@@ -109,8 +137,9 @@ def infer_succession(
         conclusion_id=conclusion_id,
         user_id=successor.user_id,
         statement=(
-            f"{successor.dst} took over {relation.name} of {successor.src} "
-            f"on {boundary.date().isoformat()}, when {predecessor.dst}'s tenure ended"
+            f"{_read(relation, successor, labels)}, assumed to have started on "
+            f"{boundary.date().isoformat()} "
+            f"when {labels.get(predecessor.dst, predecessor.dst)}'s tenure ended"
         ),
         # Assertion ids only. The rule that licensed this is named in the
         # statement rather than cited here, because evidence is a foreign key to

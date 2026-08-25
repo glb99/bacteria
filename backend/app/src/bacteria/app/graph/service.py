@@ -339,6 +339,14 @@ async def _reconcile(
     conclusions = await repository.depending_on(owner, [a.assertion_id for a in believed])
     applicable = [r for r in relations if r.name in affected]
 
+    # Read once, and only when a rule might fire: this is the only thing in the
+    # reconciliation that needs a node's *name* rather than its id, and it needs
+    # it so that a conclusion's statement is readable by the person expected to
+    # disagree with it.
+    labels = (
+        {node.node_id: node.label for node in await repository.nodes(owner)} if applicable else {}
+    )
+
     conflicts: list[Conflict] = []
     inferred: list[Conclusion] = []
     for relation in applicable:
@@ -346,7 +354,7 @@ async def _reconcile(
             if conflict.state != "possible":
                 continue
             succession = infer_succession(
-                believed, relation, conclusion_id=str(uuid.uuid4()), now=now
+                believed, relation, labels=labels, conclusion_id=str(uuid.uuid4()), now=now
             )
             if succession is None:
                 continue

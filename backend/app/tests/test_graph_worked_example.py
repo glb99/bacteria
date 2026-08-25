@@ -37,6 +37,13 @@ W3 = datetime(2026, 5, 18, tzinfo=timezone.utc)
 W4 = datetime(2026, 5, 25, tzinfo=timezone.utc)
 FEBRUARY = datetime(2026, 2, 15, tzinfo=timezone.utc)
 
+LABELS = {
+    "org:acme": "Acme",
+    "person:diane": "Diane",
+    "person:marta": "Marta",
+    "person:bob": "Bob",
+}
+
 ONE_CTO = Relation(
     name="cto",
     sentence="<dst> is the CTO of <src>",
@@ -133,7 +140,7 @@ def test_an_inference_explains_the_conflict_without_writing_a_date_anywhere():
     assertions, _ = _four_weeks()
     at_week_four = state_at(assertions, W4)
 
-    succession = infer_succession(at_week_four, ONE_CTO, conclusion_id="c2", now=W4)
+    succession = infer_succession(at_week_four, ONE_CTO, labels=LABELS, conclusion_id="c2", now=W4)
 
     assert succession is not None
     assert succession.boundary == FEBRUARY
@@ -157,7 +164,7 @@ def test_retracting_the_assumption_returns_the_conflict_to_undecided():
     """
     assertions, _ = _four_weeks()
     at_week_four = state_at(assertions, W4)
-    succession = infer_succession(at_week_four, ONE_CTO, conclusion_id="c2", now=W4)
+    succession = infer_succession(at_week_four, ONE_CTO, labels=LABELS, conclusion_id="c2", now=W4)
     assert succession is not None
 
     withdrawn = [Conclusion(**{**succession.conclusion.__dict__, "status": "retracted"})]

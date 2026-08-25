@@ -437,10 +437,24 @@ async def _node(repository: SqlGraphRepository, user_id: str, node_id: str) -> N
 
 @dataclass(frozen=True)
 class Preference:
-    """One keyed fact the graph is willing to have spoken."""
+    """One keyed fact drawn out of the graph.
+
+    Carries what a keyed memory needs rather than only the pair, because the
+    caller that turns these into ``MemoryEntry`` values would otherwise have to
+    go back to the log for the words behind each one — and a second read is a
+    second chance for the two to disagree.
+
+    ``reason`` comes from the claim's ``attrs``, which is where the extractor put
+    the transcript's own wording. A preference with no recorded reason cannot be
+    reviewed later, which is why the agent's ``MemoryEntry`` requires one.
+    """
 
     key: str
     value: str
+    reason: str
+    source: str
+    scope: str
+    recorded_at: datetime
 
 
 async def preferences_for(
@@ -492,10 +506,55 @@ async def preferences_for(
         if held is None or claim.recorded_at > held.recorded_at:
             newest[claim.rel] = claim
 
-    return [
-        Preference(key=rel, value=labels.get(claim.dst, claim.dst))
-        for rel, claim in sorted(newest.items())
-    ]
+    return [_preference(rel, claim, labels) for rel, claim in sorted(newest.items())]
+
+
+def _preference(rel: str, claim: Assertion, labels: dict[str, str]) -> Preference:
+    attrs = claim.attrs or {}
+    return Preference(
+        key=rel,
+        value=labels.get(claim.dst, claim.dst),
+        reason=str(attrs.get("reason") or "recorded in the graph"),
+        source=str(attrs.get("source") or ("owner" if claim.origin == "stated" else "graph")),
+        scope=claim.scope,
+        recorded_at=claim.recorded_at,
+    )
+
+
+async def proposals_from(
+    repository: SqlGraphRepository,
+    user_id: str,
+    *,
+    session_id: Optional[str] = None,
+    relations: Sequence[Relation] = (),
+) -> list[Preference]:
+    """Preferences the graph holds and may **not** speak.
+
+    The mirror of :func:`preferences_for`, and separate from it on purpose. That
+    function is the one place deciding what reaches a prompt — ADR 0010 §5 rests
+    on it being one place — so widening it with a flag would put "speakable" and
+    "not speakable" behind the same argument and make the guarantee depend on
+    reading a call site correctly.
+
+    Everything here is ``inferred``: something worked it out, nobody said it.
+    """
+    wanted = {r.name for r in (relations or preference_relations())}
+    if not wanted:
+        return []
+
+    owner_node = await owner(repository, user_id, now=datetime.now(timezone.utc))
+    labels = {n.node_id: n.label for n in await repository.nodes(user_id)}
+
+    found: list[Preference] = []
+    for claim in await repository.current(user_id):
+        if claim.rel not in wanted or claim.origin != "inferred":
+            continue
+        if claim.src != owner_node.node_id:
+            continue
+        if claim.scope == "session" and claim.session_id != session_id:
+            continue
+        found.append(_preference(claim.rel, claim, labels))
+    return sorted(found, key=lambda p: (p.key, p.value))
 
 
 async def retract(

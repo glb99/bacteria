@@ -1,0 +1,130 @@
+"""The graph as keyed memory, and the guarantee that had to be restated.
+
+Two stores now answer the same questions. What matters is not that this one
+works but that it agrees with the other where it should, and differs visibly
+where it must — ADR 0010 exists to make that difference observable rather than
+argued about.
+
+Real Postgres, like everything that touches storage here.
+"""
+
+import pytest
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from bacteria.agent.session.store import USER_SCOPE
+from bacteria.app.chat.graph_memory import GraphMemoryStore, UnknownPreferenceError
+from bacteria.app.chat.repository import SqlSessionRepository
+
+USER = "graph-memory"
+
+
+@pytest.fixture(name="store")
+async def _store(engine):
+    async with AsyncSession(engine) as db:
+        session = await SqlSessionRepository(db).create_session(USER)
+        yield GraphMemoryStore(db), session.session_id
+
+
+async def test_a_stated_preference_round_trips(store):
+    """`remember` then `entries` — the contract every store owes."""
+    memory, session_id = store
+    await memory.remember(session_id, USER, "tone", "concise", "they said so")
+
+    view = await memory.entries(session_id, USER)
+
+    assert view.memory["tone"].value == "concise"
+    assert view.memory["tone"].reason == "they said so"
+
+
+async def test_a_proposal_does_not_reach_the_speakable_collections(store):
+    """ADR 0010 §5's guarantee, which moved from two tables to one column.
+
+    The table store makes "reaches the model" a question of which table a row is
+    in — something you cannot forget. One log holding both cannot have that, so
+    the filter lives in one function and this is the test that stands in for the
+    structure that was lost.
+    """
+    memory, session_id = store
+    await memory.propose(session_id, "tone", "terse", "guessed from the transcript", source="x")
+
+    view = await memory.entries(session_id, USER)
+
+    assert view.memory == {}
+    assert view.user_memory == {}
+    assert view.proposals != {}, "it is held, and it is not speakable"
+
+
+async def test_activating_states_what_was_proposed(store):
+    """Ratification appends rather than moving: both rows survive, differing in origin."""
+    memory, session_id = store
+    await memory.propose(session_id, "tone", "terse", "guessed", source="extractor")
+
+    await memory.activate(session_id, USER, "extractor", "tone")
+
+    view = await memory.entries(session_id, USER)
+    assert view.memory["tone"].value == "terse", "now speakable"
+    assert view.proposals != {}, "and the proposal it came from is still recorded"
+
+
+async def test_activating_nothing_is_refused(store):
+    """Matching the table store rather than conjuring a memory from nothing."""
+    memory, session_id = store
+
+    with pytest.raises(KeyError):
+        await memory.activate(session_id, USER, "extractor", "tone")
+
+
+async def test_user_scope_and_session_scope_land_in_different_collections(store):
+    memory, session_id = store
+    await memory.remember(session_id, USER, "tone", "concise", "said so")
+    await memory.remember(session_id, USER, "language", "spanish", "said so", scope=USER_SCOPE)
+
+    view = await memory.entries(session_id, USER)
+
+    assert "tone" in view.memory
+    assert "language" in view.user_memory
+
+
+async def test_forgetting_removes_it_from_what_may_be_spoken(store):
+    memory, session_id = store
+    await memory.remember(session_id, USER, "tone", "concise", "said so")
+
+    await memory.forget(session_id, USER, "tone")
+
+    assert (await memory.entries(session_id, USER)).memory == {}
+
+
+async def test_rejecting_removes_the_proposal(store):
+    memory, session_id = store
+    await memory.propose(session_id, "tone", "terse", "guessed", source="extractor")
+
+    await memory.reject(session_id, "extractor", "tone")
+
+    assert (await memory.entries(session_id, USER)).proposals == {}
+
+
+async def test_a_key_the_catalogue_does_not_know_is_refused(store):
+    """**The substantive difference between the two stores**, surfaced not hidden.
+
+    A table takes any key. The graph takes the ones its vocabulary knows, because
+    a claim under an unratified relation cannot be projected — no relation, no
+    key, nothing to return. Accepting it would make `remember` report success and
+    lose the fact, which is worse than a refusal a caller can see.
+    """
+    memory, session_id = store
+
+    with pytest.raises(UnknownPreferenceError):
+        await memory.remember(session_id, USER, "favourite_biscuit", "rich tea", "said so")
+
+
+async def test_it_starts_empty(store):
+    """Nothing extracts a preference yet, so this is the honest initial state.
+
+    Recorded as a test because it is the first thing a comparison against the
+    tables will show, and it should read as a known gap rather than a failure.
+    """
+    memory, session_id = store
+
+    view = await memory.entries(session_id, USER)
+
+    assert (view.memory, view.user_memory, view.proposals) == ({}, {}, {})

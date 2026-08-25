@@ -22,7 +22,6 @@ from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import (
     LabelTakenError,
     MismatchedKindsError,
-    Preference,
     link,
     observe,
     owner,
@@ -478,7 +477,7 @@ async def test_a_stated_preference_becomes_a_keyed_answer(repo):
     value = await repo.mint_node(USER, "value", "concise", now=W1)
     await _seed_prefs(repo, _pref("p1", "tone", value.node_id, origin="stated", recorded_at=W1))
 
-    assert await preferences_for(repo, USER) == [Preference(key="tone", value="concise")]
+    assert [(p.key, p.value) for p in await preferences_for(repo, USER)] == [("tone", "concise")]
 
 
 async def test_an_extracted_preference_is_not_spoken(repo):
@@ -528,7 +527,7 @@ async def test_two_answers_for_one_key_resolve_to_the_newer(repo):
         _pref("p2", "tone", long.node_id, origin="stated", recorded_at=W3),
     )
 
-    assert await preferences_for(repo, USER) == [Preference(key="tone", value="thorough")]
+    assert [(p.key, p.value) for p in await preferences_for(repo, USER)] == [("tone", "thorough")]
 
 
 async def test_a_fact_about_a_thing_is_not_a_preference(repo):
@@ -556,4 +555,4 @@ async def test_ratifying_what_the_model_guessed_is_not_a_repeat(repo):
     outcome = await observe(repo, [stated], now=W3)
 
     assert outcome.recorded == 1
-    assert await preferences_for(repo, USER) == [Preference(key="tone", value="concise")]
+    assert [(p.key, p.value) for p in await preferences_for(repo, USER)] == [("tone", "concise")]

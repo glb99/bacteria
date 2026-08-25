@@ -29,6 +29,8 @@ from bacteria.agent.session.store import (
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, list_keys, principal_is_known, revoke_key
 from bacteria.app.chat import review
+from bacteria.app.chat.comparison import compare
+from bacteria.app.chat.models import ChatSession
 from bacteria.app.chat.repository import SqlSessionRepository
 from bacteria.app.chat.service import run_turn
 from bacteria.app.core import observability, platform
@@ -536,6 +538,48 @@ async def _one_shot(handler, *args) -> int:
         return await handler(SqlSessionRepository(db), *args)
 
 
+async def _memory_diff(session_id: str) -> int:
+    """Ask both memory stores the same question and report where they differ.
+
+    **Not ADR 0006's kill criterion.** That asks whether traversal beats recency
+    on the eval harness, which needs retrieval and does not exist. This asks
+    whether the two stores currently agree — the thing somebody has to know
+    before turning ``graph_backed_memory`` on, and unanswerable until both stores
+    existed.
+
+    Reads only, so it is safe against a deployment in use.
+    """
+    async with AsyncSession(get_engine()) as db:
+        row = await db.get(ChatSession, session_id)
+        if row is None:
+            print(f"no such session: {session_id}")
+            return 1
+        report = await compare(db, session_id, row.user_id)
+
+    print(f"session:  {report.session_id}   owner: {report.user_id}")
+    print(f"tables:   {report.table_keys} keyed memories")
+    print(f"graph:    {report.graph_keys} keyed memories")
+
+    if report.agree:
+        print()
+        print("The two stores agree.")
+        return 0
+
+    print()
+    width = max(len(d.key) for d in report.divergences)
+    for divergence in report.divergences:
+        print(
+            f"  {divergence.key:<{width}}  {divergence.kind:<15} "
+            f"tables={divergence.tables!r} graph={divergence.graph!r}"
+        )
+    # Neither side is authoritative, so this is a finding rather than a failure
+    # and exits zero. A non-zero exit would make "the graph is still empty" look
+    # like an error in a system where it is the expected state.
+    print()
+    print(f"{len(report.divergences)} difference(s). Neither store is authoritative.")
+    return 0
+
+
 async def _relations(threshold: int) -> int:
     """Report relation names the extractor keeps producing and the catalogue lacks.
 
@@ -700,7 +744,14 @@ def main() -> int:
         help="how many times a name must appear to be listed; the rule of three by default",
     )
 
+    diff = commands.add_parser(
+        "memory-diff", help="compare what each memory store holds for a session"
+    )
+    diff.add_argument("session_id", help="the conversation to compare")
+
     args = parser.parse_args()
+    if args.command == "memory-diff":
+        return platform.run(_memory_diff(args.session_id))
     if args.command == "relations":
         return platform.run(_relations(args.threshold))
     if args.command == "issue-key":

@@ -26,6 +26,7 @@ Not built:
     gate first**, not after.
 """
 
+from bacteria.agent.context.retrieval import SuppliesMemoryCandidates
 from bacteria.agent.model.client import ModelClient
 from bacteria.agent.model.gemini_client import GeminiClient
 from bacteria.agent.model.protocol import SendsMessages
@@ -37,6 +38,7 @@ from bacteria.app.chat.repository import KnownKeys, SqlSessionRepository
 from bacteria.app.chat.tasks import extract_memories_task
 from bacteria.app.core import observability
 from bacteria.app.core.jobs import get_app
+from bacteria.app.core.settings import get_settings
 from bacteria.app.graph.tasks import extract_assertions_task
 
 # Suppressed for the same reason as bacteria's own table: the annotation is the
@@ -84,6 +86,31 @@ def build_model_client(provider: str, model: str | None = None) -> SendsMessages
     # Widening the protocol to describe a constructor would trade a suppression
     # here for the provider abstraction layer that ADR rejects.
     return client_cls(model=model) if model else client_cls()  # ty: ignore[unknown-argument]
+
+
+def _candidate_supplier(
+    repository: SqlSessionRepository, principal: str
+) -> SuppliesMemoryCandidates | None:
+    """The narrowing stage, if this deployment asked for one.
+
+    ``None`` by default, which leaves every memory in state a candidate and
+    assembly behaving as it always has. Off is the honest default: with nothing
+    confirmed the graph narrows to an empty set, and a deployment that turned
+    this on before curating anything would lose its memory and read it as the
+    graph failing.
+
+    A whole-deployment choice like ``graph_backed_memory``, for the same reason:
+    chosen per request, "which memory answered" stops being answerable exactly
+    when the two disagree.
+    """
+    if not get_settings().graph_retrieval_enabled:
+        return None
+
+    # Imported here rather than at module scope: the graph package imports this
+    # one for its models, and a top-level import would close the cycle.
+    from bacteria.app.chat.graph_candidates import GraphCandidateSupplier
+
+    return GraphCandidateSupplier(repository.session, principal)
 
 
 def build_registry(
@@ -235,7 +262,11 @@ async def run_turn(
     # than the model call, so a turn that raised is still a span -- the failure
     # path is where "how long before it gave up" is asked most.
     with observability.turn_span(session_id=session_id, principal=principal) as turn:
-        runtime = Runtime(model_client=build_model_client(provider), session_store=repository)
+        runtime = Runtime(
+            model_client=build_model_client(provider),
+            session_store=repository,
+            candidate_supplier=_candidate_supplier(repository, principal),
+        )
         result = await runtime.run_turn(
             session_id,
             user_text,

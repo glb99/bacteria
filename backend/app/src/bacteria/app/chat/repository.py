@@ -190,6 +190,22 @@ class SqlSessionRepository:
         # memory answered" unanswerable exactly when the two disagree.
         self._memory: MemoryStore = memory or _configured_store(session)
 
+    @property
+    def session(self) -> AsyncSession:
+        """The session this reads through, for composing another reader on it.
+
+        Exposed rather than threaded through ``run_turn``'s signature, and that
+        is a trade rather than a clean answer. The alternative was passing the
+        database into a function that already takes the repository built from it,
+        or building the reader in an entrypoint -- and this codebase's rule is
+        that a decision made in an entrypoint is a decision nothing tests.
+
+        Read-only, and for readers only. Anything that writes through this rather
+        than through a method here is outside the detached-read guarantee the
+        module docstring makes.
+        """
+        return self._db
+
     async def create_session(self, user_id: str) -> Session:
         row = ChatSession(session_id=str(uuid.uuid4()), user_id=user_id)
         self._db.add(row)

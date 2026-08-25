@@ -289,3 +289,52 @@ async def test_linking_two_nodes_leaves_both_and_adds_a_claim(client, issue, eng
     graph = client.get("/graph", headers=auth(token)).json()
     assert len([n for n in graph["nodes"] if n["kind"] == "person"]) == 2
     assert "same_as" in [a["rel"] for a in graph["assertions"]]
+
+
+async def test_confirming_does_not_double_a_claim_on_the_page(client, issue, engine):
+    """The log keeps one row per event; a page wants one line per belief.
+
+    Confirming appends -- the proposal stays and the endorsement is a second row
+    with the same triple -- which is right for a log and read, on screen, as the
+    claim having been duplicated by the act of agreeing with it.
+    """
+    token = await issue("doubles")
+    await _seed(engine, "doubles", holder="diane")
+    before = client.get("/graph", headers=auth(token)).json()["assertions"]
+
+    client.post("/graph/assertions/a-doubles-diane/confirm", headers=auth(token))
+
+    after = client.get("/graph", headers=auth(token)).json()["assertions"]
+    assert len(after) == len(before)
+    assert [a["origin"] for a in after] == ["stated"], "and the endorsement is the one shown"
+
+
+async def test_a_confirmed_claim_does_not_contradict_itself(client, issue, engine):
+    """Two rows for one claim would be compared against each other.
+
+    `cto` is functional, so a person agreeing with a claim would be reported as
+    contradicting themselves -- which is why the collapse happens before
+    conflicts are computed rather than in the console.
+    """
+    token = await issue("agrees")
+    await _seed(engine, "agrees", holder="diane")
+
+    client.post("/graph/assertions/a-agrees-diane/confirm", headers=auth(token))
+
+    assert client.get("/graph", headers=auth(token)).json()["conflicts"] == []
+
+
+async def test_retracting_a_confirmed_claim_removes_it_entirely(client, issue, engine):
+    """One belief, recorded twice, stops being believed once.
+
+    Closing only the row named would leave the other believed, so the claim would
+    still be on the page and the retraction would look like it had failed.
+    """
+    token = await issue("undoes")
+    await _seed(engine, "undoes", holder="diane")
+    client.post("/graph/assertions/a-undoes-diane/confirm", headers=auth(token))
+    shown = client.get("/graph", headers=auth(token)).json()["assertions"][0]
+
+    client.post(f"/graph/assertions/{shown['assertion_id']}/retract", headers=auth(token))
+
+    assert client.get("/graph", headers=auth(token)).json()["assertions"] == []

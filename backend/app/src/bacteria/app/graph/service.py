@@ -769,11 +769,23 @@ async def retract(
     owner was trying to leave.
     """
     owner = assertion.user_id
-    dependents = await repository.depending_on(owner, [assertion.assertion_id])
+    # Every row saying this, not only the one named. A confirmed claim is two
+    # rows -- the proposal and the endorsement -- and closing one would leave the
+    # other believed, so the claim would still be there and the retraction would
+    # look like it had failed. One belief, recorded twice, stops being believed
+    # once.
+    # Compared without `origin`, which the repeat key includes and this must not:
+    # there it separates a guess from an endorsement, and here those are the two
+    # rows that have to go together.
+    target = _claim_of(assertion)[:5]
+    same = [a for a in await repository.current(owner) if _claim_of(a)[:5] == target]
+    ids = [a.assertion_id for a in same] or [assertion.assertion_id]
+    dependents = await repository.depending_on(owner, ids)
 
-    await repository.close(log_retract(assertion, at=now))
+    for doomed in same or [assertion]:
+        await repository.close(log_retract(doomed, at=now))
 
-    now_stale = stale_after(dependents, [assertion.assertion_id])
+    now_stale = stale_after(dependents, ids)
     for conclusion in now_stale:
         await repository.set_status(owner, conclusion.conclusion_id, "stale")
 

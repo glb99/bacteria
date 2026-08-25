@@ -51,6 +51,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.agent.model.protocol import SendsMessages
 from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
 from bacteria.app.graph.catalogue import Relation, resolve, vocabulary
+from bacteria.app.graph.catalogue import preferences as preference_relations
 from bacteria.app.graph.dates import parse_bound, stated_in
 from bacteria.app.graph.log import Assertion, Trust
 from bacteria.app.graph.models import GraphExtraction
@@ -119,6 +120,10 @@ Rules:
   "kind": "person"}. Never invent a name for them and never use "user".
 - Only relationships between two named things. Not attributes ("is tired"), not
   events, not summaries of what was discussed.
+- The exception is a known relationship whose object is a `value` — those are the
+  ones written above with a plain word for `dst`, like a preferred tone or the
+  language to write in. An attribute the list does not cover is still not a
+  relationship, so return nothing for it.
 - A person's name is an attribute, not a relationship. "I'm Guillermo" and "call
   me Gui" say what to call someone; they do not relate two things. Return
   nothing for them.
@@ -357,6 +362,13 @@ async def _to_assertion(
     dst = await _node_id(repository, user_id, claim["dst"], now=now)
 
     valid = _interval(claim)
+    # A fact is about the world and holds wherever the person goes; a preference
+    # was expressed in a conversation, and belongs to it until somebody states it
+    # for good. That matches where the table store keeps a proposal -- keyed by
+    # session -- so the two can be compared without the scopes being the reason
+    # they differ.
+    resolved = resolve(claim["rel"])
+    is_preference = resolved is not None and resolved.relation in preference_relations()
 
     return Assertion(
         assertion_id=_assertion_id(user_id, src, claim["rel"], dst, now),
@@ -367,6 +379,11 @@ async def _to_assertion(
         valid=valid,
         recorded_at=now,
         trust=trust,
+        # Always inferred. The extractor is the model, and nothing it writes may
+        # be spoken until a person says it themselves -- which is how ADR 0016
+        # survives a store where the model does nearly all of the writing.
+        origin="inferred",
+        scope="session" if is_preference else "user",
         session_id=session_id,
         attrs=_attrs(claim),
     )

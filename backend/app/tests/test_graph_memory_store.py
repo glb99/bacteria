@@ -128,3 +128,50 @@ async def test_it_starts_empty(store):
     view = await memory.entries(session_id, USER)
 
     assert (view.memory, view.user_memory, view.proposals) == ({}, {}, {})
+
+
+async def test_what_the_extractor_heard_arrives_as_a_proposal(engine):
+    """The two halves meeting: extraction writes, the store reads, nothing speaks.
+
+    Until this, `GraphMemoryStore` had no way to be non-empty except by somebody
+    calling `remember` — so the comparison against the tables could only ever
+    report that the graph knew nothing.
+    """
+    from datetime import datetime, timezone
+
+    from bacteria.app.graph.log import Assertion
+    from bacteria.app.graph.repository import SqlGraphRepository
+    from bacteria.app.graph.service import owner, refer_to
+    from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+
+    now = datetime.now(timezone.utc)
+    async with AsyncSession(engine) as db:
+        session = await SqlSessionRepository(db).create_session("heard")
+        graph = SqlGraphRepository(db)
+        me = await owner(graph, "heard", now=now)
+        value = await refer_to(graph, "heard", "value", "concise", now=now)
+        # Exactly what `_claim` builds for a preference the extractor heard.
+        await graph.record(
+            [
+                Assertion(
+                    assertion_id="heard-1",
+                    user_id="heard",
+                    src=me.node_id,
+                    rel="tone",
+                    dst=value.node_id,
+                    valid=Interval(None, OPEN_ENDED),
+                    recorded_at=now,
+                    origin="inferred",
+                    scope="session",
+                    session_id=session.session_id,
+                    attrs={"reason": "they asked for short answers"},
+                )
+            ]
+        )
+        await db.commit()
+
+        view = await GraphMemoryStore(db).entries(session.session_id, "heard")
+
+    assert view.memory == {}, "the model does not get to write its own memory"
+    assert [key for _, key in view.proposals] == ["tone"]
+    assert next(iter(view.proposals.values())).reason == "they asked for short answers"

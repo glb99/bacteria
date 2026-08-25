@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Mapping, Optional, Sequence
 
-from bacteria.app.graph.catalogue import Relation
+from bacteria.app.graph.catalogue import Relation, read_as
 from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval, overlaps
@@ -53,26 +53,6 @@ class Succession:
     predecessor: str
     successor: str
     boundary: datetime
-
-
-def _read(relation: Relation, assertion: Assertion, labels: Mapping[str, str]) -> str:
-    """One claim as a sentence a person can read, from the catalogue's template.
-
-    The first version of this module built statements out of node ids and the
-    bare relation name, which produced *"1385501d-… took over cto of dcaad500-…"*
-    in the first real conclusion this system ever drew. Correct, and unusable.
-
-    A conclusion's statement is the thing someone reads in order to **disagree**
-    with it — the whole point of a defeasible belief being recorded rather than
-    applied — so it is held to the same standard as a constraint's ``invariant``,
-    which was split out of ``sentence`` for exactly this reason.
-
-    Falls back to an id when a label is missing, because a statement that names a
-    node badly is still better than a conclusion that could not be written.
-    """
-    return relation.sentence.replace("<src>", labels.get(assertion.src, assertion.src)).replace(
-        "<dst>", labels.get(assertion.dst, assertion.dst)
-    )
 
 
 def infer_succession(
@@ -137,7 +117,7 @@ def infer_succession(
         conclusion_id=conclusion_id,
         user_id=successor.user_id,
         statement=(
-            f"{_read(relation, successor, labels)}, assumed to have started on "
+            f"{read_as(relation, labels.get(successor.src, successor.src), labels.get(successor.dst, successor.dst))}, assumed to have started on "
             f"{boundary.date().isoformat()} "
             f"when {labels.get(predecessor.dst, predecessor.dst)}'s tenure ended"
         ),

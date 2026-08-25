@@ -54,6 +54,7 @@ from bacteria.app.graph.service import (
     LabelTakenError,
     MismatchedKindsError,
     Outcome,
+    confirm,
     link,
     reject,
     rename,
@@ -92,6 +93,11 @@ class AssertionOut(BaseModel):
     ends: str
     starts: Optional[datetime]
     trust: str
+    origin: str
+    """Whether anybody meant this, which is the only thing that decides if it can
+    be spoken. Carried because the console offers *confirm* on a proposal and not
+    on a claim already confirmed, and could not tell them apart without it."""
+
     recorded_at: datetime
     reason: Optional[str]
 
@@ -191,6 +197,7 @@ async def read_graph(principal: CurrentPrincipal, db: DbSession) -> GraphOut:
                 ends=_render_end(a.valid.end),
                 starts=a.valid.start,
                 trust=a.trust,
+                origin=a.origin,
                 recorded_at=a.recorded_at,
                 reason=(a.attrs or {}).get("reason"),
             )
@@ -289,6 +296,36 @@ async def retract_assertion(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such assertion") from None
 
     outcome = await retract(repository, claim, now=datetime.now(timezone.utc))
+    await db.commit()
+    return _rendered(outcome)
+
+
+@router.post("/assertions/{assertion_id}/confirm", response_model=OutcomeOut)
+async def confirm_assertion(
+    assertion_id: str, principal: CurrentPrincipal, db: DbSession
+) -> OutcomeOut:
+    """Endorse a claim the extractor proposed, so a prompt may be told it.
+
+    The only act on this graph that *keeps* something. Everything else takes
+    away, which is why its absence was invisible: the graph worked, quietly,
+    without ever mattering.
+
+    Appends rather than editing. The proposal stays and the two rows differ in
+    ``origin``, so the log records the endorsement as its own event — and
+    confirming twice writes nothing, because saying yes twice is one yes.
+    """
+    repository = SqlGraphRepository(db)
+    try:
+        claim = await repository.assertion(principal.id, assertion_id)
+    except UnknownAssertionError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such assertion") from None
+
+    outcome = await confirm(
+        repository,
+        claim,
+        assertion_id=str(uuid.uuid4()),
+        now=datetime.now(timezone.utc),
+    )
     await db.commit()
     return _rendered(outcome)
 

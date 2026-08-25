@@ -26,8 +26,9 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Sequence
 
+from bacteria.app.graph.catalogue import CATALOGUE, Relation
 from bacteria.app.graph.conclusions import Conclusion, stale_after
-from bacteria.app.graph.constraints import SEEDED, Conflict, FunctionalConstraint
+from bacteria.app.graph.constraints import Conflict, conflicts_for
 from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
@@ -132,7 +133,7 @@ async def observe(
     assertions: Sequence[Assertion],
     *,
     now: datetime,
-    constraints: Sequence[FunctionalConstraint] = SEEDED,
+    relations: Sequence[Relation] = CATALOGUE,
 ) -> Outcome:
     """Record claims, then say what they collide with.
 
@@ -163,7 +164,7 @@ async def observe(
         await repository.record(fresh)
 
     conflicts, inferred = await _reconcile(
-        repository, owner, {a.rel for a in assertions}, constraints, now
+        repository, owner, {a.rel for a in assertions}, relations, now
     )
     return Outcome(recorded=len(fresh), conflicts=conflicts, inferred=inferred)
 
@@ -226,7 +227,7 @@ async def revise(
     replacement: Assertion,
     *,
     now: datetime,
-    constraints: Sequence[FunctionalConstraint] = SEEDED,
+    relations: Sequence[Relation] = CATALOGUE,
 ) -> Outcome:
     """Correct a claim, and mark everything that had been resting on it.
 
@@ -250,7 +251,7 @@ async def revise(
     for conclusion in now_stale:
         await repository.set_status(owner, conclusion.conclusion_id, "stale")
 
-    conflicts, inferred = await _reconcile(repository, owner, {replacement.rel}, constraints, now)
+    conflicts, inferred = await _reconcile(repository, owner, {replacement.rel}, relations, now)
     # One: the replacement. A revision writes unconditionally — it is a
     # correction, so the claim it states is by definition not one the log
     # already believes.
@@ -260,8 +261,8 @@ async def revise(
 async def _reconcile(
     repository: SqlGraphRepository,
     owner: str,
-    relations: set[str],
-    constraints: Sequence[FunctionalConstraint],
+    affected: set[str],
+    relations: Sequence[Relation],
     now: datetime,
 ) -> tuple[list[Conflict], list[Conclusion]]:
     """Evaluate the affected rules, explain what can be explained, evaluate again.
@@ -282,16 +283,16 @@ async def _reconcile(
     """
     believed = await repository.current(owner)
     conclusions = await repository.depending_on(owner, [a.assertion_id for a in believed])
-    applicable = [c for c in constraints if c.rel in relations]
+    applicable = [r for r in relations if r.name in affected]
 
     conflicts: list[Conflict] = []
     inferred: list[Conclusion] = []
-    for constraint in applicable:
-        for conflict in constraint.conflicts(believed, conclusions=conclusions):
+    for relation in applicable:
+        for conflict in conflicts_for(relation, believed, conclusions=conclusions):
             if conflict.state != "possible":
                 continue
             succession = infer_succession(
-                believed, constraint, conclusion_id=str(uuid.uuid4()), now=now
+                believed, relation, conclusion_id=str(uuid.uuid4()), now=now
             )
             if succession is None:
                 continue
@@ -301,6 +302,6 @@ async def _reconcile(
         # Recomputed after inference, so a caller is told the state a person
         # would see rather than the one that held for the instant before the
         # explanation was recorded.
-        conflicts.extend(constraint.conflicts(believed, conclusions=conclusions))
+        conflicts.extend(conflicts_for(relation, believed, conclusions=conclusions))
 
     return conflicts, inferred

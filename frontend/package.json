@@ -8,12 +8,14 @@
   "scripts": {
     "generate": "openapi-typescript openapi.json --output src/api.gen.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "openapi-fetch": "^0.14.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "openapi-typescript": "^7.9.1",
     "typescript": "^5.9.3",
     "vite": "^7.1.14"

@@ -19,6 +19,7 @@ const workspace = el("workspace");
 const who = el("who");
 const signOut = el<HTMLButtonElement>("sign-out");
 const tabs = el<HTMLDivElement>("tabs");
+const tabError = el("tab-error");
 const panels = {
   chat: el("tab-chat"),
   graph: el("tab-graph"),
@@ -51,6 +52,7 @@ function showSignIn(message?: string): void {
  * hours and a console is exactly the thing left open for longer than that.
  */
 async function refresh(): Promise<void> {
+  show(tabError, false);
   try {
     if (tab === "chat") {
       await chat.refresh();
@@ -66,6 +68,20 @@ async function refresh(): Promise<void> {
       showSignIn("that session has ended — sign in again");
       return;
     }
+    // Shown, not rethrown. This handler runs inside an async event listener, so
+    // a rethrow becomes an unhandled promise rejection: the panel has already
+    // switched, nothing renders, and the page looks like the click did nothing.
+    // "Nothing happened" is the worst failure a UI can report, because it is
+    // indistinguishable from working — and it cost a real debugging session.
+    //
+    // The message is deliberately the raw error. This is a console for the
+    // person who runs the server; a friendlier string would hide the status code
+    // that says which half is broken.
+    tabError.textContent = `${tab} failed to load — ${String(error)}`;
+    show(tabError, true);
+    show(workspace, true);
+    // Rethrown as well, so the browser console still gets a stack for whoever
+    // is looking there. The line above is for whoever is not.
     throw error;
   }
 }

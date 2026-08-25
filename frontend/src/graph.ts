@@ -45,6 +45,28 @@ const layoutButtons = el<HTMLDivElement>("graph-layout");
 let layout: Layout = "subject";
 
 /**
+ * Where trust is reported, and why it is not on the claim.
+ *
+ * It was a tag on every row, and it was the same value on every row: attribution
+ * is per transcript slice, and after the first turn essentially every slice
+ * contains an assistant turn, so everything reads `third-party`. A label that
+ * never varies is not information — it is a word a reader has to learn in order
+ * to discover it means nothing to them.
+ *
+ * So it is counted in the diagnostics instead, where a constant is a *finding*:
+ * the tier is inert, which is an open question in the design rather than
+ * something a person looking at their own memory needs to act on.
+ */
+function trustSummary(assertions: GraphAssertion[]): string {
+  const counts = new Map<string, number>();
+  for (const a of assertions) counts.set(a.trust, (counts.get(a.trust) ?? 0) + 1);
+  return [...counts]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([trust, n]) => `${n} ${trust}`)
+    .join(" · ");
+}
+
+/**
  * How a valid-time end reads on screen.
  *
  * Three states, three phrasings, because the API sends three and collapsing any
@@ -118,7 +140,7 @@ function renderClaims(
     column.append(
       text(
         "p",
-        layout === "subject" ? "claims about this thing" : "claims of this kind",
+        layout === "subject" ? "what it knows about this" : "everything related this way",
         "derivation",
       ),
     );
@@ -131,19 +153,29 @@ function renderClaims(
       // badge to know one of these is disputed.
       item.className = `node${contested.has(assertion.assertion_id) ? " contested" : ""}`;
 
+      const subject = nodes.get(assertion.src)?.label ?? "?";
       const object = nodes.get(assertion.dst)?.label ?? "?";
-      item.append(text("code", assertion.rel));
-      item.append(text("span", object, "value"));
+
+      // A sentence with its direction drawn, not a row of cells. The first
+      // version printed `rel`, `object`, and two tags, which is a database tuple
+      // with the schema removed: nothing on the row said which end was the
+      // subject, and the reader had to know that the column heading was.
+      const claim = document.createElement("p");
+      claim.className = "claim";
+      claim.append(
+        text("span", subject, "end"),
+        text("span", `—${assertion.rel}→`, "arrow"),
+        text("span", object, "end"),
+      );
+      item.append(claim);
+
       item.append(text("span", endsLabel(assertion.ends), "tag"));
-      // Trust is shown rather than filtered on. Everything is currently
-      // `third-party` because attribution is per transcript slice and almost
-      // every slice contains an assistant turn — a thing worth being able to see
-      // on a screen rather than only in a decision record.
-      item.append(text("span", assertion.trust, "tag source"));
       if (contested.has(assertion.assertion_id)) {
         item.append(text("span", "disputed", "tag contested"));
       }
-      if (assertion.reason) item.append(text("p", assertion.reason, "note"));
+      // Where it came from, in the words that produced it. This is what makes a
+      // wrong claim contestable rather than merely visible.
+      if (assertion.reason) item.append(text("p", `from: “${assertion.reason}”`, "note"));
       list.append(item);
     }
     column.append(list);
@@ -236,10 +268,11 @@ function renderVerdict(
     ["undecided for want of a date", String(undecided)],
     ["conclusions drawn", String(conclusions.length)],
     ["conclusions whose evidence moved", String(stale)],
+    ["trust attribution", trustSummary(assertions) || "—"],
   ];
 
   verdict.replaceChildren(
-    text("h3", "Is the graph earning its keep?"),
+    text("h3", "What is in here, and whether it is earning its keep"),
     ...rows.flatMap(([term, value]) => [text("dt", term), text("dd", value)]),
     text(
       "p",
@@ -286,9 +319,8 @@ export async function refresh(_sessionId: string | null): Promise<void> {
 
   legend.replaceChildren(
     text("span", `${graph.nodes.length} things`),
-    text("span", `${graph.assertions.length} claims`),
+    text("span", `${graph.assertions.length} things it knows about them`),
     text("span", `${graph.conflicts.length} disagreements`),
-    text("span", "extracted from conversation, not derived from key names", "note"),
   );
 }
 

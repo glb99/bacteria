@@ -73,8 +73,14 @@ function perform(button: HTMLButtonElement, run: () => Promise<unknown>): void {
   void run()
     .then(() => refresh(currentSessionId))
     .catch((failure: unknown) => {
-      button.disabled = false;
       report(failure instanceof Error ? failure.message : String(failure));
+    })
+    // Always, rather than only on failure. A redraw normally replaces this
+    // button and the flag goes with it -- but if the redraw is what failed, the
+    // row is left dead with nothing saying why, and the page looks broken
+    // rather than the request looking failed.
+    .finally(() => {
+      button.disabled = false;
     });
 }
 
@@ -309,15 +315,27 @@ function renderNodes(nodes: GraphNode[]): HTMLElement[] {
   const section = document.createElement("section");
   section.className = "cluster";
   section.append(text("h3", "Things"));
-  section.append(
-    text(
-      "p",
-      pendingLink
-        ? "Pick the other node these are the same as."
-        : "Two nodes for one thing are linked, never merged: both keep their claims.",
-      "derivation",
-    ),
-  );
+
+  // The pending state says which node is waiting and offers the way out, because
+  // a half-finished two-click act is the one place this page holds state a person
+  // cannot see. Naming the node is the point: "pick the other one" is useless if
+  // you have forgotten which one you picked.
+  const waiting = nodes.find((n) => n.node_id === pendingLink);
+  if (waiting) {
+    const banner = document.createElement("p");
+    banner.className = "derivation";
+    banner.append(text("span", `Linking “${waiting.label}” — pick the other node.`));
+    banner.append(
+      action("cancel", "quiet", async () => {
+        pendingLink = null;
+      }),
+    );
+    section.append(banner);
+  } else {
+    section.append(
+      text("p", "Two nodes for one thing are linked, never merged: both keep their claims.", "derivation"),
+    );
+  }
 
   const list = document.createElement("ul");
   for (const node of nodes) {
@@ -339,13 +357,11 @@ function renderNodes(nodes: GraphNode[]): HTMLElement[] {
     );
 
     item.append(
-      action(arming ? "cancel" : "same as…", "quiet", async () => {
-        if (arming) {
-          pendingLink = null;
-          return;
-        }
-        if (pendingLink === null) {
-          pendingLink = node.node_id;
+      action(arming ? "picked" : "same as…", "quiet", async () => {
+        // Read at click time rather than from the closure, so a stale render
+        // cannot make the second click behave like a first one.
+        if (pendingLink === null || pendingLink === node.node_id) {
+          pendingLink = pendingLink === node.node_id ? null : node.node_id;
           return;
         }
         const first = pendingLink;

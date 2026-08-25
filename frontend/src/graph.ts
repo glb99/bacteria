@@ -19,15 +19,28 @@
  * - a **contradiction**, with the rule that found it and how sure that rule is
  * - a **conclusion**, with the claims underneath it and whether they still hold
  *
- * Nothing here writes. The routes to retract a claim or reject a conclusion do
- * not exist yet, so this is a viewer rather than the negotiation surface it is
- * meant to become — and a button that looked like it did something would be
- * worse than its absence.
+ * And now it writes. A claim can be retracted, a conclusion rejected, a node
+ * renamed, and two nodes linked — which is what turns a viewer into the surface
+ * where a person and their agent disagree.
+ *
+ * **Nothing here stages.** These are the owner's own edits and the design's rule
+ * is that their writes are never blocked, so each acts immediately and the reply
+ * redraws the page. What would stage is a proposal somebody else made, and
+ * nothing makes one yet.
+ *
+ * Retraction asks twice, in place rather than in a dialog: the button becomes
+ * "sure?" and a click elsewhere puts it back. A modal would be the notification
+ * fatigue the design warns against in miniature, and no confirmation at all
+ * makes a misclick cost a claim that has to be said again to come back.
  */
 
 import {
+  linkNodes,
   readConclusions,
   readGraph,
+  rejectConclusion,
+  renameNode,
+  retractAssertion,
   type GraphAssertion,
   type GraphConclusion,
   type GraphConflict,
@@ -43,6 +56,68 @@ const verdict = el("graph-verdict");
 const layoutButtons = el<HTMLDivElement>("graph-layout");
 
 let layout: Layout = "subject";
+
+/** The node waiting for a second one to be linked to, if any. */
+let pendingLink: string | null = null;
+
+/**
+ * A button that performs one act and redraws.
+ *
+ * Errors are surfaced on the page rather than thrown into an event handler,
+ * where an unhandled rejection would be invisible to the person who just clicked
+ * and appear only in a browser console they are not reading. That failure has
+ * already happened once in this file's history.
+ */
+function action(label: string, className: string, run: () => Promise<unknown>): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `act ${className}`;
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    void run()
+      .then(() => refresh(currentSessionId))
+      .catch((failure: unknown) => {
+        button.disabled = false;
+        report(failure instanceof Error ? failure.message : String(failure));
+      });
+  });
+  return button;
+}
+
+/**
+ * A destructive act that asks once, in place.
+ *
+ * The second click is the one that happens. Any other click on the page resets
+ * it, so an abandoned "sure?" does not sit there waiting to catch someone later.
+ */
+function confirmable(label: string, run: () => Promise<unknown>): HTMLButtonElement {
+  const button = action(label, "danger", run);
+  const armed = () => button.dataset["armed"] === "yes";
+  button.addEventListener(
+    "click",
+    (event) => {
+      if (armed()) return;
+      event.stopImmediatePropagation();
+      button.dataset["armed"] = "yes";
+      button.textContent = "sure?";
+      document.addEventListener(
+        "click",
+        () => {
+          delete button.dataset["armed"];
+          button.textContent = label;
+        },
+        { capture: true, once: true },
+      );
+    },
+    { capture: true },
+  );
+  return button;
+}
+
+function report(message: string): void {
+  legend.replaceChildren(text("span", message, "failed"));
+}
 
 /**
  * Where trust is reported, and why it is not on the claim.
@@ -176,11 +251,84 @@ function renderClaims(
       // Where it came from, in the words that produced it. This is what makes a
       // wrong claim contestable rather than merely visible.
       if (assertion.reason) item.append(text("p", `from: “${assertion.reason}”`, "note"));
+      // The claim is the unit a person disagrees with, so the affordance is on
+      // it rather than in a panel that would make them match ids by eye.
+      item.append(
+        confirmable("retract", () => retractAssertion(assertion.assertion_id)),
+      );
       list.append(item);
     }
     column.append(list);
     return column;
   });
+}
+
+/**
+ * The things themselves, and the two acts that are about identity rather than fact.
+ *
+ * Nodes had no section: they appeared only as the ends of claims, which is where
+ * a reader wants them and leaves nowhere to hang an act that is *about* a node.
+ * Both acts here are — renaming one, and saying two are the same thing.
+ *
+ * **Linking takes two clicks on two nodes** rather than a form asking for two
+ * ids, because a person picking out a duplicate is looking at labels and would
+ * have to go and find ids to type. The first click arms; the second commits;
+ * clicking the armed node again cancels.
+ */
+function renderNodes(nodes: GraphNode[]): HTMLElement[] {
+  if (nodes.length === 0) return [];
+
+  const section = document.createElement("section");
+  section.className = "cluster";
+  section.append(text("h3", "Things"));
+  section.append(
+    text(
+      "p",
+      pendingLink
+        ? "Pick the other node these are the same as."
+        : "Two nodes for one thing are linked, never merged: both keep their claims.",
+      "derivation",
+    ),
+  );
+
+  const list = document.createElement("ul");
+  for (const node of nodes) {
+    const item = document.createElement("li");
+    const arming = pendingLink === node.node_id;
+    item.className = `node${arming ? " proposed" : ""}`;
+    item.append(text("span", node.label, "value"));
+    item.append(text("span", node.kind, "tag"));
+
+    item.append(
+      action("rename", "quiet", async () => {
+        // `prompt` is modal, which this file otherwise avoids. It stays because
+        // the alternative is an inline editor, and one is a line of code against
+        // fifty for an act nobody performs twice on the same node.
+        const label = window.prompt(`What should “${node.label}” be called?`, node.label);
+        if (label === null || label.trim() === "" || label === node.label) return;
+        await renameNode(node.node_id, label.trim());
+      }),
+    );
+
+    item.append(
+      action(arming ? "cancel" : "same as…", "quiet", async () => {
+        if (arming) {
+          pendingLink = null;
+          return;
+        }
+        if (pendingLink === null) {
+          pendingLink = node.node_id;
+          return;
+        }
+        const first = pendingLink;
+        pendingLink = null;
+        await linkNodes(first, node.node_id);
+      }),
+    );
+    list.append(item);
+  }
+  section.append(list);
+  return [section];
 }
 
 function renderConflicts(conflicts: GraphConflict[], assertions: GraphAssertion[]): HTMLElement[] {
@@ -235,6 +383,12 @@ function renderConclusions(conclusions: GraphConclusion[]): HTMLElement[] {
       item.append(text("span", "evidence changed", "tag contested"));
     }
     item.append(text("p", `rests on ${conclusion.evidence.length} claim(s)`, "note"));
+    // Rejecting is not destructive in the way retracting is -- a conclusion may
+    // be recomputed and the log keeps everything it rested on -- so it asks
+    // once, not twice. A retracted one is gone from this list and stays gone.
+    if (conclusion.status === "active") {
+      item.append(action("reject", "quiet", () => rejectConclusion(conclusion.conclusion_id)));
+    }
     list.append(item);
   }
   section.append(list);
@@ -310,6 +464,7 @@ export async function refresh(_sessionId: string | null): Promise<void> {
   } else {
     canvas.replaceChildren(
       ...renderClaims(graph.assertions, nodes, contested),
+      ...renderNodes(graph.nodes),
       ...renderConflicts(graph.conflicts, graph.assertions),
       ...renderConclusions(conclusions),
     );

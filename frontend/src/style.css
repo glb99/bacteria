@@ -650,3 +650,34 @@ code {
 .diagnostic .verdict {
   margin-top: 0.6rem;
 }
+
+/* The acts on a claim, a conclusion and a node.
+ *
+ * Small and quiet by default. An affordance that shouted would make a page of
+ * claims read as a page of things to do, which is the review-fatigue failure the
+ * design warns about: a queue everyone clicks through is worse than no queue,
+ * because everyone believes it was checked. */
+button.act {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+  border-color: var(--line);
+  color: var(--muted);
+  align-self: start;
+}
+
+button.act:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: transparent;
+}
+
+/* Armed, having been clicked once. Loud on purpose and only in this state. */
+button.act.danger[data-armed="yes"] {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.legend .failed {
+  color: var(--danger);
+}

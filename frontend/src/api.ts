@@ -44,10 +44,24 @@ export class Unauthenticated extends Error {}
 export async function unwrap<T>(
   call: Promise<{ data?: T; error?: unknown; response: Response }>,
 ): Promise<T> {
-  const { data, response } = await call;
+  const { data, error, response } = await call;
   if (response.status === 401) throw new Unauthenticated();
-  if (data === undefined) throw new Error(`the API answered ${response.status}`);
+  if (data === undefined) throw new Error(refusal(error) ?? `the API answered ${response.status}`);
   return data;
+}
+
+/**
+ * The API's own words for why it refused, when it gave any.
+ *
+ * Worth carrying rather than replacing with a status code, because some refusals
+ * are written for the person reading them: renaming a node onto a taken name
+ * answers with the verb that resolves it, and "the API answered 409" would throw
+ * that away and leave a dead end where there is an invitation.
+ */
+function refusal(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const detail = (error as { detail?: unknown }).detail;
+  return typeof detail === "string" ? detail : null;
 }
 
 /**
@@ -133,3 +147,36 @@ export const rejectProposal = (sessionId: string, source: string, key: string) =
 export const openSession = (key: string) => unwrap(api.POST("/auth/session", { body: { key } }));
 
 export const closeSession = () => api.DELETE("/auth/session");
+
+/**
+ * Stop believing a claim.
+ *
+ * `POST` to a verb rather than `DELETE` of the resource, mirroring the route:
+ * nothing is deleted, the row stays and its belief interval closes. The reply
+ * carries what changed, so a caller redraws from it rather than re-fetching the
+ * graph to discover that it should.
+ */
+export const retractAssertion = (assertionId: string) =>
+  unwrap(
+    api.POST("/graph/assertions/{assertion_id}/retract", {
+      params: { path: { assertion_id: assertionId } },
+    }),
+  );
+
+export const rejectConclusion = (conclusionId: string) =>
+  unwrap(
+    api.POST("/graph/conclusions/{conclusion_id}/reject", {
+      params: { path: { conclusion_id: conclusionId } },
+    }),
+  );
+
+export const renameNode = (nodeId: string, label: string) =>
+  unwrap(
+    api.POST("/graph/nodes/{node_id}/rename", {
+      params: { path: { node_id: nodeId } },
+      body: { label },
+    }),
+  );
+
+export const linkNodes = (left: string, right: string) =>
+  unwrap(api.POST("/graph/links", { body: { left, right } }));

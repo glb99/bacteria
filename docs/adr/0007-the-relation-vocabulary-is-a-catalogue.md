@@ -2,7 +2,29 @@
 
 ## Status
 
-Proposed — 2026-08-25.
+Accepted — 2026-08-25. Implemented the same day, in full.
+
+Three things came out of building it rather than out of arguing about it, and
+each is amended in place below:
+
+- **`sentence` was doing two jobs.** The sketch had one field serving the prompt
+  and the console. *"`<dst>` is the CTO of `<src>`"* says which way round to read
+  a claim and states no rule, where a person shown a contradiction needs one they
+  can disagree with. An existing route test caught it. Split into `sentence` and
+  `invariant` — see §0.
+- **§5's aliasing example was unbuildable.** It aliased `called`/`name`/
+  `alternative_name` to one relation, and §9 of this record decides those are not
+  relationships at all, so there was no entry to alias to. The mechanism was
+  right; only the example was wrong.
+- **§8 shipped as a command, not a periodic job.** No periodic-job infrastructure
+  exists, and a scheduled report writes its list into a log nobody tails. This
+  record's own "not built" already said the asking is a person reading a line, so
+  it is `bacteria-admin relations`.
+
+One thing this record did not reach: a converse alias must be **recognized and
+never advertised**. Rendering the catalogue naïvely offered `mother_of` under a
+sentence reading *"`<src>`'s mother is `<dst>`"*, which invites the inversion the
+flag exists to undo.
 
 **Amends [ADR 0006](0006-the-memory-graph-is-an-assertion-log.md) rather than
 superseding it.** Everything 0006 decided about the *shape of a row* stands: two

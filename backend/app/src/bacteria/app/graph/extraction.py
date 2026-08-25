@@ -50,7 +50,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.model.protocol import SendsMessages
 from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
-from bacteria.app.graph.catalogue import vocabulary
+from bacteria.app.graph.catalogue import Relation, resolve, vocabulary
 from bacteria.app.graph.log import Assertion, Trust
 from bacteria.app.graph.models import GraphExtraction
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -152,6 +152,37 @@ A closed set, checked rather than trusted. An open one means the same thing
 arrives as "person", "human" and "individual" across three runs and becomes three
 node kinds — the vocabulary drift that makes a graph unusable, arriving one
 reasonable-looking answer at a time.
+"""
+
+_NAMING_RELATIONS = frozenset(
+    {
+        "name",
+        "named",
+        "called",
+        "goes_by",
+        "known_as",
+        "also_known_as",
+        "alternative_name",
+        "alias",
+        "nickname",
+        "first_name",
+        "last_name",
+        "full_name",
+    }
+)
+"""Relations that are really a claim about what to call something.
+
+A denylist, which is the shape this package argues against everywhere else, and
+it is used here because the alternative is worse rather than because it is good.
+The general rule — *a claim whose object is a bare name for its subject is not a
+relationship* — needs to know that "Guillermo" is a name and "Acme" is not, and
+nothing here can tell those apart without asking a model a question it would
+answer confidently and wrongly.
+
+So this catches the spellings the model actually produced (``name``, ``called``,
+``alternative_name``) plus the near neighbours it will reach for next, and it
+will miss one eventually. Missing one costs a junk node in the tail; the
+alternative costs a wrong answer with no way to see it.
 """
 
 
@@ -318,12 +349,27 @@ async def _to_assertion(
         recorded_at=now,
         trust=trust,
         session_id=session_id,
-        attrs={
-            "reason": claim["reason"],
-            "tense": claim["tense"],
-            "prompt_version": PROMPT_VERSION,
-        },
+        attrs=_attrs(claim),
     )
+
+
+def _attrs(claim: dict[str, Any]) -> dict[str, Any]:
+    """What travels with a claim but is not part of it.
+
+    ``proposed_rel`` appears only when the catalogue rewrote the relation, and it
+    is what makes aliasing reversible. Merging two relation names is the cheap
+    direction — the opposite of merging two nodes — precisely because the word the
+    model chose survives here, so a wrong alias is undone by re-reading the log
+    rather than by having kept both rows.
+    """
+    attrs = {
+        "reason": claim["reason"],
+        "tense": claim["tense"],
+        "prompt_version": PROMPT_VERSION,
+    }
+    if "proposed_rel" in claim:
+        attrs["proposed_rel"] = claim["proposed_rel"]
+    return attrs
 
 
 async def _node_id(
@@ -465,13 +511,69 @@ def _clean(item: Any) -> Optional[dict[str, Any]]:
     if ends["src"] == ends["dst"]:
         return None
 
-    return {
-        "src": ends["src"],
-        "dst": ends["dst"],
-        "rel": rel.strip()[:_MAX_LABEL_CHARS],
-        "tense": tense,
-        "reason": reason.strip()[:_MAX_LABEL_CHARS],
-    }
+    return _canonicalize(
+        {
+            "src": ends["src"],
+            "dst": ends["dst"],
+            "rel": rel.strip()[:_MAX_LABEL_CHARS],
+            "tense": tense,
+            "reason": reason.strip()[:_MAX_LABEL_CHARS],
+        }
+    )
+
+
+def _canonicalize(claim: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Put a claim into the catalogue's vocabulary, or leave it in the tail.
+
+    Three steps, and only the first can reject on the relation alone.
+
+    **A name is not a relationship**, so a naming claim is dropped. The prompt
+    forbids attributes and the model ignored it five times out of fifteen, which
+    is what moved the rule here: ``self —name→ Guillermo`` makes "Guillermo" a
+    *node*, and the graph now holds the same human twice with nothing joining
+    them. Where such a claim should go instead is a rename of the owner node, and
+    there is no write path for one — so this loses a real fact, deliberately, in
+    the recoverable direction.
+
+    **An alias is rewritten and a converse alias swaps the ends.** The model's own
+    word is kept so the rewrite can be audited and undone by reading the log,
+    which is what makes collapsing safe here where merging two nodes would not be.
+
+    **A canonical claim must fit its signature.** Wrong kinds are flipped if
+    flipping fits and dropped otherwise. This catches an inversion in ``employer
+    (person → organization)`` and nothing at all in ``mother (person → person)``,
+    which is why the reading sentence in the prompt is the prevention and this is
+    only a net.
+
+    A relation the catalogue does not know is returned untouched. That is the
+    tail, and it is not an error.
+    """
+    proposed = claim["rel"]
+    if proposed in _NAMING_RELATIONS:
+        return None
+
+    resolution = resolve(proposed)
+    if resolution is None:
+        return claim
+
+    relation = resolution.relation
+    if resolution.swap:
+        claim = {**claim, "src": claim["dst"], "dst": claim["src"]}
+
+    claim = {**claim, "rel": relation.name}
+    if proposed != relation.name:
+        claim["proposed_rel"] = proposed
+
+    if _fits(relation, claim):
+        return claim
+
+    flipped = {**claim, "src": claim["dst"], "dst": claim["src"]}
+    return flipped if _fits(relation, flipped) else None
+
+
+def _fits(relation: Relation, claim: dict[str, Any]) -> bool:
+    """Do this claim's ends have the kinds the relation says they should?"""
+    return claim["src"]["kind"] == relation.src_kind and claim["dst"]["kind"] == relation.dst_kind
 
 
 async def _watermark(db: AsyncSession, session_id: str) -> int:

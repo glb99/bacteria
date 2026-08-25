@@ -10,6 +10,17 @@
  * Written against a running server rather than starting one, so it is the same
  * process a person is looking at when they report something. `just e2e` supplies
  * the key.
+ *
+ * **Nothing here writes**, and that is a constraint rather than a preference.
+ * The first version retracted whichever claim came first and linked whichever
+ * nodes came first, against a real graph — and ate eight assertions across a few
+ * runs, including the pair a succession was resting on. Seeding a graph of its
+ * own needs a route that creates assertions, and none exists.
+ *
+ * So these check the wiring up to the moment of the write: a confirmation arms
+ * and disarms, an ineligible partner is not offered, a row is actually reachable.
+ * Every defect this file was written for lived there. What happens *after* the
+ * request is the backend suite's job, where the data is disposable.
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -19,11 +30,21 @@ const KEY = process.env["BACTERIA_KEY"] ?? "";
 async function signIn(page: Page): Promise<void> {
   await page.goto("/");
   // The console exchanges a key for a session cookie; a saved session skips it.
+  // The console decides *asynchronously* whether a stored session still works,
+  // so immediately after `goto` both panels are hidden. Asking "is the key field
+  // visible" then answers no, the sign-in is skipped, and every later assertion
+  // fails as "#workspace is hidden" — a rendering bug that is really this race.
+  await expect(page.locator("#sign-in, #workspace").first()).toBeVisible();
+
   const field = page.locator("#key");
   if (await field.isVisible().catch(() => false)) {
     await field.fill(KEY);
     await page.locator("#sign-in-form button").click();
   }
+  // Wait for the exchange to finish before reaching for a tab. Clicking earlier
+  // hits a hidden workspace and fails as "#graph is hidden", which reads like a
+  // rendering bug and is a race in this helper.
+  await expect(page.locator("#workspace")).toBeVisible();
   await page.locator('[data-tab="graph"]').click();
   await expect(page.locator("#graph")).toBeVisible();
 }
@@ -37,36 +58,13 @@ test("the graph tab renders rather than failing silently", async ({ page }) => {
   await expect(page.locator("#graph-legend")).toContainText("things");
 });
 
-test("retract asks once and then acts", async ({ page }) => {
-  await signIn(page);
-
-  const claims = page.locator("#graph li.node", { has: page.locator("p.claim") });
-  const before = await claims.count();
-  test.skip(before === 0, "no claims in this graph to retract");
-
-  // Located by class rather than by text, because the text is what changes.
-  // Filtering on "retract" made the armed button unfindable and the failure read
-  // as "the click did nothing" — which is the very report this test exists for.
-  const button = claims.first().locator("button.danger");
-  await button.click();
-
-  // Armed, not fired.
-  await expect(button).toHaveText("sure?");
-  await expect(claims).toHaveCount(before);
-
-  // The second defect: a `document` listener registered with `capture: true`
-  // disarmed this on the way down, so the confirming click re-armed instead of
-  // acting and the claim could never be retracted.
-  await button.click();
-  await expect(claims).toHaveCount(before - 1);
-});
-
 test("an abandoned confirmation resets rather than waiting to catch someone", async ({ page }) => {
   await signIn(page);
 
   const claims = page.locator("#graph li.node", { has: page.locator("p.claim") });
   test.skip((await claims.count()) === 0, "no claims in this graph");
 
+  // Armed and abandoned, never confirmed, so this one writes nothing.
   const button = claims.first().locator("button.danger");
   await button.click();
   await expect(button).toHaveText("sure?");
@@ -92,38 +90,6 @@ async function rowsOfKind(page: Page, kind: string): Promise<number[]> {
   return found;
 }
 
-test("linking takes two clicks on two nodes", async ({ page }) => {
-  await signIn(page);
-
-  const things = thingsSection(page);
-  const rows = things.locator("li.node");
-  const people = await rowsOfKind(page, "person");
-  test.skip(people.length < 2, "fewer than two people to link");
-
-  // The last button on the row: its label alternates between "same as…" and
-  // "picked", so anything matching on text stops matching the moment it is used.
-  await rows.nth(people[0]!).locator("button").last().click();
-
-  // The pending half is the only state on this page a person cannot otherwise
-  // see, so it has to be named.
-  await expect(things).toContainText("Linking");
-
-  // Asserted on the request rather than on a row count, and both earlier
-  // versions of this line were wrong in instructive ways. Asserting a `same_as`
-  // claim *existed* passed without the click doing anything, because one already
-  // did. Counting rows then failed whenever the pair was already linked, since
-  // restating a believed claim is correctly not written again. What the click
-  // owes is a successful call.
-  const posted = page.waitForResponse(
-    (r) => r.url().includes("/graph/links") && r.request().method() === "POST",
-  );
-
-  await rows.nth(people[1]!).locator("button").last().click();
-
-  expect((await posted).status()).toBe(201);
-  await expect(things).not.toContainText("Linking");
-});
-
 test("a node of another kind cannot be picked as the other half", async ({ page }) => {
   await signIn(page);
 
@@ -139,4 +105,32 @@ test("a node of another kind cannot be picked as the other half", async ({ page 
   // and saying so in the legend, six inches from the button. Not offered now.
   await expect(rows.nth(others[0]!).locator("button").last()).toBeDisabled();
   await expect(thingsSection(page)).toContainText("pick another person");
+});
+
+
+test("the other nodes are reachable, not merely present", async ({ page }) => {
+  await signIn(page);
+
+  const rows = thingsSection(page).locator("li.node");
+  const people = await rowsOfKind(page, "person");
+  test.skip(people.length < 2, "fewer than two people");
+
+  await rows.nth(people[0]!).locator("button").last().click();
+  // Wait for the redraw before measuring: a box read mid-replace is null, which
+  // would fail for a reason that has nothing to do with reachability.
+  await expect(thingsSection(page)).toContainText("Linking");
+
+  // Asserted on geometry, because every DOM assertion in this file passed while
+  // the section was crammed into one 15rem grid column: the buttons were present
+  // and enabled, the labels wrapped to a character per line, and the whole thing
+  // was unusable. "Present and enabled" is not "reachable".
+  const partner = rows.nth(people[1]!).locator("button").last();
+  const box = await partner.boundingBox();
+
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeGreaterThan(40);
+  expect(box!.height).toBeGreaterThan(12);
+
+  const label = await rows.nth(people[1]!).locator("span.value").boundingBox();
+  expect(label!.width).toBeGreaterThan(30);
 });

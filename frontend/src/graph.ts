@@ -323,7 +323,7 @@ function renderNodes(nodes: GraphNode[]): HTMLElement[] {
   if (nodes.length === 0) return [];
 
   const section = document.createElement("section");
-  section.className = "cluster";
+  section.className = "cluster wide";
   section.append(text("h3", "Things"));
 
   // The pending state says which node is waiting and offers the way out, because
@@ -424,7 +424,7 @@ function renderConflicts(conflicts: GraphConflict[], assertions: GraphAssertion[
 
   const claims = new Map(assertions.map((a) => [a.assertion_id, a]));
   const section = document.createElement("section");
-  section.className = "cluster";
+  section.className = "cluster wide";
   section.append(text("h3", "Disagreements"));
 
   const list = document.createElement("ul");
@@ -453,7 +453,7 @@ function renderConclusions(conclusions: GraphConclusion[]): HTMLElement[] {
   if (conclusions.length === 0) return [];
 
   const section = document.createElement("section");
-  section.className = "cluster";
+  section.className = "cluster wide";
   section.append(text("h3", "Things it worked out"));
   section.append(text("p", "drawn from the claims, not stated by anyone", "derivation"));
 

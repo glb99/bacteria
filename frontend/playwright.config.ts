@@ -9,7 +9,12 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 15_000,
+  timeout: 30_000,
+  // Above the 5s default: signing in exchanges a key, and the console then
+  // fetches the graph and its conclusions before a tab can be asserted on. Under
+  // a run of several files that reliably passed 5s, and the failure read as
+  // "#workspace is hidden" -- a rendering bug that was a timeout.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: process.env["BACTERIA_URL"] ?? "http://127.0.0.1:8000",
     // On by default: the failures here are visual and sequential, and a trace is

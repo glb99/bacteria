@@ -484,6 +484,18 @@ code {
   margin-bottom: 0.15rem;
 }
 
+/* A section about the whole graph rather than one facet of it.
+ *
+ * The columns exist to slice claims by subject or relation, and a list of every
+ * node -- or every disagreement, or every conclusion -- is not a slice. Left in
+ * a 15rem column, a node row had a label, a kind and two buttons to fit and gave
+ * the label whatever was left, which was a character per line: "A c m e". The
+ * buttons were present, enabled, and pushed against the edge, which is what "no
+ * interface to click the other thing" looks like from the other side. */
+.cluster.wide {
+  grid-column: 1 / -1;
+}
+
 .derivation {
   margin: 0 0 0.5rem;
   color: var(--muted);
@@ -501,6 +513,7 @@ code {
 
 .node {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: baseline;
   padding: 0.3rem 0.45rem;
@@ -512,6 +525,10 @@ code {
 .node .value {
   color: var(--muted);
   overflow-wrap: anywhere;
+  /* Enough to hold a name before anything else may take space. Without it flex
+   * shrinks the label first, because it is the item that *can* wrap -- and the
+   * result is a column of single letters beside two perfectly legible buttons. */
+  min-width: 6rem;
   /* Pushes the tags right as a group. It was on `.tag` itself, which was correct
      while there was only ever one and puts a gap between them once there are
      two. */

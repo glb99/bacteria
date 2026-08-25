@@ -118,6 +118,19 @@ class Settings(BaseSettings):
             not discover it on a bill. Nothing it produces can reach a model
             without a human activating it, so the risk of leaving it on is
             expense and review backlog rather than behaviour.
+        graph_backed_memory: Whether keyed memory is read from and written to the
+            assertion graph instead of ``chat_memory_entry`` and its siblings.
+
+            **Off by default**, and a whole-deployment choice rather than a
+            per-request one. A store selected per call would make "which memory
+            answered" unanswerable exactly when the two disagree, which is the
+            question this setting exists to let somebody ask.
+
+            On, memory starts **empty**: nothing extracts a preference into the
+            graph yet, so a deployment that flips this loses its memory until
+            somebody states one. That is the honest state of step two and is why
+            the default is the store that works.
+
         graph_extraction_enabled: Whether a turn queues a job to read the new
             transcript items and record *relationships* from them in the memory
             graph.
@@ -205,6 +218,7 @@ class Settings(BaseSettings):
     run_worker_in_api: bool = False
     worker_concurrency: int = 4
     memory_extraction_enabled: bool = False
+    graph_backed_memory: bool = False
     graph_extraction_enabled: bool = False
     graph_extraction_model: str | None = None
     graph_extraction_max_assertions: int = 8

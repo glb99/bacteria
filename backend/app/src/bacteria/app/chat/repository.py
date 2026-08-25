@@ -60,6 +60,7 @@ from bacteria.app.chat.models import (
     ChatTranscriptItem,
     ChatUserMemoryEntry,
 )
+from bacteria.app.core.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,24 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def _configured_store(session: AsyncSession) -> MemoryStore:
+    """The store this deployment chose, defaulting to the tables that work.
+
+    Read here rather than at every call site, so that "which memory is in use" is
+    one answer for the process rather than a thing each caller could get
+    differently -- which is the property that makes a discrepancy between the two
+    attributable to the stores rather than to the caller.
+    """
+    if get_settings().graph_backed_memory:
+        # Imported here rather than at module scope: the graph store imports the
+        # graph package, which imports this one for its own models, and a
+        # top-level import would close the cycle.
+        from bacteria.app.chat.graph_memory import GraphMemoryStore
+
+        return GraphMemoryStore(session)
+    return TableMemoryStore(session)
+
+
 class SqlSessionRepository:
     """Stores agent sessions in a relational database.
 
@@ -169,7 +188,7 @@ class SqlSessionRepository:
         # graph's memory passes one; ADR 0010 puts that choice in configuration
         # rather than per request, because a store chosen per call makes "which
         # memory answered" unanswerable exactly when the two disagree.
-        self._memory: MemoryStore = memory or TableMemoryStore(session)
+        self._memory: MemoryStore = memory or _configured_store(session)
 
     async def create_session(self, user_id: str) -> Session:
         row = ChatSession(session_id=str(uuid.uuid4()), user_id=user_id)

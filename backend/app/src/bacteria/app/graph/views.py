@@ -44,6 +44,7 @@ from bacteria.app.core.dependencies import DbSession
 from bacteria.app.graph.catalogue import functional
 from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.constraints import conflicts_for
+from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import (
     SqlGraphRepository,
     UnknownAssertionError,
@@ -162,7 +163,7 @@ async def read_graph(principal: CurrentPrincipal, db: DbSession) -> GraphOut:
     caching is a comparison over a set small enough to walk.
     """
     repository = SqlGraphRepository(db)
-    believed = await repository.current(principal.id)
+    believed = _one_row_per_claim(await repository.current(principal.id))
     conclusions = await repository.depending_on(principal.id, [a.assertion_id for a in believed])
 
     conflicts = [
@@ -233,6 +234,31 @@ def _conclusion_out(conclusion: Conclusion) -> ConclusionOut:
         recorded_at=conclusion.recorded_at,
         evidence=list(conclusion.evidence),
     )
+
+
+def _one_row_per_claim(believed: list[Assertion]) -> list[Assertion]:
+    """One line per belief, where the log keeps one row per *event*.
+
+    Confirming appends: the proposal stays and the endorsement is a second row
+    with the same triple and a different ``origin``. That is right for a log —
+    two things happened — and wrong for a page, where it read as the claim
+    having been duplicated by the act of agreeing with it.
+
+    **The endorsement wins**, so the id every affordance targets is the confirmed
+    one and ``origin`` renders as *confirmed* rather than as a proposal that also
+    happens to be confirmed somewhere off screen.
+
+    Conflicts are computed after this, and must be: two rows for one claim would
+    otherwise be compared against each other, and a functional relation would
+    report a person as contradicting themselves by agreeing.
+    """
+    kept: dict[tuple[str, str, str, object, object], Assertion] = {}
+    for claim in believed:
+        key = (claim.src, claim.rel, claim.dst, claim.valid.start, claim.valid.end)
+        held = kept.get(key)
+        if held is None or (held.origin != "stated" and claim.origin == "stated"):
+            kept[key] = claim
+    return list(kept.values())
 
 
 def _render_end(end: Optional[datetime]) -> str:

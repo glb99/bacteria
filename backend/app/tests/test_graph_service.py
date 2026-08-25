@@ -10,6 +10,7 @@ that moved.
 Real Postgres. Start it with `just db-up`.
 """
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -21,9 +22,11 @@ from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import (
     LabelTakenError,
     MismatchedKindsError,
+    Preference,
     link,
     observe,
     owner,
+    preferences_for,
     reject,
     rename,
     retract,
@@ -441,3 +444,116 @@ async def test_a_link_can_be_retracted_like_any_other_claim(repo):
     await retract(repo, await repo.assertion(USER, "l1"), now=W4)
 
     assert [a.assertion_id for a in await repo.current(USER)] == []
+
+
+def _pref(
+    assertion_id: str, rel: str, value: str, *, origin: str, recorded_at, **over
+) -> Assertion:
+    return Assertion(
+        assertion_id=assertion_id,
+        user_id=USER,
+        src="owner",
+        rel=rel,
+        dst=value,
+        valid=Interval(None, OPEN_ENDED),
+        recorded_at=recorded_at,
+        origin=origin,
+        **over,
+    )
+
+
+async def _seed_prefs(repo, *assertions) -> str:
+    """Record preferences against the owner node, whose id is derived."""
+    me = await owner(repo, USER, now=W1)
+    await repo.record([replace(a, src=me.node_id) for a in assertions])
+    return me.node_id
+
+
+async def test_a_stated_preference_becomes_a_keyed_answer(repo):
+    """The relation is the key -- no keying mechanism of its own is needed.
+
+    One slot per key and one dst per (src, rel) at a time are the same statement,
+    and the catalogue already made the second.
+    """
+    value = await repo.mint_node(USER, "value", "concise", now=W1)
+    await _seed_prefs(repo, _pref("p1", "tone", value.node_id, origin="stated", recorded_at=W1))
+
+    assert await preferences_for(repo, USER) == [Preference(key="tone", value="concise")]
+
+
+async def test_an_extracted_preference_is_not_spoken(repo):
+    """What keeps "memory is written by the owner, not the model" true.
+
+    The model does nearly all of the writing here. It may propose a preference;
+    it cannot make its proposal speakable, because everything it writes is
+    `inferred` and only an act of the owner's reaches `stated`.
+    """
+    value = await repo.mint_node(USER, "value", "concise", now=W1)
+    await _seed_prefs(repo, _pref("p1", "tone", value.node_id, origin="inferred", recorded_at=W1))
+
+    assert await preferences_for(repo, USER) == []
+
+
+async def test_a_session_scoped_preference_narrows_rather_than_widens(repo):
+    value = await repo.mint_node(USER, "value", "spanish", now=W1)
+    await _seed_prefs(
+        repo,
+        _pref(
+            "p1",
+            "language",
+            value.node_id,
+            origin="stated",
+            recorded_at=W1,
+            scope="session",
+            session_id="s1",
+        ),
+    )
+
+    assert await preferences_for(repo, USER, session_id="s1") != []
+    assert await preferences_for(repo, USER, session_id="s2") == []
+    assert await preferences_for(repo, USER) == []
+
+
+async def test_two_answers_for_one_key_resolve_to_the_newer(repo):
+    """A caller that asked for the tone needs *an* answer.
+
+    The contradiction is already flagged by the constraint layer, so returning
+    nothing here would hide a dispute behind a missing key rather than surface it.
+    """
+    terse = await repo.mint_node(USER, "value", "concise", now=W1)
+    long = await repo.mint_node(USER, "value", "thorough", now=W1)
+    await _seed_prefs(
+        repo,
+        _pref("p1", "tone", terse.node_id, origin="stated", recorded_at=W1),
+        _pref("p2", "tone", long.node_id, origin="stated", recorded_at=W3),
+    )
+
+    assert await preferences_for(repo, USER) == [Preference(key="tone", value="thorough")]
+
+
+async def test_a_fact_about_a_thing_is_not_a_preference(repo):
+    """`mother` is functional and points at a person, so it has no key."""
+    await _seed_prefs(repo, _pref("p1", "mother", "person:x", origin="stated", recorded_at=W1))
+
+    assert await preferences_for(repo, USER) == []
+
+
+async def test_ratifying_what_the_model_guessed_is_not_a_repeat(repo):
+    """`origin` is in the repeat key where `trust` deliberately is not.
+
+    A claim arriving through a different channel is news about the channel. The
+    owner confirming what the model guessed is news about the world, and
+    swallowing it as a restatement would make ratification impossible to record.
+    """
+    value = await repo.mint_node(USER, "value", "concise", now=W1)
+    me = await owner(repo, USER, now=W1)
+    guessed = replace(
+        _pref("p1", "tone", value.node_id, origin="inferred", recorded_at=W1), src=me.node_id
+    )
+    await observe(repo, [guessed], now=W1)
+
+    stated = replace(guessed, assertion_id="p2", origin="stated", recorded_at=W3)
+    outcome = await observe(repo, [stated], now=W3)
+
+    assert outcome.recorded == 1
+    assert await preferences_for(repo, USER) == [Preference(key="tone", value="concise")]

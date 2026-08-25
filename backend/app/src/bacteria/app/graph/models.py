@@ -177,6 +177,33 @@ class GraphAssertion(SQLModel, table=True):
     session_id: Optional[str] = Field(default=None, index=True)
     run_id: Optional[str] = Field(default=None, index=True)
 
+    origin: str = Field(default="inferred", index=True)
+    """Whether anybody meant this, as against how it arrived.
+
+    ``stated`` when the owner said it, ``inferred`` when something worked it out.
+    ``trust`` answers a different question and was never asked this one: it
+    records which *channel* a claim came through, and after the first turn
+    essentially every transcript slice contains an assistant message, so the tier
+    reads ``third-party`` whoever was speaking.
+
+    *Which channel* and *did anyone mean it* come apart exactly where it matters.
+    A projection has to answer the second before it may speak, which is why this
+    is a column and not an implication of which table a row is in.
+
+    Indexed because the projection filters on it on every read.
+    """
+
+    scope: str = Field(default="user")
+    """Where a claim applies, as against where it came from.
+
+    ``user`` everywhere, ``session`` only within the conversation named by
+    ``session_id``. The existing column answers provenance and cannot answer
+    this: a fact learned in one conversation usually applies to all of them.
+
+    Together the pair reproduces the agent's own session/user memory scopes
+    without inventing a third concept.
+    """
+
     closed_by: Optional[str] = Field(default=None)
     """Which act ended belief in this claim, or ``None`` while it is believed.
 

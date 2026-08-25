@@ -84,7 +84,9 @@ Return ONLY a JSON array, with no prose and no code fence. Each element:
    "reason": "..."}
 
   src, dst - the two things related. `label` is the name as written; `kind` is
-             one of: person, organization, place, project, topic.
+             one of: person, organization, place, project, topic, value.
+             Use "value" only for the object of a preference — a word like
+             "concise" or "spanish", not a thing anyone could point at.
   rel       - the relationship, lower_snake_case, read as "src rel dst".
               Prefer one of the known relationships below, which are listed with
               the direction they are read in. Use your own short noun only when
@@ -155,13 +157,20 @@ Not built:
     that query rather than in advance of it.
 """
 
-_KINDS = frozenset({"person", "organization", "place", "project", "topic"})
+_KINDS = frozenset({"person", "organization", "place", "project", "topic", "value"})
 """What a node may be.
 
 A closed set, checked rather than trusted. An open one means the same thing
 arrives as "person", "human" and "individual" across three runs and becomes three
 node kinds — the vocabulary drift that makes a graph unusable, arriving one
 reasonable-looking answer at a time.
+
+``value`` is the odd member and is admitted knowingly. The others are things a
+person could point at; ``concise`` is a word. It is the object of a preference —
+``self —tone→ concise`` — and the alternative was a property table that evidence
+could never cite, because evidence is a foreign key to the assertion log. ADR
+0008 argues it at length. The cost is that ``graph_node`` now holds two sorts of
+row, and nothing enforces that a value is only ever a ``dst``.
 """
 
 _NAMING_RELATIONS = frozenset(

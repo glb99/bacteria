@@ -23,10 +23,11 @@ path — the agent's ADR 0017 boundary, unchanged by any of this.
 
 import uuid
 from dataclasses import dataclass, field, replace
-from datetime import datetime
-from typing import Sequence
+from datetime import datetime, timezone
+from typing import Optional, Sequence
 
 from bacteria.app.graph.catalogue import CATALOGUE, Relation
+from bacteria.app.graph.catalogue import preferences as preference_relations
 from bacteria.app.graph.conclusions import Conclusion, stale_after
 from bacteria.app.graph.constraints import Conflict, conflicts_for
 from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
@@ -271,9 +272,24 @@ def _unrepeated(assertions: Sequence[Assertion], believed: Sequence[Assertion]) 
     return fresh
 
 
-def _claim_of(assertion: Assertion) -> tuple[str, str, str, str, Interval]:
-    """What makes two assertions the same claim, for the purpose above."""
-    return (assertion.user_id, assertion.src, assertion.rel, assertion.dst, assertion.valid)
+def _claim_of(assertion: Assertion) -> tuple[str, str, str, str, Interval, str]:
+    """What makes two assertions the same claim, for the purpose above.
+
+    ``origin`` is in the key and ``trust`` is deliberately not, and the pair reads
+    as inconsistent until you ask what each says. A claim arriving through a
+    different channel is news about the channel; the **owner confirming what the
+    model guessed is news about the world**, and it is how a proposal becomes
+    something a projection may speak. Swallowing that as a restatement would make
+    ratification impossible to record.
+    """
+    return (
+        assertion.user_id,
+        assertion.src,
+        assertion.rel,
+        assertion.dst,
+        assertion.valid,
+        assertion.origin,
+    )
 
 
 async def revise(
@@ -417,6 +433,69 @@ async def _node(repository: SqlGraphRepository, user_id: str, node_id: str) -> N
     if found is None:
         raise UnknownNodeError(node_id)
     return found
+
+
+@dataclass(frozen=True)
+class Preference:
+    """One keyed fact the graph is willing to have spoken."""
+
+    key: str
+    value: str
+
+
+async def preferences_for(
+    repository: SqlGraphRepository,
+    user_id: str,
+    *,
+    session_id: Optional[str] = None,
+    relations: Sequence[Relation] = (),
+) -> list[Preference]:
+    """The graph as keyed memory: one answer per key, or none.
+
+    **The projection, and it is mechanical.** For each preference relation, the
+    believed claim the owner stated, rendered as key and value. No ranking, no
+    model call, no choice — the relation *is* the key, because "one slot per key"
+    and "one ``dst`` per ``(src, rel)`` at a time" are the same statement and the
+    catalogue already says the second.
+
+    **Only what the owner stated.** An extracted preference is ``inferred`` and
+    does not appear here however confident it looks, which is what keeps the
+    agent's rule — *memory is written by the owner, not the model* — true of a
+    system where the model does nearly all of the writing. The model may propose;
+    it cannot make its proposal speakable.
+
+    **Session scope narrows, it does not widen.** A claim scoped to a session
+    appears only when that session is the one asking; a user-scoped claim always
+    does.
+
+    Two believed answers for one key is a contradiction the constraint layer has
+    already flagged, and this takes the most recently recorded — because a caller
+    that asked for the tone needs *an* answer, and returning none for a key under
+    dispute is worse than returning the newer of two.
+    """
+    wanted = {r.name for r in (relations or preference_relations())}
+    if not wanted:
+        return []
+
+    owner_node = await owner(repository, user_id, now=datetime.now(timezone.utc))
+    labels = {n.node_id: n.label for n in await repository.nodes(user_id)}
+
+    newest: dict[str, Assertion] = {}
+    for claim in await repository.current(user_id):
+        if claim.rel not in wanted or claim.origin != "stated":
+            continue
+        if claim.src != owner_node.node_id:
+            continue
+        if claim.scope == "session" and claim.session_id != session_id:
+            continue
+        held = newest.get(claim.rel)
+        if held is None or claim.recorded_at > held.recorded_at:
+            newest[claim.rel] = claim
+
+    return [
+        Preference(key=rel, value=labels.get(claim.dst, claim.dst))
+        for rel, claim in sorted(newest.items())
+    ]
 
 
 async def retract(

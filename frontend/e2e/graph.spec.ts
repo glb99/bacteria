@@ -76,30 +76,67 @@ test("an abandoned confirmation resets rather than waiting to catch someone", as
   await expect(button).toHaveText("retract");
 });
 
+function thingsSection(page: Page) {
+  return page.locator("#graph section", {
+    has: page.getByRole("heading", { name: "Things", exact: true }),
+  });
+}
+
+/** Row indexes whose node is of the given kind, in render order. */
+async function rowsOfKind(page: Page, kind: string): Promise<number[]> {
+  const rows = thingsSection(page).locator("li.node");
+  const found: number[] = [];
+  for (let i = 0; i < (await rows.count()); i++) {
+    if ((await rows.nth(i).innerText()).includes(kind)) found.push(i);
+  }
+  return found;
+}
+
 test("linking takes two clicks on two nodes", async ({ page }) => {
   await signIn(page);
 
-  const things = page.locator("#graph section", {
-    has: page.getByRole("heading", { name: "Things", exact: true }),
-  });
+  const things = thingsSection(page);
   const rows = things.locator("li.node");
-  test.skip((await rows.count()) < 2, "fewer than two nodes to link");
+  const people = await rowsOfKind(page, "person");
+  test.skip(people.length < 2, "fewer than two people to link");
 
   // The last button on the row: its label alternates between "same as…" and
   // "picked", so anything matching on text stops matching the moment it is used.
-  await rows.nth(0).locator("button").last().click();
+  await rows.nth(people[0]!).locator("button").last().click();
 
   // The pending half is the only state on this page a person cannot otherwise
   // see, so it has to be named.
   await expect(things).toContainText("Linking");
 
-  await rows.nth(1).locator("button").last().click();
+  // Asserted on the request rather than on a row count, and both earlier
+  // versions of this line were wrong in instructive ways. Asserting a `same_as`
+  // claim *existed* passed without the click doing anything, because one already
+  // did. Counting rows then failed whenever the pair was already linked, since
+  // restating a believed claim is correctly not written again. What the click
+  // owes is a successful call.
+  const posted = page.waitForResponse(
+    (r) => r.url().includes("/graph/links") && r.request().method() === "POST",
+  );
 
-  // Either a link was written, or the API refused for a reason it stated. Both
-  // are outcomes; silence is not.
-  await expect(async () => {
-    const linked = await page.locator("#graph .claim", { hasText: "same_as" }).count();
-    const reported = await page.locator("#graph-legend .failed").count();
-    expect(linked + reported).toBeGreaterThan(0);
-  }).toPass({ timeout: 5000 });
+  await rows.nth(people[1]!).locator("button").last().click();
+
+  expect((await posted).status()).toBe(201);
+  await expect(things).not.toContainText("Linking");
+});
+
+test("a node of another kind cannot be picked as the other half", async ({ page }) => {
+  await signIn(page);
+
+  const rows = thingsSection(page).locator("li.node");
+  const people = await rowsOfKind(page, "person");
+  const others = await rowsOfKind(page, "organization");
+  test.skip(people.length === 0 || others.length === 0, "need two kinds present");
+
+  await rows.nth(people[0]!).locator("button").last().click();
+
+  // This is the report that opened the investigation: clicking a second node and
+  // seeing nothing happen. It was the API refusing a person-to-organization link
+  // and saying so in the legend, six inches from the button. Not offered now.
+  await expect(rows.nth(others[0]!).locator("button").last()).toBeDisabled();
+  await expect(thingsSection(page)).toContainText("pick another person");
 });

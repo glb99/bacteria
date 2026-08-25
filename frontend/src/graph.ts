@@ -61,6 +61,16 @@ let layout: Layout = "subject";
 let pendingLink: string | null = null;
 
 /**
+ * Why the last link was refused, shown beside the act rather than in the legend.
+ *
+ * A refusal reported at the bottom of the page is a refusal nobody reads: the
+ * first version put "cannot link a person to an organization" in the legend, six
+ * inches from the button that had just done nothing, and the honest description
+ * of that from the other side of the screen is "I click and nothing happens".
+ */
+let linkError: string | null = null;
+
+/**
  * Run one act, then redraw.
  *
  * Errors are surfaced on the page rather than thrown into an event handler,
@@ -324,13 +334,17 @@ function renderNodes(nodes: GraphNode[]): HTMLElement[] {
   if (waiting) {
     const banner = document.createElement("p");
     banner.className = "derivation";
-    banner.append(text("span", `Linking “${waiting.label}” — pick the other node.`));
+    banner.append(
+      text("span", `Linking “${waiting.label}” — pick another ${waiting.kind}.`),
+    );
     banner.append(
       action("cancel", "quiet", async () => {
         pendingLink = null;
+        linkError = null;
       }),
     );
     section.append(banner);
+    if (linkError) section.append(text("p", linkError, "failed"));
   } else {
     section.append(
       text("p", "Two nodes for one thing are linked, never merged: both keep their claims.", "derivation"),
@@ -341,6 +355,11 @@ function renderNodes(nodes: GraphNode[]): HTMLElement[] {
   for (const node of nodes) {
     const item = document.createElement("li");
     const arming = pendingLink === node.node_id;
+    // A link is between two things of one kind, so while one is waiting the
+    // others are not all candidates. Refusing at the API and reporting it is a
+    // worse answer than not offering the click: the person learns the rule by
+    // seeing which rows stay available.
+    const eligible = waiting === undefined || node.kind === waiting.kind;
     item.className = `node${arming ? " proposed" : ""}`;
     item.append(text("span", node.label, "value"));
     item.append(text("span", node.kind, "tag"));
@@ -357,22 +376,47 @@ function renderNodes(nodes: GraphNode[]): HTMLElement[] {
     );
 
     item.append(
-      action(arming ? "picked" : "same as…", "quiet", async () => {
-        // Read at click time rather than from the closure, so a stale render
-        // cannot make the second click behave like a first one.
-        if (pendingLink === null || pendingLink === node.node_id) {
-          pendingLink = pendingLink === node.node_id ? null : node.node_id;
-          return;
-        }
-        const first = pendingLink;
-        pendingLink = null;
-        await linkNodes(first, node.node_id);
-      }),
+      linkButton(node, arming, eligible),
     );
     list.append(item);
   }
   section.append(list);
   return [section];
+}
+
+/**
+ * One node's half of the two-click link.
+ *
+ * **The pending node survives a refusal.** It used to be cleared before the
+ * request, so a rejected link put the person back at the start with nothing said
+ * and nothing selected — which is indistinguishable from the click having been
+ * ignored.
+ */
+function linkButton(node: GraphNode, arming: boolean, eligible: boolean): HTMLButtonElement {
+  const button = action(arming ? "picked" : "same as…", "quiet", async () => {
+    // Read at click time rather than from the closure, so a stale render cannot
+    // make the second click behave like a first one.
+    if (pendingLink === null || pendingLink === node.node_id) {
+      pendingLink = pendingLink === node.node_id ? null : node.node_id;
+      linkError = null;
+      return;
+    }
+    try {
+      await linkNodes(pendingLink, node.node_id);
+      pendingLink = null;
+      linkError = null;
+    } catch (failure) {
+      // Kept rather than rethrown, so the redraw still happens and the message
+      // lands in the section the person is looking at.
+      linkError = failure instanceof Error ? failure.message : String(failure);
+    }
+  });
+
+  if (!eligible) {
+    button.disabled = true;
+    button.title = "a link is between two things of the same kind";
+  }
+  return button;
 }
 
 function renderConflicts(conflicts: GraphConflict[], assertions: GraphAssertion[]): HTMLElement[] {

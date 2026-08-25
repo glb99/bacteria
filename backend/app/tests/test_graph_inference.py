@@ -10,7 +10,7 @@ Pure — no database, no fixtures.
 
 from datetime import datetime, timezone
 
-from bacteria.app.graph.constraints import FunctionalConstraint
+from bacteria.app.graph.catalogue import Relation
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
@@ -19,7 +19,14 @@ NOW = datetime(2026, 5, 25, tzinfo=timezone.utc)
 JAN = datetime(2026, 1, 15, tzinfo=timezone.utc)
 FEB = datetime(2026, 2, 15, tzinfo=timezone.utc)
 
-ONE_CTO = FunctionalConstraint(rel="cto", sentence="An organization has one CTO at a time.")
+ONE_CTO = Relation(
+    name="cto",
+    sentence="<dst> is the CTO of <src>",
+    invariant="An organization has one CTO at a time.",
+    src_kind="organization",
+    dst_kind="person",
+    functional=True,
+)
 
 
 def _role(assertion_id: str, holder: str, valid: Interval, *, user: str = "u1") -> Assertion:

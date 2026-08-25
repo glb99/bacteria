@@ -34,7 +34,8 @@ from pydantic import BaseModel
 
 from bacteria.app.auth.dependencies import CurrentPrincipal
 from bacteria.app.core.dependencies import DbSession
-from bacteria.app.graph.constraints import SEEDED
+from bacteria.app.graph.catalogue import functional
+from bacteria.app.graph.constraints import conflicts_for
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.temporal import OPEN_ENDED
 
@@ -139,13 +140,13 @@ async def read_graph(principal: CurrentPrincipal, db: DbSession) -> GraphOut:
     conflicts = [
         ConflictOut(
             rule=conflict.rule,
-            sentence=constraint.sentence,
+            sentence=relation.invariant or relation.sentence,
             left=conflict.left,
             right=conflict.right,
             state=conflict.state,
         )
-        for constraint in SEEDED
-        for conflict in constraint.conflicts(believed, conclusions=conclusions)
+        for relation in functional()
+        for conflict in conflicts_for(relation, believed, conclusions=conclusions)
     ]
 
     return GraphOut(

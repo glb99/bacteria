@@ -76,12 +76,23 @@ A new `app/graph/catalogue.py` holds one entry per canonical relation:
 @dataclass(frozen=True)
 class Relation:
     name: str
-    sentence: str  # "<src> works for <dst>" — read to the model and to a person
+    sentence: str  # "<src> works for <dst>" — how to read a claim
+    invariant: str | None  # "A person has one employer at a time." — the rule
     src_kind: str
     dst_kind: str
     functional: bool  # one at a time
     aliases: tuple[Alias, ...] = ()
 ```
+
+**`sentence` and `invariant` are two fields because they answer two questions**,
+and this record originally had one doing both. *"`<dst>` is the CTO of `<src>`"*
+says which way round to read a claim and is what the prompt needs; it states no
+rule, so a person shown a contradiction has nothing to disagree with. *"An
+organization has one CTO at a time"* is the rule and is what the console shows.
+0006 made that arguability load-bearing — a constraint here is a hypothesis about
+someone's world rather than something the system may enforce — so collapsing the
+two would have quietly dropped it. A route test caught it. `invariant` is `None`
+exactly when `functional` is false.
 
 `FunctionalConstraint` and `SEEDED` are folded into it. A constraint stops being
 a separate object and becomes `functional=True` on an entry, which also dissolves
@@ -167,9 +178,14 @@ should become, and it is how anyone learns that `interlocutor` is junk.
 
 ### 5. Aliases canonicalize, and carry a converse flag
 
-`called`, `name`, `alternative_name` → one relation. Extraction rewrites an
-aliased relation before the assertion is built, and the model's original word
-stays in `attrs`.
+`works_for`, `employed_by` → `employer`. Extraction rewrites an aliased relation
+before the assertion is built, and the model's original word stays in `attrs` as
+`proposed_rel`.
+
+*(This section first gave `called`, `name`, `alternative_name` → one relation as
+the example. That cannot be built: §9 decides those are not relationships at all,
+so there is no entry for them to alias to. The mechanism is unchanged; only the
+example was wrong.)*
 
 Collapsing is safe here in a way node merging is not. 0006 established that
 splitting one person across two nodes is recoverable and collapsing two people

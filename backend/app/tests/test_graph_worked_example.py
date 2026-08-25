@@ -24,8 +24,9 @@ Pure: no database, no fixtures, no model.
 
 from datetime import datetime, timezone
 
+from bacteria.app.graph.catalogue import Relation
 from bacteria.app.graph.conclusions import Conclusion, stale_after
-from bacteria.app.graph.constraints import FunctionalConstraint
+from bacteria.app.graph.constraints import conflicts_for
 from bacteria.app.graph.inference import infer_succession
 from bacteria.app.graph.log import Assertion, state_at, supersede
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
@@ -36,7 +37,14 @@ W3 = datetime(2026, 5, 18, tzinfo=timezone.utc)
 W4 = datetime(2026, 5, 25, tzinfo=timezone.utc)
 FEBRUARY = datetime(2026, 2, 15, tzinfo=timezone.utc)
 
-ONE_CTO = FunctionalConstraint(rel="cto", sentence="An organization has one CTO at a time.")
+ONE_CTO = Relation(
+    name="cto",
+    sentence="<dst> is the CTO of <src>",
+    invariant="An organization has one CTO at a time.",
+    src_kind="organization",
+    dst_kind="person",
+    functional=True,
+)
 USER = "user-1"
 
 
@@ -91,7 +99,7 @@ def test_week_three_is_a_contradiction_rather_than_a_correction():
     assertions, _ = _four_weeks()
     at_week_three = state_at(assertions, W3)
 
-    conflicts = ONE_CTO.conflicts(at_week_three)
+    conflicts = conflicts_for(ONE_CTO, at_week_three)
 
     assert [c.state for c in conflicts] == ["conflict"]
     assert {conflicts[0].left, conflicts[0].right} == {"a3", "a7"}
@@ -108,7 +116,7 @@ def test_week_four_leaves_the_conflict_undecided_rather_than_resolving_it():
     assertions, _ = _four_weeks()
     at_week_four = state_at(assertions, W4)
 
-    conflicts = ONE_CTO.conflicts(at_week_four)
+    conflicts = conflicts_for(ONE_CTO, at_week_four)
 
     assert [c.state for c in conflicts] == ["possible"]
 
@@ -132,7 +140,7 @@ def test_an_inference_explains_the_conflict_without_writing_a_date_anywhere():
     assert set(succession.conclusion.evidence) == {"a8", "a7"}
     assert succession.conclusion.derived_by == "constraint-inference"
 
-    explained = ONE_CTO.conflicts(at_week_four, conclusions=[succession.conclusion])
+    explained = conflicts_for(ONE_CTO, at_week_four, conclusions=[succession.conclusion])
     assert [c.state for c in explained] == ["explained"]
 
     # The claim itself is untouched: no assumed start reached the log.
@@ -154,7 +162,9 @@ def test_retracting_the_assumption_returns_the_conflict_to_undecided():
 
     withdrawn = [Conclusion(**{**succession.conclusion.__dict__, "status": "retracted"})]
 
-    assert [c.state for c in ONE_CTO.conflicts(at_week_four, conclusions=withdrawn)] == ["possible"]
+    assert [c.state for c in conflicts_for(ONE_CTO, at_week_four, conclusions=withdrawn)] == [
+        "possible"
+    ]
 
 
 def test_the_week_two_conclusion_goes_stale_when_its_evidence_is_revised():

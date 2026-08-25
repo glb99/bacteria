@@ -25,8 +25,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Optional, Sequence
 
+from bacteria.app.graph.catalogue import Relation
 from bacteria.app.graph.conclusions import Conclusion
-from bacteria.app.graph.constraints import FunctionalConstraint
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval, overlaps
 
@@ -57,7 +57,7 @@ class Succession:
 
 def infer_succession(
     assertions: Iterable[Assertion],
-    constraint: FunctionalConstraint,
+    relation: Relation,
     *,
     conclusion_id: str,
     now: datetime,
@@ -81,7 +81,7 @@ def infer_succession(
     not written to assertions at all. That is the point of returning a
     :class:`Succession` rather than an edited claim.
     """
-    believed = [a for a in assertions if a.rel == constraint.rel and a.recorded_until is None]
+    believed = [a for a in assertions if a.rel == relation.name and a.recorded_until is None]
     if not believed:
         return None
 
@@ -109,13 +109,13 @@ def infer_succession(
         conclusion_id=conclusion_id,
         user_id=successor.user_id,
         statement=(
-            f"{successor.dst} took over {constraint.rel} of {successor.src} "
+            f"{successor.dst} took over {relation.name} of {successor.src} "
             f"on {boundary.date().isoformat()}, when {predecessor.dst}'s tenure ended"
         ),
-        # Assertion ids only. The constraint that licensed this is named in the
+        # Assertion ids only. The rule that licensed this is named in the
         # statement rather than cited here, because evidence is a foreign key to
-        # the assertion log and a constraint is not an assertion — there is no
-        # row for it to point at. If constraints ever become assertions, this is
+        # the assertion log and the rule is a flag on a catalogue entry — there is
+        # no row for it to point at. If the catalogue ever becomes rows, this is
         # where the third id goes.
         evidence=(predecessor.assertion_id, successor.assertion_id),
         confidence=SUCCESSION_CONFIDENCE,

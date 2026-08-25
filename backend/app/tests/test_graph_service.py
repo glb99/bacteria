@@ -159,3 +159,64 @@ async def test_an_empty_observation_changes_nothing(repo):
     assert outcome.conflicts == []
     assert outcome.inferred == []
     assert not outcome.needs_attention
+
+
+async def test_a_claim_the_log_already_believes_is_not_written_again(repo):
+    """A fact restated next week is not a second fact.
+
+    The deterministic assertion id does not cover this and looked like it did.
+    It hashes the run's timestamp, deliberately, so that a genuine later
+    observation does not collide with the first — which means it collapses a
+    retried job and nothing else. Without this guard every re-mention appends a
+    believed copy and the projection returns N identical edges for one
+    relationship, which is what three mentions of the same parent in one
+    afternoon produced in real use.
+    """
+    await observe(repo, [_cto("a3", "person:diane", Interval(None, OPEN_ENDED), W1)], now=W1)
+
+    outcome = await observe(
+        repo, [_cto("a9", "person:diane", Interval(None, OPEN_ENDED), W3)], now=W3
+    )
+
+    assert outcome.recorded == 0
+    assert len(await repo.current(USER)) == 1
+
+
+async def test_the_same_pair_over_a_different_span_is_not_a_repeat(repo):
+    """ "She was their CTO until February" is not a restatement of "she is".
+
+    Keyed on the triple alone this would be swallowed and the correction lost,
+    which is the failure mode of making the guard above too eager. It is not a
+    revision either — nothing produces one from an extraction — so it lands
+    beside the first and the constraint layer is left to report the pair.
+    """
+    await observe(repo, [_cto("a3", "person:diane", Interval(None, OPEN_ENDED), W1)], now=W1)
+
+    outcome = await observe(
+        repo, [_cto("a9", "person:diane", Interval(None, FEBRUARY), W3)], now=W3
+    )
+
+    assert outcome.recorded == 1
+    assert len(await repo.current(USER)) == 2
+
+
+async def test_a_claim_repeated_inside_one_batch_is_written_once(repo):
+    """A model returning the same claim twice must not produce two rows.
+
+    Given ids minted the way extraction mints them the database would collapse
+    these anyway — same instant, same claim, same id, and ``record`` ignores
+    primary-key conflicts. Distinct ids here on purpose: the guarantee belongs to
+    the service, so a writer that mints ids some other way still gets it, and the
+    count reported back does not claim writes that never happened.
+    """
+    outcome = await observe(
+        repo,
+        [
+            _cto("a3", "person:diane", Interval(None, OPEN_ENDED), W1),
+            _cto("a4", "person:diane", Interval(None, OPEN_ENDED), W1),
+        ],
+        now=W1,
+    )
+
+    assert outcome.recorded == 1
+    assert len(await repo.current(USER)) == 1

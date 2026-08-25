@@ -237,3 +237,46 @@ async def test_an_absent_session_is_an_error_rather_than_a_quiet_zero(db):
     """A scheduling bug must not look like a conversation nobody spoke in."""
     with pytest.raises(UnknownSessionError):
         await extract_assertions(db, FakeClient(), "no-such-session", max_assertions=5, now=NOW)
+
+
+async def test_what_was_written_records_which_conversation_it_came_from(db):
+    """A claim nobody can trace back to a conversation cannot be judged.
+
+    The column existed, was indexed, and was never written, so every assertion
+    from the first fortnight of real use carries a null — provenance that looks
+    recorded and is not. Retracting one bad session's output needs it, and so
+    does anyone asking why a surprising claim is in their graph.
+    """
+    client = FakeClient(json.dumps([_claim("Acme", "cto", "Diane")]))
+
+    await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
+
+    stored = (await SqlGraphRepository(db).current(USER))[0]
+    assert stored.session_id == SESSION
+
+
+async def test_a_claim_restated_in_a_later_run_is_not_recorded_twice(db):
+    """Not the retry above: a later run stamps a different recorded time.
+
+    The assertion id is hashed from the claim *and* the run's timestamp, so a
+    fact mentioned again next week hashes differently and used to land as a
+    second believed row. This is the case that actually filled the log; the retry
+    it was designed for never happened.
+    """
+    payload = json.dumps([_claim("Acme", "cto", "Diane")])
+    await extract_assertions(db, FakeClient(payload), SESSION, max_assertions=5, now=NOW)
+
+    for seq, (role, text) in enumerate(
+        [("user", "Diane is still their CTO"), ("assistant", "Noted.")], start=2
+    ):
+        db.add(
+            ChatTranscriptItem(
+                session_id=SESSION, seq=seq, kind="message", payload={"role": role, "text": text}
+            )
+        )
+    await db.flush()
+
+    result = await extract_assertions(db, FakeClient(payload), SESSION, max_assertions=5, now=LATER)
+
+    assert (result.recorded, result.duplicates) == (0, 1)
+    assert len(await SqlGraphRepository(db).current(USER)) == 1

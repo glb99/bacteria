@@ -85,6 +85,7 @@ async def extract_assertions_task(session_id: str) -> dict[str, int]:
             "examined": result.examined,
             "recorded": result.recorded,
             "dropped": result.dropped,
+            "duplicates": result.duplicates,
             "conflicts": result.conflicts,
             "through_seq": result.through_seq,
         },
@@ -93,6 +94,7 @@ async def extract_assertions_task(session_id: str) -> dict[str, int]:
         "examined": result.examined,
         "recorded": result.recorded,
         "dropped": result.dropped,
+        "duplicates": result.duplicates,
         "conflicts": result.conflicts,
         "through_seq": result.through_seq,
     }

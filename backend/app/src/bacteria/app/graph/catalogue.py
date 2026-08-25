@@ -260,3 +260,39 @@ def vocabulary() -> str:
         suffix = f" (also: {synonyms})" if synonyms else ""
         lines.append(f"  {relation.name} - {relation.sentence}{suffix}")
     return "\n".join(lines)
+
+
+PROMOTION_THRESHOLD = 3
+"""How often a relation must recur before it is worth asking about.
+
+The rule of three, doing here what it does for object types: a shape seen once is
+an accident and a shape seen three times is a pattern. It is a threshold for
+*asking*, never for acting — nothing promotes a relation but an edit to
+:data:`CATALOGUE`.
+"""
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """A tail relation that has recurred often enough to be worth a look."""
+
+    name: str
+    count: int
+
+
+def promotable(tally: dict[str, int], *, threshold: int = PROMOTION_THRESHOLD) -> list[Candidate]:
+    """Which relations outside the catalogue have earned a question.
+
+    Pure, and takes the counts rather than fetching them, so the rule is testable
+    without a database and the query is somewhere a query belongs.
+
+    Sorted by how often each was seen, because a reader working down the list
+    should meet the strongest case first — and ties by name, so two runs over
+    unchanged data print the same thing and a diff means something.
+    """
+    candidates = [
+        Candidate(name, count)
+        for name, count in tally.items()
+        if count >= threshold and not is_canonical(name)
+    ]
+    return sorted(candidates, key=lambda c: (-c.count, c.name))

@@ -25,6 +25,7 @@ from bacteria.app.graph.repository import (
     SqlGraphRepository,
     UnknownAssertionError,
     UnknownConclusionError,
+    tally_relations,
 )
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
@@ -228,3 +229,26 @@ async def test_a_conclusion_status_cannot_be_changed_across_owners(repo):
 
     await repo.set_status("u2", "c1", "stale")
     assert (await repo.depending_on("u2", ["a3"]))[0].status == "stale"
+
+
+async def test_the_relation_tally_counts_across_every_owner(engine):
+    """The one unscoped read here, and the scope is the point.
+
+    The catalogue is a single literal shared by everybody, so whether a relation
+    is worth promoting is a question about the extractor's output rather than
+    about anyone's graph. Tallied per user, a name that nine people each used
+    twice would never reach the rule of three.
+    """
+    async with AsyncSession(engine) as session:
+        repo = SqlGraphRepository(session)
+        await repo.record(
+            [
+                _assertion("t1", Interval(None, OPEN_ENDED), user="tally-a", dst="person:one"),
+                _assertion("t2", Interval(None, OPEN_ENDED), user="tally-b", dst="person:two"),
+            ]
+        )
+        await session.commit()
+
+        tally = await tally_relations(session)
+
+    assert tally["cto"] >= 2, "both owners' rows are counted, not one owner's"

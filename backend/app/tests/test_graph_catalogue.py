@@ -13,6 +13,7 @@ from bacteria.app.graph.catalogue import (
     functional,
     is_canonical,
     lookup,
+    promotable,
     resolve,
     vocabulary,
 )
@@ -127,3 +128,23 @@ def test_the_prompt_block_does_not_advertise_a_converse_alias():
 
     assert "mother_of" not in block
     assert "employs" not in block
+
+
+def test_a_tail_relation_seen_three_times_is_worth_asking_about():
+    """The rule of three, deciding when to *ask* and never when to act."""
+    candidates = promotable({"pet": 3, "owns": 1})
+
+    assert [c.name for c in candidates] == ["pet"]
+    assert candidates[0].count == 3
+
+
+def test_a_canonical_relation_is_never_a_candidate():
+    """It is already in, so counting it says nothing anyone can act on."""
+    assert promotable({"employer": 99}) == []
+
+
+def test_candidates_lead_with_the_strongest_case_and_break_ties_by_name():
+    """Two runs over unchanged data must print the same thing, or a diff lies."""
+    candidates = promotable({"pet": 4, "owns": 9, "knows": 4})
+
+    assert [c.name for c in candidates] == ["owns", "knows", "pet"]

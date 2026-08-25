@@ -37,6 +37,8 @@ from bacteria.app.core.jobs import register_tasks
 from bacteria.app.core.settings import get_settings, load_env_file
 from bacteria.app.evaluation.checks import Policy, evaluate
 from bacteria.app.evaluation.runs import load_runs
+from bacteria.app.graph.catalogue import PROMOTION_THRESHOLD, promotable
+from bacteria.app.graph.repository import tally_relations
 
 
 async def _issue(principal_id: str, label: str) -> int:
@@ -534,6 +536,35 @@ async def _one_shot(handler, *args) -> int:
         return await handler(SqlSessionRepository(db), *args)
 
 
+async def _relations(threshold: int) -> int:
+    """Report relation names the extractor keeps producing and the catalogue lacks.
+
+    **A command rather than the periodic job ADR 0007 sketched**, and the reason
+    is in that record's own "not built": nothing acts on the count, and promotion
+    is an edit to a literal that a person makes. A scheduled job would write the
+    same list into a log nobody tails; asking is a thing someone *does*, so it is
+    a thing they run. When something ever acts on it, the query is already here
+    and the schedule is a wrapper.
+
+    Reports and never promotes. A relation appearing three times is a reason to
+    look, and the rule of three says nothing about whether a regularity is an
+    invariant — a wrongly admitted relation generates false contradictions
+    forever, which is worse than having none.
+    """
+    async with AsyncSession(get_engine()) as db:
+        candidates = promotable(await tally_relations(db), threshold=threshold)
+
+    if not candidates:
+        print(f"No relation outside the catalogue has been seen {threshold} times.")
+        return 0
+
+    print(f"Seen {threshold}+ times and not in the catalogue:")
+    for candidate in candidates:
+        print(f"  {candidate.count:>4}  {candidate.name}")
+    print("\nPromote one by adding it to CATALOGUE in bacteria/app/graph/catalogue.py.")
+    return 0
+
+
 async def _revoke(key_id: str) -> int:
     if keys.split(key_id) is not None:
         # A whole key was passed where an id belongs. Refused rather than
@@ -659,7 +690,19 @@ def main() -> int:
         help="proportion of runs allowed to have failed, 0 to 1",
     )
 
+    relations_cmd = commands.add_parser(
+        "relations", help="show relation names the catalogue does not cover"
+    )
+    relations_cmd.add_argument(
+        "--threshold",
+        type=int,
+        default=PROMOTION_THRESHOLD,
+        help="how many times a name must appear to be listed; the rule of three by default",
+    )
+
     args = parser.parse_args()
+    if args.command == "relations":
+        return platform.run(_relations(args.threshold))
     if args.command == "issue-key":
         return platform.run(_issue(args.principal_id, args.label or args.principal_id))
     if args.command == "chat":

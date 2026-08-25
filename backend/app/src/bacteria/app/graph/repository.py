@@ -34,7 +34,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -407,6 +407,29 @@ class SqlGraphRepository:
             col(GraphConclusionEvidence.conclusion_id) == conclusion_id
         )
         return list((await self._db.exec(statement)).all())
+
+
+async def tally_relations(db: AsyncSession) -> dict[str, int]:
+    """How many times each relation name has ever been written.
+
+    **The one read here that is not scoped to a user, and the exception is the
+    point.** Everything else keys by ``user_id`` because one person's graph must
+    never answer a question about another's. This does not answer a question
+    about anyone's graph: the catalogue is a single literal shared by everybody,
+    so "is this relation worth promoting" is a question about the extractor's
+    output, and asking it one user at a time would need three mentions from one
+    person before a name that nine people used could be seen. No labels, no
+    subjects and no objects are read — only which words appeared and how often.
+
+    A free function rather than a method for the same reason: it takes no owner,
+    so putting it on an owner-scoped repository would suggest it had one.
+
+    Counts the whole log rather than what is currently believed. A retracted
+    claim still evidences the vocabulary the extractor reaches for, which is what
+    this is measuring — not what is true.
+    """
+    statement = select(GraphAssertion.rel, func.count()).group_by(col(GraphAssertion.rel))
+    return {rel: count for rel, count in (await db.exec(statement)).all()}
 
 
 class UnknownAssertionError(KeyError):

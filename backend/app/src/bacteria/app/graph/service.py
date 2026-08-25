@@ -657,6 +657,12 @@ async def confirm(
 
     A second confirmation of the same claim writes nothing and reports nothing
     written, which is what the repeat rule is for: saying yes twice is one yes.
+
+    ``now`` must be later than the claim's own ``recorded_at``, and in practice
+    always is — a person confirms something they have read. Passing the same
+    instant collides on ``uq_assertion_claim_recorded``, which is the constraint
+    doing its job: at one moment there is one belief about a claim, and a
+    confirmation *is* a second belief about it.
     """
     stated = replace(
         assertion,

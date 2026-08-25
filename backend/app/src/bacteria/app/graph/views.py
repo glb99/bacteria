@@ -1,9 +1,15 @@
 """HTTP surface for looking at the memory graph.
 
-Read-only, deliberately and for now. Nothing here retracts a claim, accepts a
-conclusion or merges two nodes, because a destructive route should not exist
-before there is a way to see what it would destroy — and seeing is the harder
-half. The write routes are the next piece and they belong beside these.
+Reading and correcting. The read routes came first deliberately — a destructive
+route should not exist before there is a way to see what it would destroy, and
+seeing was the harder half — and the write routes are here now because the
+alternative is a person watching their own graph hold two mothers for them with
+no way to say so.
+
+**Every write is the owner's own, so none of them stage.** A person retracting
+their claim is the approver rather than the applicant, and the design's rule is
+that the owner's writes are never blocked. What stages is a proposal somebody
+else made, and nothing here makes one.
 
 **Ownership is structural rather than checked.** ``chat/`` establishes who and
 then, in a second step, whether that caller may have a particular session,
@@ -26,17 +32,33 @@ Not built:
     would bound the wrong end.
 """
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from bacteria.app.auth.dependencies import CurrentPrincipal
 from bacteria.app.core.dependencies import DbSession
 from bacteria.app.graph.catalogue import functional
+from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.constraints import conflicts_for
-from bacteria.app.graph.repository import SqlGraphRepository
+from bacteria.app.graph.repository import (
+    SqlGraphRepository,
+    UnknownAssertionError,
+    UnknownConclusionError,
+    UnknownNodeError,
+)
+from bacteria.app.graph.service import (
+    LabelTakenError,
+    MismatchedKindsError,
+    Outcome,
+    link,
+    reject,
+    rename,
+    retract,
+)
 from bacteria.app.graph.temporal import OPEN_ENDED
 
 router = APIRouter(prefix="/graph", tags=["graph"])
@@ -190,18 +212,20 @@ async def read_conclusions(principal: CurrentPrincipal, db: DbSession) -> list[C
     repository = SqlGraphRepository(db)
     believed = await repository.current(principal.id)
     conclusions = await repository.depending_on(principal.id, [a.assertion_id for a in believed])
-    return [
-        ConclusionOut(
-            conclusion_id=c.conclusion_id,
-            statement=c.statement,
-            confidence=c.confidence,
-            derived_by=c.derived_by,
-            status=c.status,
-            recorded_at=c.recorded_at,
-            evidence=list(c.evidence),
-        )
-        for c in conclusions
-    ]
+    return [_conclusion_out(c) for c in conclusions]
+
+
+def _conclusion_out(conclusion: Conclusion) -> ConclusionOut:
+    """One conclusion as the wire sees it, for both the listing and a write."""
+    return ConclusionOut(
+        conclusion_id=conclusion.conclusion_id,
+        statement=conclusion.statement,
+        confidence=conclusion.confidence,
+        derived_by=conclusion.derived_by,
+        status=conclusion.status,
+        recorded_at=conclusion.recorded_at,
+        evidence=list(conclusion.evidence),
+    )
 
 
 def _render_end(end: Optional[datetime]) -> str:
@@ -218,3 +242,158 @@ def _render_end(end: Optional[datetime]) -> str:
     if end == OPEN_ENDED:
         return "open"
     return end.isoformat()
+
+
+class OutcomeOut(BaseModel):
+    """What a write changed, and what it left for a person to look at.
+
+    The same shape for all four verbs, because a caller's next move is the same
+    whichever it was: redraw, and show what now needs attention. Carrying the
+    engine's `Outcome` through rather than returning 204 is what lets the console
+    update without re-fetching the graph to discover it should.
+    """
+
+    conflicts: list[ConflictOut]
+    inferred: list[ConclusionOut]
+    stale: list[ConclusionOut]
+
+
+class LinkIn(BaseModel):
+    """Two nodes the owner says are one thing."""
+
+    left: str
+    right: str
+
+
+class RenameIn(BaseModel):
+    """What a node should be called instead."""
+
+    label: str
+
+
+@router.post("/assertions/{assertion_id}/retract", response_model=OutcomeOut)
+async def retract_assertion(
+    assertion_id: str, principal: CurrentPrincipal, db: DbSession
+) -> OutcomeOut:
+    """Stop believing a claim.
+
+    A `POST` to a verb rather than a `DELETE` of the resource, because nothing is
+    deleted: the row stays, its belief interval closes, and `state_at` still
+    reconstructs what was believed before. `DELETE` would name the wrong act, and
+    a route's shape is the first thing anyone reads about what it does.
+    """
+    repository = SqlGraphRepository(db)
+    try:
+        claim = await repository.assertion(principal.id, assertion_id)
+    except UnknownAssertionError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such assertion") from None
+
+    outcome = await retract(repository, claim, now=datetime.now(timezone.utc))
+    await db.commit()
+    return _rendered(outcome)
+
+
+@router.post("/conclusions/{conclusion_id}/reject", response_model=OutcomeOut)
+async def reject_conclusion(
+    conclusion_id: str, principal: CurrentPrincipal, db: DbSession
+) -> OutcomeOut:
+    """Withdraw an inferred belief the owner disagrees with.
+
+    The conflict it was explaining returns to *possible*, which is the honest
+    state it held before anyone assumed anything — and it will not be explained
+    the same way again.
+    """
+    repository = SqlGraphRepository(db)
+    try:
+        outcome = await reject(
+            repository, principal.id, conclusion_id, now=datetime.now(timezone.utc)
+        )
+    except UnknownConclusionError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such conclusion") from None
+
+    await db.commit()
+    return _rendered(outcome)
+
+
+@router.post("/nodes/{node_id}/rename", response_model=NodeOut)
+async def rename_node(
+    node_id: str, body: RenameIn, principal: CurrentPrincipal, db: DbSession
+) -> NodeOut:
+    """Correct what a node is called.
+
+    409 when the name is taken, and the message is the point: two nodes that
+    should share a name are two nodes to link, so the refusal is an invitation
+    rather than a wall.
+    """
+    repository = SqlGraphRepository(db)
+    try:
+        node = await rename(
+            repository, principal.id, node_id, body.label, now=datetime.now(timezone.utc)
+        )
+    except UnknownNodeError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such node") from None
+    except LabelTakenError as taken:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{taken.label!r} already names another node; link them instead",
+        ) from None
+
+    await db.commit()
+    return NodeOut(
+        node_id=node.node_id,
+        label=node.label,
+        kind=node.kind,
+        first_seen=node.first_seen,
+        last_seen=node.last_seen,
+    )
+
+
+@router.post("/links", response_model=OutcomeOut, status_code=201)
+async def link_nodes(body: LinkIn, principal: CurrentPrincipal, db: DbSession) -> OutcomeOut:
+    """Say two nodes are the same thing.
+
+    201, because this creates an assertion — the link is a claim like any other
+    and can be retracted through the route above, which is the whole argument for
+    linking rather than merging.
+    """
+    repository = SqlGraphRepository(db)
+    try:
+        outcome = await link(
+            repository,
+            principal.id,
+            body.left,
+            body.right,
+            assertion_id=str(uuid.uuid4()),
+            now=datetime.now(timezone.utc),
+        )
+    except UnknownNodeError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such node") from None
+    except MismatchedKindsError as mismatch:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(mismatch)) from None
+
+    await db.commit()
+    return _rendered(outcome)
+
+
+def _rendered(outcome: Outcome) -> OutcomeOut:
+    """One `Outcome` as the wire sees it.
+
+    Conflicts lose their rule sentence here and keep their state, because a
+    caller that just wrote is redrawing rather than reading: `GET /graph` carries
+    the sentences, and repeating them on every write would make the two surfaces
+    two places to keep one wording.
+    """
+    return OutcomeOut(
+        conflicts=[
+            ConflictOut(
+                rule=c.rule,
+                sentence="",
+                left=c.left,
+                right=c.right,
+                state=c.state,
+            )
+            for c in outcome.conflicts
+        ],
+        inferred=[_conclusion_out(c) for c in outcome.inferred],
+        stale=[_conclusion_out(c) for c in outcome.stale],
+    )

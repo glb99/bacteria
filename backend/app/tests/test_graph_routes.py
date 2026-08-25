@@ -197,3 +197,95 @@ async def test_one_principal_never_sees_anothers_conclusions(client, issue, engi
     await _seed(engine, "acme")
 
     assert client.get("/graph/conclusions", headers=auth(intruder)).json() == []
+
+
+async def test_retracting_a_claim_ends_the_conflict_it_was_in(client, issue, engine):
+    """The act the console could show a person and could not offer them.
+
+    Two current CTOs, the owner says one is wrong, and the disagreement is gone
+    rather than merely quieter.
+    """
+    token = await issue("retracts")
+    await _seed(engine, "retracts", holder="diane")
+    await _seed(engine, "retracts", holder="marta")
+    before = client.get("/graph", headers=auth(token)).json()
+    assert [c["state"] for c in before["conflicts"]] == ["conflict"]
+
+    response = client.post("/graph/assertions/a-retracts-marta/retract", headers=auth(token))
+
+    assert response.status_code == 200
+    assert response.json()["conflicts"] == []
+    after = client.get("/graph", headers=auth(token)).json()
+    assert [a["dst"] for a in after["assertions"]] == [
+        a["dst"] for a in before["assertions"] if a["assertion_id"] == "a-retracts-diane"
+    ]
+
+
+async def test_another_persons_claim_cannot_be_retracted(client, issue, engine):
+    """A filter rather than a check, and asserted rather than trusted.
+
+    404 rather than 403: a caller able to tell "no such assertion" from "not
+    yours" can enumerate the second by guessing.
+    """
+    await _seed(engine, "owner", holder="diane")
+    intruder = await issue("intruder")
+
+    response = client.post("/graph/assertions/a-owner-diane/retract", headers=auth(intruder))
+
+    assert response.status_code == 404
+
+
+async def test_renaming_the_owner_node(client, issue, engine):
+    """Every graph starts out owned by somebody called "self"."""
+    token = await issue("named")
+    await _seed(engine, "named")
+    async with AsyncSession(engine) as session:
+        me = await refer_to(SqlGraphRepository(session), "named", "person", "self", now=NOW)
+        await session.commit()
+
+    response = client.post(
+        f"/graph/nodes/{me.node_id}/rename",
+        headers=auth(token),
+        json={"label": "Guillermo"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["label"] == "Guillermo"
+
+
+async def test_a_rename_onto_a_taken_name_says_to_link_instead(client, issue, engine):
+    """The refusal is an invitation, which is why the message carries the verb."""
+    token = await issue("collides")
+    await _seed(engine, "collides", holder="diane")
+    async with AsyncSession(engine) as session:
+        me = await refer_to(SqlGraphRepository(session), "collides", "person", "self", now=NOW)
+        await session.commit()
+
+    response = client.post(
+        f"/graph/nodes/{me.node_id}/rename", headers=auth(token), json={"label": "diane"}
+    )
+
+    assert response.status_code == 409
+    assert "link" in response.json()["detail"]
+
+
+async def test_linking_two_nodes_leaves_both_and_adds_a_claim(client, issue, engine):
+    """Linked, never merged -- and the link is retractable like anything else."""
+    token = await issue("links")
+    await _seed(engine, "links", holder="diane")
+    async with AsyncSession(engine) as session:
+        repo = SqlGraphRepository(session)
+        me = await refer_to(repo, "links", "person", "self", now=NOW)
+        other = await refer_to(repo, "links", "person", "diane", now=NOW)
+        await session.commit()
+
+    response = client.post(
+        "/graph/links",
+        headers=auth(token),
+        json={"left": me.node_id, "right": other.node_id},
+    )
+
+    assert response.status_code == 201
+    graph = client.get("/graph", headers=auth(token)).json()
+    assert len([n for n in graph["nodes"] if n["kind"] == "person"]) == 2
+    assert "same_as" in [a["rel"] for a in graph["assertions"]]

@@ -243,10 +243,31 @@ function group(
   return new Map([...groups].sort(([a], [b]) => a.localeCompare(b)));
 }
 
+/**
+ * How a claim says who is making it.
+ *
+ * Two voices, because there are two parties: the person whose graph this is, and
+ * the agent that reads for them. `origin` carries it — `stated` means somebody
+ * meant it, `inferred` means the extractor produced it and nobody has endorsed
+ * it yet.
+ *
+ * **Not `trust`.** That records which channel a claim arrived through and is the
+ * same value on nearly every row, which is why it was taken off the claim and
+ * counted in the diagnostics instead. A voice has to distinguish somebody from
+ * somebody else or it is decoration.
+ *
+ * This is the difference between a log you inspect and a model you argue with: a
+ * claim cannot be contested if it is not visible who is making it.
+ */
+const VOICE: Record<string, { label: string; className: string }> = {
+  stated: { label: "you confirmed this", className: "voice stated" },
+  inferred: { label: "I worked this out", className: "voice inferred" },
+};
+
 function renderClaims(
   assertions: GraphAssertion[],
   nodes: Map<string, GraphNode>,
-  contested: Set<string>,
+  contested: Map<string, string>,
 ): HTMLElement[] {
   const groups = group(assertions, nodes, layout);
 
@@ -268,10 +289,20 @@ function renderClaims(
     const list = document.createElement("ul");
     for (const assertion of members) {
       const item = document.createElement("li");
-      // A claim inside a contradiction is marked here as well as in the panel
+      // A claim inside a disagreement is marked here as well as in the panel
       // below, because a person scanning the columns should not have to find the
       // badge to know one of these is disputed.
-      item.className = `node${contested.has(assertion.assertion_id) ? " contested" : ""}`;
+      //
+      // **The state travels, not a boolean.** This was `contested` either way,
+      // which rendered `possible` and `explained` identically to `conflict` --
+      // collapsing on screen the three-valued distinction the temporal layer
+      // exists to produce. A contradiction is a thing to resolve, a possible one
+      // a thing to date, an explained one an assumption to agree with: three
+      // asks, and one border colour cannot make three requests.
+      const state = contested.get(assertion.assertion_id);
+      item.className = `node${state ? ` disputed ${state}` : ""}${
+        assertion.canonical ? "" : " tail"
+      }`;
 
       const subject = nodes.get(assertion.src)?.label ?? "?";
       const object = nodes.get(assertion.dst)?.label ?? "?";
@@ -290,12 +321,24 @@ function renderClaims(
       item.append(claim);
 
       item.append(text("span", endsLabel(assertion.ends), "tag"));
-      if (contested.has(assertion.assertion_id)) {
-        item.append(text("span", "disputed", "tag contested"));
+      // A relation nobody has ratified. ADR 0007 records the tail rather than
+      // dropping it precisely so it can be judged, and it cannot be judged while
+      // it renders like an agreed one.
+      if (!assertion.canonical) {
+        item.append(text("span", "unratified word", "tag tail"));
+      }
+      if (state) {
+        item.append(text("span", CONFLICT_COPY[state]?.label ?? state, `tag ${state}`));
       }
       // Where it came from, in the words that produced it. This is what makes a
       // wrong claim contestable rather than merely visible.
       if (assertion.reason) item.append(text("p", `from: “${assertion.reason}”`, "note"));
+      // Who is saying it, on every claim rather than only on the endorsed ones.
+      // The previous version tagged a confirmed claim and left the rest bare,
+      // so the common case -- the agent's own reading of a transcript -- was
+      // the one with no attribution at all.
+      const voice = VOICE[assertion.origin];
+      if (voice) item.append(text("span", voice.label, `tag ${voice.className}`));
       // The claim is the unit a person agrees or disagrees with, so both
       // affordances are on it rather than in a panel that would make them match
       // ids by eye.
@@ -306,8 +349,6 @@ function renderClaims(
       // any of the ones that empty it.
       if (assertion.origin !== "stated") {
         item.append(action("confirm", "quiet", () => confirmAssertion(assertion.assertion_id)));
-      } else {
-        item.append(text("span", "confirmed", "tag"));
       }
       item.append(
         confirmable("retract", () => retractAssertion(assertion.assertion_id)),
@@ -547,9 +588,23 @@ export async function refresh(_sessionId: string | null): Promise<void> {
   const [graph, conclusions] = await Promise.all([readGraph(), readConclusions()]);
 
   const nodes = labelsOf(graph.nodes);
-  const contested = new Set(
-    graph.conflicts.filter((c) => c.state === "conflict").flatMap((c) => [c.left, c.right]),
-  );
+  // Every state, not only the provable one. Filtering to `conflict` meant a
+  // claim waiting on a date looked exactly like an agreed one, so the two
+  // states the constraint layer works hardest to distinguish were invisible on
+  // the claim itself and reachable only by matching ids against the panel.
+  //
+  // Hard conflicts win a tie: a claim in both a contradiction and an explained
+  // pair has one ask that cannot wait and one that can.
+  const contested = new Map<string, string>();
+  const rank: Record<string, number> = { explained: 0, possible: 1, conflict: 2 };
+  for (const c of graph.conflicts) {
+    for (const id of [c.left, c.right]) {
+      const held = contested.get(id);
+      if (held === undefined || (rank[c.state] ?? 0) > (rank[held] ?? 0)) {
+        contested.set(id, c.state);
+      }
+    }
+  }
 
   if (graph.assertions.length === 0) {
     canvas.replaceChildren(

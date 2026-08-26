@@ -101,6 +101,46 @@ async def test_the_graph_comes_back_with_its_nodes_and_claims(client, issue, eng
     assert body["assertions"][0]["reason"] == "said so in conversation"
 
 
+async def test_a_claim_says_whether_its_relation_was_ever_ratified(client, issue, engine):
+    """Canonicality is derived at read time, and it has to reach the reader.
+
+    ADR 0007 keeps the tail in the log rather than in a side table, on the
+    grounds that it is the evidence for what the catalogue should become. That
+    argument only holds if a person can *see* which words are unagreed — a tail
+    relation rendered like a ratified one teaches nobody that `interlocutor` is
+    junk.
+
+    Asserted against a live catalogue rather than a stub: `cto` is seeded and a
+    made-up relation is not, and if a future edit promotes one of these the test
+    should fail rather than quietly agree.
+    """
+    token = await issue("acme")
+    await _seed(engine, "acme")
+    async with AsyncSession(engine) as session:
+        repo = SqlGraphRepository(session)
+        org = await refer_to(repo, "acme", "organization", "Acme", now=NOW)
+        person = await refer_to(repo, "acme", "person", "diane", now=NOW)
+        await repo.record(
+            [
+                Assertion(
+                    assertion_id="a-tail",
+                    user_id="acme",
+                    src=org.node_id,
+                    dst=person.node_id,
+                    rel="interlocutor",
+                    valid=Interval(None, OPEN_ENDED),
+                    recorded_at=NOW,
+                )
+            ]
+        )
+        await session.commit()
+
+    body = client.get("/graph", headers=auth(token)).json()
+    canonical = {a["rel"]: a["canonical"] for a in body["assertions"]}
+
+    assert canonical == {"cto": True, "interlocutor": False}
+
+
 async def test_a_bound_says_which_of_its_three_states_it_is_in(client, issue, engine):
     """`open`, `unknown` and a date must be distinguishable on the wire.
 

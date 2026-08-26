@@ -614,6 +614,7 @@ async def claims_for(
     user_id: str,
     *,
     anchors: Sequence[str] = (),
+    as_of: Optional[datetime] = None,
 ) -> list[Claim]:
     """The facts this person has confirmed, optionally narrowed to some nodes.
 
@@ -629,12 +630,31 @@ async def claims_for(
     ``anchors`` narrows to claims touching those nodes at either end. Empty means
     everything confirmed, which is what a caller comparing against recency wants
     — narrowing is the supplier's job and this is the read it narrows.
+
+    ``as_of`` reads the graph as it was *believed* at a past moment rather than
+    now, and it is deliberately a parameter here rather than a third function.
+    The rule above is that exactly two functions decide what may be spoken; a
+    third would make *speakable* depend on reading a call site correctly. This
+    one changes **when**, never **whether** — ``origin == "stated"`` still gates
+    every row, and a claim confirmed after ``as_of`` is absent because it was not
+    yet believed, not because the rule moved.
+
+    That distinction is what makes grading a past run honest. §3 of the model
+    gives recorded time exactly one job — reconstructing the memory a run
+    actually saw — and reading ``current()`` instead would score yesterday's turn
+    against today's beliefs, which flatters every strategy equally and settles
+    nothing.
     """
     labels = {node.node_id: node.label for node in await repository.nodes(user_id)}
     wanted = set(anchors)
 
     found: list[Claim] = []
-    for assertion in await repository.current(user_id):
+    believed = (
+        await repository.current(user_id)
+        if as_of is None
+        else await repository.believed_at(user_id, as_of)
+    )
+    for assertion in believed:
         if assertion.origin != "stated":
             continue
         relation = lookup(assertion.rel)

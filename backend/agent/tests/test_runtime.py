@@ -396,6 +396,10 @@ async def test_a_run_records_how_it_was_configured():
         "memories_in_context": 1,
         "memories_considered": 1,
         "retrieval_strategy": "recency",
+        # Which entry, not just how many. A count cannot answer whether the
+        # right one was shown, so a run recorded without this is a turn nobody
+        # can grade afterwards.
+        "memory_keys": ["tone"],
         "tool_calls_proposed": 1,
         "tool_calls_dropped": 0,
         "outcome": "completed",

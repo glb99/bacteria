@@ -321,11 +321,23 @@ function renderClaims(
       item.append(claim);
 
       item.append(text("span", endsLabel(assertion.ends), "tag"));
-      // A relation nobody has ratified. ADR 0007 records the tail rather than
+      // A relation outside the catalogue. ADR 0007 records the tail rather than
       // dropping it precisely so it can be judged, and it cannot be judged while
       // it renders like an agreed one.
+      //
+      // **The label says the consequence, not the status.** It read "unratified
+      // word", which failed on the first person to see it -- and that person had
+      // designed the thing. Three faults, all the same fault: it borrowed the
+      // ADR's vocabulary rather than the reader's, it named an act nobody can
+      // perform here (promotion is an edit to a literal; the chore reports and
+      // does not act), and it stated a category while leaving the reader to work
+      // out whether it mattered.
+      //
+      // What follows from being outside the catalogue is that constraints never
+      // run on it -- which is the bound on how much damage a wrong constraint
+      // can do, and the only thing about the tail a reader has to know.
       if (!assertion.canonical) {
-        item.append(text("span", "unratified word", "tag tail"));
+        item.append(text("span", "no rule checks this", "tag tail"));
       }
       if (state) {
         item.append(text("span", CONFLICT_COPY[state]?.label ?? state, `tag ${state}`));

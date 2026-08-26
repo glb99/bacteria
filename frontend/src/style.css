@@ -555,6 +555,80 @@ code {
   border-color: color-mix(in oklch, var(--danger) 45%, transparent);
 }
 
+/* Colour before text.
+ *
+ * A state has to land before a word of it is read, and this console had five
+ * dimensions of state rendered as five columns -- so a reader combined them by
+ * hand, and `possible` and `explained` sat next to each other as adjacent words
+ * that look like synonyms and are not.
+ *
+ * The three disagreement states get three treatments rather than three shades of
+ * one, deliberately. A contradiction is a thing to resolve, a possible one a
+ * thing to date, an explained one an assumption to agree or disagree with. Three
+ * different asks; severities would say the third is a milder first. */
+.node.disputed {
+  border-left-width: 3px;
+}
+
+.node.disputed.conflict {
+  border-left-color: var(--danger);
+}
+
+.node.disputed.possible {
+  border-left-color: var(--muted);
+  border-left-style: dashed;
+}
+
+.node.disputed.explained {
+  border-left-color: var(--user);
+}
+
+.node .tag.conflict {
+  color: var(--danger);
+  border-color: color-mix(in oklch, var(--danger) 45%, transparent);
+}
+
+.node .tag.possible {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.node .tag.explained {
+  color: var(--user);
+  border-color: color-mix(in oklch, var(--user) 45%, transparent);
+}
+
+/* A relation the catalogue has not ratified. Muted rather than alarming: the
+   tail is recorded on purpose and most of it is fine -- it is unagreed
+   vocabulary, not a fault -- but it must not read as an agreed word, because
+   the whole reason for keeping it is that somebody judges it. */
+.node.tail .arrow {
+  color: var(--muted);
+  border-bottom: 1px dashed color-mix(in oklch, var(--muted) 60%, transparent);
+}
+
+.node .tag.tail {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+/* Who is making the claim. Two voices, and they are given different colours
+   rather than different words alone, because the point is to tell them apart
+   while scanning rather than after reading. */
+.node .tag.voice {
+  font-style: italic;
+}
+
+.node .tag.voice.stated {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+
+.node .tag.voice.inferred {
+  color: var(--user);
+  border-color: color-mix(in oklch, var(--user) 40%, transparent);
+}
+
 /* Proposed nodes are dashed. They are the part of the graph that does not
    exist yet -- nothing reaches a prompt until a person accepts it -- and a
    solid border would draw them as facts. */

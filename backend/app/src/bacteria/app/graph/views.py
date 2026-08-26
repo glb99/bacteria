@@ -41,7 +41,7 @@ from pydantic import BaseModel
 
 from bacteria.app.auth.dependencies import CurrentPrincipal
 from bacteria.app.core.dependencies import DbSession
-from bacteria.app.graph.catalogue import functional
+from bacteria.app.graph.catalogue import functional, is_canonical
 from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.constraints import conflicts_for
 from bacteria.app.graph.log import Assertion
@@ -98,6 +98,16 @@ class AssertionOut(BaseModel):
     """Whether anybody meant this, which is the only thing that decides if it can
     be spoken. Carried because the console offers *confirm* on a proposal and not
     on a claim already confirmed, and could not tell them apart without it."""
+
+    canonical: bool
+    """Whether ``rel`` is a relation the catalogue has agreed to.
+
+    Derived here rather than stored, which is ADR 0007's decision and not an
+    optimization: promoting a relation is then an edit to one literal, and every
+    past claim reclassifies without a row being touched. Sent because the tail
+    being *visible* is the point of recording it — a person cannot learn that
+    ``interlocutor`` is junk from a graph that renders it like everything else.
+    """
 
     recorded_at: datetime
     reason: Optional[str]
@@ -199,6 +209,7 @@ async def read_graph(principal: CurrentPrincipal, db: DbSession) -> GraphOut:
                 starts=a.valid.start,
                 trust=a.trust,
                 origin=a.origin,
+                canonical=is_canonical(a.rel),
                 recorded_at=a.recorded_at,
                 reason=(a.attrs or {}).get("reason"),
             )

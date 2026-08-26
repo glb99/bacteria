@@ -625,6 +625,8 @@ export interface components {
         AssertionOut: {
             /** Assertion Id */
             assertion_id: string;
+            /** Canonical */
+            canonical: boolean;
             /** Dst */
             dst: string;
             /** Ends */

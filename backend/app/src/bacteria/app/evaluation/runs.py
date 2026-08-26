@@ -63,6 +63,30 @@ class RecordedRun:
         return list(self.meta.get("tools_exposed") or [])
 
     @property
+    def memory_keys(self) -> list[str]:
+        """Which memory entries this turn was shown.
+
+        Empty for a run recorded before the runtime wrote them, which is not the
+        same as a run that was shown nothing — ``memories_in_context`` tells
+        those apart, and a comparison of retrieval strategies has to skip the
+        first rather than score it as a miss.
+        """
+        return list(self.meta.get("memory_keys") or [])
+
+    @property
+    def memories_in_context(self) -> int:
+        return int(self.meta.get("memories_in_context") or 0)
+
+    @property
+    def gradable(self) -> bool:
+        """Can this run's retrieval be scored at all?
+
+        A run that was shown memories but recorded no keys predates the field.
+        Counting it as a miss would blame the strategy for the instrumentation.
+        """
+        return self.memories_in_context == 0 or bool(self.memory_keys)
+
+    @property
     def outcome(self) -> Optional[str]:
         return self.meta.get("outcome")
 

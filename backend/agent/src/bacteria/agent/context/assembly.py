@@ -123,6 +123,17 @@ class AssembledContext:
             memories the owner kept and the model was not shown, which until now
             nothing recorded anywhere.
         retrieval_strategy: Which rule chose them.
+        memory_keys: The keys of the entries that reached ``system``, sorted.
+
+            Identities rather than a count, and the difference is what makes a
+            past turn gradable. "Four memories, strategy recency" cannot answer
+            whether those were the *right* four, so every run recorded before
+            this existed is evidence nobody can ever score — which is why it is
+            here rather than waiting for the thing that will read it.
+
+            Keys, not values: a key selects the entry from the store it came
+            from, and copying the text would put a second copy of the memory in
+            the transcript with its own retention question.
     """
 
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -130,6 +141,7 @@ class AssembledContext:
     memories_included: int = 0
     memories_considered: int = 0
     retrieval_strategy: str = ""
+    memory_keys: list[str] = field(default_factory=list)
 
 
 def assemble_context(
@@ -199,6 +211,11 @@ def assemble_context(
         memories_included=len(selection.chosen),
         memories_considered=selection.considered,
         retrieval_strategy=selection.strategy,
+        # Sorted so that two runs shown the same memories produce the same
+        # record. Retrieval order is a property of the strategy and is reported
+        # by `retrieval_strategy`; preserving it here would make a diff between
+        # two runs depend on it without saying so.
+        memory_keys=sorted(selection.chosen),
     )
 
 

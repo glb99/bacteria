@@ -31,6 +31,9 @@ Not built:
     does.
 """
 
+from datetime import datetime
+from typing import Optional
+
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.context.retrieval import Candidates
@@ -58,9 +61,23 @@ class GraphCandidateSupplier:
     could show one person another's memory.
     """
 
-    def __init__(self, session: AsyncSession, user_id: str) -> None:
+    def __init__(
+        self, session: AsyncSession, user_id: str, *, as_of: Optional[datetime] = None
+    ) -> None:
         self._db = session
         self._user_id = user_id
+        self._as_of = as_of
+        """The moment whose beliefs to read, or ``None`` for now.
+
+        Set only when replaying a past run, and set on the supplier rather than
+        passed to :meth:`candidates` because that signature is the agent's
+        ``SuppliesMemoryCandidates`` protocol — a host adding an argument to it
+        would be a host deciding the protocol.
+
+        It also cannot vary within one supplier's life, which is the same
+        argument ``user_id`` makes: a caller able to change *when* mid-turn could
+        show a person a memory the turn did not have.
+        """
 
     async def candidates(self, session_id: str, user_text: str, limit: int) -> Candidates:
         """The confirmed claims this message appears to be about.
@@ -77,7 +94,7 @@ class GraphCandidateSupplier:
         this very conversation — which is exactly backwards.
         """
         repository = SqlGraphRepository(self._db)
-        everything = await claims_for(repository, self._user_id)
+        everything = await claims_for(repository, self._user_id, as_of=self._as_of)
         if not everything:
             return Candidates(considered=0)
 
@@ -89,7 +106,7 @@ class GraphCandidateSupplier:
         chosen = (
             everything
             if not anchors
-            else await claims_for(repository, self._user_id, anchors=anchors)
+            else await claims_for(repository, self._user_id, anchors=anchors, as_of=self._as_of)
         )
 
         entries = {

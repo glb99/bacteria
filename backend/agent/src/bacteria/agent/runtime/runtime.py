@@ -161,6 +161,12 @@ def _run_meta(
     quadratically with the conversation, and it would put the system prompt's
     contents in a second place with its own retention question. What a reader
     needs to reconstruct a run is how much it was shown, not another copy.
+
+    **Memory keys are the exception, and they are not a copy.** A key names an
+    entry in the store it came from; the text stays there. The count alone
+    cannot answer *whether those were the right ones*, which is the question
+    every comparison between two retrieval strategies has to ask — so a run
+    recorded without them is a turn nobody can ever grade.
     """
     return TranscriptItem(
         kind="run_meta",
@@ -176,6 +182,7 @@ def _run_meta(
             # along for memory.
             "memories_considered": context.memories_considered,
             "retrieval_strategy": context.retrieval_strategy,
+            "memory_keys": context.memory_keys,
             "tool_calls_proposed": tool_calls_proposed,
             "tool_calls_dropped": tool_calls_dropped,
             "outcome": outcome,

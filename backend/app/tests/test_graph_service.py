@@ -200,9 +200,13 @@ async def test_the_same_pair_over_a_different_span_is_not_a_repeat(repo):
     """ "She was their CTO until February" is not a restatement of "she is".
 
     Keyed on the triple alone this would be swallowed and the correction lost,
-    which is the failure mode of making the guard above too eager. It is not a
-    revision either — nothing produces one from an extraction — so it lands
-    beside the first and the constraint layer is left to report the pair.
+    which is the failure mode of making the guard above too eager. So it is
+    *written* — and, since the same triple with a known end is strictly more
+    informed than the same triple left open, the open one stops being believed.
+
+    Both halves matter and they pull opposite ways: swallow it and the correction
+    is lost, keep both and the log says Diane is currently CTO and also stopped
+    being CTO in February.
     """
     await observe(repo, [_cto("a3", "person:diane", Interval(None, OPEN_ENDED), W1)], now=W1)
 
@@ -210,8 +214,8 @@ async def test_the_same_pair_over_a_different_span_is_not_a_repeat(repo):
         repo, [_cto("a9", "person:diane", Interval(None, FEBRUARY), W3)], now=W3
     )
 
-    assert outcome.recorded == 1
-    assert len(await repo.current(USER)) == 2
+    assert outcome.recorded == 1, "the correction is written, not swallowed"
+    assert [a.assertion_id for a in await repo.current(USER)] == ["a9"]
 
 
 async def test_a_claim_repeated_inside_one_batch_is_written_once(repo):
@@ -636,3 +640,89 @@ async def test_anchors_narrow_to_claims_touching_those_nodes(repo):
     narrowed = await claims_for(repo, USER, anchors=["person:diane"])
 
     assert [c.assertion_id for c in narrowed] == ["c1"]
+
+
+async def test_a_dated_claim_closes_the_open_one_it_corrects(repo):
+    """The case a real conversation produced, in one sentence.
+
+    "Diane is Acme's CTO", then "Diane left in February". Same triple, one open
+    and one ended -- not two beliefs about the world, but the second being the
+    first plus when it stopped.
+    """
+    open_claim = _cto("a1", "person:diane", Interval(None, OPEN_ENDED), W1)
+    await observe(repo, [open_claim], now=W1)
+
+    await observe(repo, [_cto("a2", "person:diane", Interval(None, FEBRUARY), W3)], now=W3)
+
+    believed = {a.assertion_id for a in await repo.current(USER)}
+    assert believed == {"a2"}, "the open claim is no longer believed"
+    closed = await repo.assertion(USER, "a1")
+    assert closed.closed_by == "superseded", "and the log says which act closed it"
+
+
+async def test_it_unblocks_the_succession_the_stale_claim_was_hiding(repo):
+    """The second harm, which is quieter than the contradiction.
+
+    Two open undated claims make `infer_succession` decline, so the stale row
+    suppressed the very inference the correction should have enabled.
+    """
+    await observe(repo, [_cto("a1", "person:diane", Interval(None, OPEN_ENDED), W1)], now=W1)
+
+    outcome = await observe(
+        repo,
+        [
+            _cto("a2", "person:diane", Interval(None, FEBRUARY), W3),
+            _cto("a3", "person:marta", Interval(None, OPEN_ENDED), W3),
+        ],
+        now=W3,
+    )
+
+    assert len(outcome.inferred) == 1
+    assert [c.state for c in outcome.conflicts] == ["explained"]
+
+
+async def test_a_different_object_is_a_disagreement_and_stays_one(repo):
+    """ "Actually it was Bob" is not a correction this may make silently.
+
+    Different `dst`, so there is nothing arithmetic about it -- it needs a person,
+    and closing it here would be the model unbelieving something nobody retracted.
+    """
+    await observe(repo, [_cto("a1", "person:diane", Interval(None, OPEN_ENDED), W1)], now=W1)
+
+    outcome = await observe(repo, [_cto("a2", "person:bob", Interval(None, FEBRUARY), W3)], now=W3)
+
+    believed = {a.assertion_id for a in await repo.current(USER)}
+    assert believed == {"a1", "a2"}, "both stand"
+    assert outcome.conflicts != [], "and the disagreement is reported"
+
+
+async def test_an_open_claim_does_not_close_another_open_one(repo):
+    """Two current claims are a contradiction, which is not this rule's business."""
+    await observe(repo, [_cto("a1", "person:diane", Interval(None, OPEN_ENDED), W1)], now=W1)
+
+    await observe(repo, [_cto("a2", "person:diane", Interval(W3, OPEN_ENDED), W3)], now=W3)
+
+    assert len(await repo.current(USER)) == 2
+
+
+async def test_a_withdrawn_start_is_not_recorded_as_one_that_was_said(repo):
+    """A row whose valid_from is null while attrs say the date was said misreports.
+
+    Extraction writes `since_said` meaning *the transcript supported this*, and
+    stripping the start here makes that untrue. A log that misreports its own
+    decision is worse than one that says nothing, because it would be believed.
+    """
+    ended = _cto("a1", "person:diane", Interval(None, FEBRUARY), W1)
+    successor = replace(
+        _cto("a2", "person:marta", Interval(FEBRUARY, OPEN_ENDED), W1),
+        attrs={"reason": "Marta took over [in February]", "since_said": "2026-02"},
+    )
+
+    await observe(repo, [ended, successor], now=W1)
+
+    stored = await repo.assertion(USER, "a2")
+    assert stored.valid.start is None
+    assert stored.attrs == {
+        "reason": "Marta took over [in February]",
+        "since_withdrawn": "2026-02",
+    }

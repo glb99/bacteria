@@ -165,11 +165,62 @@ async def observe(
     fresh = _unassumed(_unrepeated(assertions, believed), believed)
     if fresh:
         await repository.record(fresh)
+        # After the write, so the closing sees the batch it belongs to. A claim
+        # that ends a role is usually stated in the same breath as the one that
+        # replaces it, and closing before the write would leave the old belief
+        # standing until the next turn.
+        await _close_superseded(repository, fresh, believed, now)
 
     conflicts, inferred = await _reconcile(
         repository, owner, {a.rel for a in assertions}, relations, now
     )
     return Outcome(recorded=len(fresh), conflicts=conflicts, inferred=inferred)
+
+
+async def _close_superseded(
+    repository: SqlGraphRepository,
+    fresh: Sequence[Assertion],
+    believed: Sequence[Assertion],
+    now: datetime,
+) -> None:
+    """Stop believing an open claim that a dated one about the *same triple* replaces.
+
+    **The narrowest possible revision, and narrow is the whole point.** "Diane is
+    Acme's CTO" and "Diane left Acme in February" are not two beliefs about the
+    world: the second is the first plus a fact about when it stopped. Same
+    ``(user_id, src, rel, dst)``, one open end and one known end — the dated
+    claim is strictly more informed and nothing else could be true.
+
+    So this needs no judgement about *which* claim a correction refers to, which
+    is the thing an extractor cannot be trusted with. The triple is identical, so
+    there is nothing to resolve and nothing to conflate.
+
+    **A model must not be able to unbelieve things**, and this is the line that
+    keeps that true. A wrongly *added* claim is visible: it shows as a conflict
+    and a person can retract it. A wrongly *closed* one is invisible — it simply
+    stops appearing — so revision is the unrecoverable direction and only the
+    arithmetic case is allowed through it. "Actually it was Bob, not Diane" has a
+    different ``dst``, stays a conflict, and remains a person's decision.
+
+    Left standing, the old claim did two kinds of harm at once, both seen in one
+    real conversation: it contradicted the successor, and it blocked the
+    succession inference by being a second open undated claim.
+    """
+    for claim in fresh:
+        if not _has_known_end(claim):
+            continue
+        for standing in believed:
+            if _claim_of(standing)[:4] != _claim_of(claim)[:4]:
+                continue
+            if standing.valid.end != OPEN_ENDED:
+                continue
+            await repository.close(replace(standing, recorded_until=now, closed_by="superseded"))
+
+
+def _has_known_end(assertion: Assertion) -> bool:
+    """An end that is a real date — neither unknown nor the open sentinel."""
+    end = assertion.valid.end
+    return end is not None and end != OPEN_ENDED
 
 
 def _unassumed(assertions: Sequence[Assertion], believed: Sequence[Assertion]) -> list[Assertion]:
@@ -220,9 +271,25 @@ def _unassumed(assertions: Sequence[Assertion], believed: Sequence[Assertion]) -
         # out of this: that is a zero-length interval, which is a different
         # defect and not a succession.
         if boundary is not None and boundary in others and boundary != a.valid.end:
-            a = replace(a, valid=Interval(None, a.valid.end))
+            a = replace(a, valid=Interval(None, a.valid.end), attrs=_withdrawn(a.attrs))
         stripped.append(a)
     return stripped
+
+
+def _withdrawn(attrs: Optional[dict]) -> Optional[dict]:
+    """Record that a start the model gave was taken back, rather than accepted.
+
+    ``since_said`` is written by extraction, before this runs, and means *the
+    transcript supported this*. When the start is stripped here that stops being
+    true, and a row whose ``valid_from`` is null while its ``attrs`` still claim
+    the date was said is a log that misreports its own decision — which is worse
+    than a missing note, because it would be believed.
+    """
+    if not attrs or "since_said" not in attrs:
+        return attrs
+    amended = dict(attrs)
+    amended["since_withdrawn"] = amended.pop("since_said")
+    return amended
 
 
 def _unrepeated(assertions: Sequence[Assertion], believed: Sequence[Assertion]) -> list[Assertion]:
@@ -702,11 +769,23 @@ async def retract(
     owner was trying to leave.
     """
     owner = assertion.user_id
-    dependents = await repository.depending_on(owner, [assertion.assertion_id])
+    # Every row saying this, not only the one named. A confirmed claim is two
+    # rows -- the proposal and the endorsement -- and closing one would leave the
+    # other believed, so the claim would still be there and the retraction would
+    # look like it had failed. One belief, recorded twice, stops being believed
+    # once.
+    # Compared without `origin`, which the repeat key includes and this must not:
+    # there it separates a guess from an endorsement, and here those are the two
+    # rows that have to go together.
+    target = _claim_of(assertion)[:5]
+    same = [a for a in await repository.current(owner) if _claim_of(a)[:5] == target]
+    ids = [a.assertion_id for a in same] or [assertion.assertion_id]
+    dependents = await repository.depending_on(owner, ids)
 
-    await repository.close(log_retract(assertion, at=now))
+    for doomed in same or [assertion]:
+        await repository.close(log_retract(doomed, at=now))
 
-    now_stale = stale_after(dependents, [assertion.assertion_id])
+    now_stale = stale_after(dependents, ids)
     for conclusion in now_stale:
         await repository.set_status(owner, conclusion.conclusion_id, "stale")
 

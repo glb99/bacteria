@@ -598,10 +598,13 @@ code {
   border-color: color-mix(in oklch, var(--user) 45%, transparent);
 }
 
-/* A relation the catalogue has not ratified. Muted rather than alarming: the
-   tail is recorded on purpose and most of it is fine -- it is unagreed
-   vocabulary, not a fault -- but it must not read as an agreed word, because
-   the whole reason for keeping it is that somebody judges it. */
+/* A relation outside the catalogue. Muted rather than alarming: the tail is
+   recorded on purpose and most of it is fine -- `pet` is a perfectly good
+   relation that simply has not been seeded -- but it must not read as an agreed
+   word, because the whole reason for keeping it is that somebody judges it.
+
+   Dashed rather than coloured for that reason. Colour here would say "wrong",
+   and the claim is not wrong; it is unchecked. */
 .node.tail .arrow {
   color: var(--muted);
   border-bottom: 1px dashed color-mix(in oklch, var(--muted) 60%, transparent);

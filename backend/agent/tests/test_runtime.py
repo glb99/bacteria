@@ -6,9 +6,10 @@ they assert that a turn *delegates* correctly, not that any one layer works.
 
 import pytest
 
+from bacteria.agent.context.retrieval import Candidates
 from bacteria.agent.model.protocol import ModelResponse
 from bacteria.agent.runtime.runtime import Runtime, StepAlreadyExecutedError, StepTracker
-from bacteria.agent.session.store import SessionStore
+from bacteria.agent.session.store import MemoryEntry, SessionStore
 from bacteria.agent.tools.execution import ToolExecutionError
 from bacteria.agent.tools.registry import ToolDefinition, ToolRegistry
 
@@ -470,3 +471,41 @@ async def test_runtime_honors_an_approving_callback():
     )
 
     assert result.response.text == "It's 10:00"
+
+
+async def test_the_runtime_awaits_the_supplier_and_assembly_does_not(make_fake_model_client):
+    """ADR 0024's shape: narrowing does I/O here, ranking stays pure there.
+
+    Putting the call inside `assemble_context` would make the one function that
+    answers "what was the model shown" also a function that talks to a database.
+    """
+    asked: list[tuple[str, str, int]] = []
+
+    class Narrows:
+        async def candidates(self, session_id: str, user_text: str, limit: int):
+            asked.append((session_id, user_text, limit))
+            return Candidates(user={"k": MemoryEntry(value="from the graph", reason="confirmed")})
+
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+    runtime = Runtime(
+        model_client=make_fake_model_client("fine"),
+        session_store=store,
+        candidate_supplier=Narrows(),
+    )
+
+    await runtime.run_turn(session.session_id, "tell me about Acme")
+
+    assert asked and asked[0][1] == "tell me about Acme"
+
+
+async def test_without_a_supplier_the_runtime_asks_nobody(make_fake_model_client):
+    """Absent one, behaviour is what it always was and a host owes nothing."""
+    store = SessionStore()
+    session = await store.create_session(user_id="u1")
+    await store.remember(session.session_id, "tone", "concise", "they said so")
+
+    runtime = Runtime(model_client=make_fake_model_client("fine"), session_store=store)
+    result = await runtime.run_turn(session.session_id, "hello")
+
+    assert result.run_id

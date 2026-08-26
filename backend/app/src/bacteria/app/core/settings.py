@@ -131,6 +131,20 @@ class Settings(BaseSettings):
             somebody states one. That is the honest state of step two and is why
             the default is the store that works.
 
+        graph_retrieval_enabled: Whether the graph decides which memories a turn
+            is shown, by resolving the message to nodes and returning the
+            confirmed claims about them.
+
+            **Off by default, and the default is doing work.** With nothing
+            confirmed the graph narrows to an empty set, so a deployment that
+            turned this on before curating anything would lose its memory and
+            read it as retrieval failing rather than as there being nothing to
+            retrieve.
+
+            Separate from ``graph_backed_memory``: one decides where a keyed
+            memory *lives*, the other decides which memories are *surfaced*, and
+            a deployment may sensibly want either without the other.
+
         graph_extraction_enabled: Whether a turn queues a job to read the new
             transcript items and record *relationships* from them in the memory
             graph.
@@ -219,6 +233,7 @@ class Settings(BaseSettings):
     worker_concurrency: int = 4
     memory_extraction_enabled: bool = False
     graph_backed_memory: bool = False
+    graph_retrieval_enabled: bool = False
     graph_extraction_enabled: bool = False
     graph_extraction_model: str | None = None
     graph_extraction_max_assertions: int = 8

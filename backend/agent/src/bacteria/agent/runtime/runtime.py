@@ -69,7 +69,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from bacteria.agent.context.assembly import AssembledContext, assemble_context
+from bacteria.agent.context.assembly import (
+    DEFAULT_MEMORY_LIMIT,
+    AssembledContext,
+    assemble_context,
+)
+from bacteria.agent.context.retrieval import SuppliesMemoryCandidates
 from bacteria.agent.model.protocol import ModelResponse, SendsMessages, ToolCall
 from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.session.store import TranscriptItem
@@ -217,9 +222,19 @@ class Runtime:
             implementation and not a change to this file.
     """
 
-    def __init__(self, model_client: SendsMessages, session_store: SessionRepository) -> None:
+    def __init__(
+        self,
+        model_client: SendsMessages,
+        session_store: SessionRepository,
+        candidate_supplier: SuppliesMemoryCandidates | None = None,
+    ) -> None:
         self._model_client = model_client
         self._session_store = session_store
+        # Optional, and absent by default. Without one every memory in state is a
+        # candidate and assembly behaves exactly as it always has -- so a host
+        # that never heard of narrowing owes nothing, which is the property that
+        # makes this a seam rather than a requirement.
+        self._candidate_supplier = candidate_supplier
 
     async def run_turn(
         self,
@@ -256,7 +271,20 @@ class Runtime:
         step_tracker = StepTracker()
 
         state = await self._session_store.get_state(session_id)
-        context = assemble_context(state, user_text)
+        # **The await is here and not inside assembly**, which is the whole shape
+        # of ADR 0024. Narrowing does I/O and belongs to the host; ranking is a
+        # pure rule. Putting the call inside `assemble_context` would make the
+        # one function that answers "what was the model shown" also a function
+        # that talks to a database, and that function's value is that it can be
+        # read in a sitting.
+        candidates = (
+            None
+            if self._candidate_supplier is None
+            else await self._candidate_supplier.candidates(
+                session_id=session_id, user_text=user_text, limit=DEFAULT_MEMORY_LIMIT
+            )
+        )
+        context = assemble_context(state, user_text, candidates=candidates)
         tools = tool_registry.schemas_for_run() if tool_registry else None
         # Names only. The schemas are the model's business; what a run needs
         # recorded is which capabilities were on the table, since a tool that

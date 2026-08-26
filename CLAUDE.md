@@ -81,6 +81,22 @@ also need `get_settings.cache_clear()`.
 already has rows. Read every generated migration and apply it to a database
 that has data in it.
 
+**Branch every pull request off `main`, never off another branch.** A stacked PR
+merges into its parent branch, and once that parent has itself gone into `main`
+the merge lands somewhere nothing leads to: GitHub shows the PR green and merged,
+and the code is not on `main`. This has happened three times here and cost a
+recovery PR each time — most recently #63, whose 280-line
+`chat/graph_candidates.py` was absent from `main` while its PR read as merged.
+
+The mechanism supposed to prevent it — GitHub retargeting a child PR when its
+base branch is deleted — does not fire when merges are batched: #64, #65 and #66
+were merged inside 31 seconds and the last two stranded. Where work genuinely
+depends on unmerged work, merge the parent first and rebase onto `main`.
+
+Checking is one command, and a PR's "Merged" badge is not it:
+
+    git merge-base --is-ancestor <sha> origin/main
+
 **Alembic must keep ignoring `procrastinate_*` tables.** They come from
 procrastinate's own SQL via a migration, not from SQLModel metadata, so
 autogenerate would write a migration to drop them. The filter is

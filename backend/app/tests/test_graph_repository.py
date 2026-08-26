@@ -252,3 +252,86 @@ async def test_the_relation_tally_counts_across_every_owner(engine):
         tally = await tally_relations(session)
 
     assert tally["cto"] >= 2, "both owners' rows are counted, not one owner's"
+
+
+async def test_endorsing_a_claim_does_not_count_as_seeing_the_relation_twice(engine):
+    """Confirming is agreement, not a second sighting.
+
+    Confirmation appends a row carrying the same triple with ``origin="stated"``
+    — deliberate, and right for a log. Counted as a row it made the rule of three
+    run backwards: a relation somebody had *endorsed*, which is the strongest
+    signal it is worth having, crossed the threshold on two real mentions where
+    one nobody looked at needed three.
+
+    Found by running the chore over a real graph, where a single mention of
+    ``pet`` reported a count of two.
+    """
+    async with AsyncSession(engine) as session:
+        repo = SqlGraphRepository(session)
+        await repo.record(
+            [
+                Assertion(
+                    assertion_id="endorse-1",
+                    user_id="endorse",
+                    src="org:acme",
+                    rel="endorsed_rel",
+                    dst="person:diane",
+                    valid=Interval(None, OPEN_ENDED),
+                    recorded_at=JAN,
+                    origin="inferred",
+                ),
+                Assertion(
+                    assertion_id="endorse-2",
+                    user_id="endorse",
+                    src="org:acme",
+                    rel="endorsed_rel",
+                    dst="person:diane",
+                    valid=Interval(None, OPEN_ENDED),
+                    recorded_at=FEB,
+                    origin="stated",
+                ),
+            ]
+        )
+        await session.commit()
+
+        tally = await tally_relations(session)
+
+    assert tally["endorsed_rel"] == 1, "one claim, twice recorded, is one sighting"
+
+
+async def test_the_same_relation_about_different_things_counts_twice(engine):
+    """The other half, or the fix would be a rule of one.
+
+    Distinctness is on the claim, so two people's pets are two sightings even
+    though the relation is the same word. Without this the previous test could be
+    satisfied by counting relations rather than claims.
+    """
+    async with AsyncSession(engine) as session:
+        repo = SqlGraphRepository(session)
+        await repo.record(
+            [
+                Assertion(
+                    assertion_id="distinct-1",
+                    user_id="distinct",
+                    src="person:one",
+                    rel="distinct_rel",
+                    dst="animal:canija",
+                    valid=Interval(None, OPEN_ENDED),
+                    recorded_at=JAN,
+                ),
+                Assertion(
+                    assertion_id="distinct-2",
+                    user_id="distinct",
+                    src="person:two",
+                    rel="distinct_rel",
+                    dst="animal:otro",
+                    valid=Interval(None, OPEN_ENDED),
+                    recorded_at=JAN,
+                ),
+            ]
+        )
+        await session.commit()
+
+        tally = await tally_relations(session)
+
+    assert tally["distinct_rel"] == 2

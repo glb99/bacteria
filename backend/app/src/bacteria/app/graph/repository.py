@@ -34,7 +34,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
-from sqlalchemy import func, or_
+from sqlalchemy import distinct, func, or_, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -484,8 +484,22 @@ async def tally_relations(db: AsyncSession) -> dict[str, int]:
     Counts the whole log rather than what is currently believed. A retracted
     claim still evidences the vocabulary the extractor reaches for, which is what
     this is measuring — not what is true.
+
+    **Distinct claims, not rows, and the difference is an endorsement.** Confirming
+    a claim appends a second row with the same triple and ``origin="stated"`` —
+    right for a log, and wrong for this count, which read it as the extractor
+    having reached for the word twice. It had not: the second row is the owner
+    agreeing with the first, not new evidence about the vocabulary.
+
+    Left unfixed, the rule of three ran backwards. A relation somebody *confirmed*
+    — the strongest signal it is worth having — crossed the threshold on two real
+    mentions, while one nobody looked at needed three. Found by running the chore
+    over a real graph, where ``pet`` showed a count of two from a single mention.
     """
-    statement = select(GraphAssertion.rel, func.count()).group_by(col(GraphAssertion.rel))
+    claim = tuple_(col(GraphAssertion.user_id), col(GraphAssertion.src), col(GraphAssertion.dst))
+    statement = select(GraphAssertion.rel, func.count(distinct(claim))).group_by(
+        col(GraphAssertion.rel)
+    )
     return {rel: count for rel, count in (await db.exec(statement)).all()}
 
 

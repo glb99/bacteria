@@ -30,6 +30,7 @@ from bacteria.app.graph.catalogue import (
     CATALOGUE,
     NAME_RELATION,
     Relation,
+    is_canonical,
     lookup,
     read_as,
 )
@@ -38,7 +39,7 @@ from bacteria.app.graph.conclusions import Conclusion, stale_after
 from bacteria.app.graph.constraints import Conflict, conflicts_for
 from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
 from bacteria.app.graph.inference import infer_succession
-from bacteria.app.graph.log import Assertion
+from bacteria.app.graph.log import Assertion, log_expire
 from bacteria.app.graph.log import retract as log_retract
 from bacteria.app.graph.repository import SqlGraphRepository, UnknownNodeError
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
@@ -850,6 +851,90 @@ async def retract(
 
     conflicts, inferred = await _reconcile(repository, owner, {assertion.rel}, relations, now)
     return Outcome(conflicts=conflicts, inferred=inferred, stale=now_stale)
+
+
+async def expire_tail(
+    repository: SqlGraphRepository,
+    user_id: str,
+    *,
+    before: datetime,
+    now: datetime,
+    dry_run: bool = False,
+) -> list[Assertion]:
+    """Close tail claims nobody came back to, and say which.
+
+    **The only thing here that removes without being asked**, and it is narrow on
+    purpose. A claim qualifies on three counts at once:
+
+    - **Its relation is not in the catalogue.** A canonical claim uses agreed
+      vocabulary and stays however long it goes unread.
+    - **Nobody confirmed it.** ``origin`` is still ``inferred``, so no person ever
+      meant it. A confirmed tail claim is somebody's deliberate act and outlives
+      any clock.
+    - **It is older than ``before``.**
+
+    **Why the tail and not everything.** ADR 0007 keeps an unratified relation
+    *because it is evidence for what the catalogue should become* — and evidence
+    has a shelf life. A word still unratified and unconfirmed after the window has
+    been available the whole time and nothing came of it, which is an answer
+    rather than an absence.
+
+    It also repairs the promotion tally, which was not the reason for choosing it.
+    ``tally_relations`` counts every tail claim ever written, so a word seen once
+    a year climbs toward three forever; expiry makes three occurrences mean three
+    *recent* ones, which is the live regularity the rule of three was meant to
+    detect rather than a lifetime total.
+
+    Closes rather than deletes, so this is retention in the sense §2 principle 8
+    permits: belief ends, the row stays, and ``closed_by`` says a clock did it
+    rather than a person.
+
+    ``dry_run`` returns what would be closed and writes nothing, so the chore's
+    preview and its action cannot disagree.
+
+    Not built:
+        Iterating owners. This takes one, because the repository is owner-scoped
+        and a chore that quietly writes across everybody is a different thing
+        wanting a different review. The caller loops when there is more than one
+        owner to loop over.
+    """
+    believed = await repository.current(user_id)
+    # A confirmation appends a row rather than flipping a flag, so a claim
+    # somebody meant is *two* rows and only one of them says `stated`. Checking
+    # `origin` alone takes the proposal out from under the endorsement -- found by
+    # running the sweep over a real graph, where its one candidate was a claim the
+    # owner had confirmed the day before. Compared on the triple and its interval,
+    # which is `_claim_of` minus `origin`, for the reason `retract` drops it too:
+    # there those are the two rows that belong together, and so are these.
+    endorsed = {_claim_of(a)[:5] for a in believed if a.origin == "stated"}
+    doomed = [
+        claim
+        for claim in believed
+        if not is_canonical(claim.rel)
+        and claim.origin == "inferred"
+        and claim.recorded_at < before
+        and _claim_of(claim)[:5] not in endorsed
+    ]
+    if not doomed:
+        return []
+
+    if dry_run:
+        # One selection, two callers. The chore reports before it writes, and a
+        # report built from a second copy of this filter is a report that drifts
+        # from what the sweep would do -- which is the one thing an operator is
+        # relying on it not to.
+        return doomed
+
+    ids = [claim.assertion_id for claim in doomed]
+    dependents = await repository.depending_on(user_id, ids)
+    for claim in doomed:
+        await repository.close(log_expire(claim, at=now))
+
+    # The same walk retraction does, for the same reason: a conclusion resting on
+    # a claim that has gone is not wrong, it is unexamined.
+    for conclusion in stale_after(dependents, ids):
+        await repository.set_status(user_id, conclusion.conclusion_id, "stale")
+    return doomed
 
 
 async def reject(

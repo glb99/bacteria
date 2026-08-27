@@ -27,13 +27,20 @@ from typing import Any, Iterable, Literal, Optional
 
 from bacteria.app.graph.temporal import Interval
 
-Closure = Literal["superseded", "retracted"]
+Closure = Literal["superseded", "retracted", "expired"]
 """Which act ended belief in a claim.
 
 A correction and a rejection both close ``recorded_until``, and only this
 says which happened. It is the difference between "we know better now" and
 "a person said no", and a system that cannot tell them apart cannot report
 how often its extractor is wrong.
+
+``expired`` is the third and the one nobody performed. A tail claim nobody
+ratified and nobody confirmed is closed on a clock, and it must not read as
+either of the others: it is not a correction, and no person said no. Counting
+it as ``retracted`` would make the extractor look wrong about facts nobody ever
+looked at, which is the opposite of what happened — the word was offered as
+evidence, the evidence sat there, and nothing came of it.
 """
 
 Origin = Literal["stated", "inferred"]
@@ -148,6 +155,16 @@ def retract(old: Assertion, *, at: datetime) -> Assertion:
     absent.
     """
     return replace(old, recorded_until=at, closed_by="retracted")
+
+
+def log_expire(old: Assertion, *, at: datetime) -> Assertion:
+    """Close a claim because nobody ever came back to it.
+
+    A sibling of :func:`log_retract` and deliberately not the same call. Both
+    close belief and only ``closed_by`` says which happened, which is the whole
+    reason that field exists.
+    """
+    return replace(old, recorded_until=at, closed_by="expired")
 
 
 def supersede(

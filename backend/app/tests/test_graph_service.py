@@ -24,6 +24,7 @@ from bacteria.app.graph.service import (
     MismatchedKindsError,
     claims_for,
     confirm,
+    expire_tail,
     link,
     observe,
     owner,
@@ -814,3 +815,115 @@ async def test_a_name_projects_as_keyed_memory(repo):
     spoken = await preferences_for(repo, "keyed", session_id="s")
 
     assert [(p.key, p.value) for p in spoken] == [("name", "Guillermo")]
+
+
+async def test_expiry_takes_the_tail_and_leaves_the_catalogue(repo):
+    """Three conditions at once, and each one is doing work.
+
+    A canonical claim stays however long it goes unread — it uses agreed
+    vocabulary, and nothing about an old fact makes it wrong. Only the tail is
+    kept *as evidence* for what the catalogue should become, and evidence that
+    has sat available and unacted-on is an answer rather than an absence.
+    """
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    await observe(
+        repo,
+        [
+            Assertion(
+                "keep-canon",
+                "exp",
+                "org:acme",
+                "cto",
+                "person:diane",
+                Interval(None, OPEN_ENDED),
+                old,
+            ),
+            Assertion(
+                "drop-tail",
+                "exp",
+                "person:me",
+                "pet",
+                "animal:canija",
+                Interval(None, OPEN_ENDED),
+                old,
+            ),
+        ],
+        now=old,
+    )
+
+    gone = await expire_tail(repo, "exp", before=W1, now=W3)
+
+    assert [a.assertion_id for a in gone] == ["drop-tail"]
+    assert {a.rel for a in await repo.current("exp")} == {"cto"}
+
+
+async def test_expiry_never_takes_a_claim_somebody_meant(repo):
+    """A confirmed tail claim outlives any clock.
+
+    `pet` is a perfectly good relation the catalogue cannot express — Q2 of
+    dialogue 11 — so a person confirming one is saying the word is right even
+    though the vocabulary has not caught up. Expiring that would be the sweep
+    overruling the owner.
+    """
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    claim = Assertion(
+        "meant-it",
+        "meant",
+        "person:me",
+        "pet",
+        "animal:canija",
+        Interval(None, OPEN_ENDED),
+        old,
+        origin="stated",
+    )
+    await observe(repo, [claim], now=old)
+
+    assert await expire_tail(repo, "meant", before=W1, now=W3) == []
+    assert len(await repo.current("meant")) == 1
+
+
+async def test_an_expired_claim_says_a_clock_closed_it(repo):
+    """Not `retracted`, which would report the extractor wrong about a fact
+    nobody ever looked at. `closed_by` exists to tell these apart.
+    """
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    await observe(
+        repo,
+        [
+            Assertion(
+                "clocked",
+                "clock",
+                "person:me",
+                "pet",
+                "animal:canija",
+                Interval(None, OPEN_ENDED),
+                old,
+            )
+        ],
+        now=old,
+    )
+
+    await expire_tail(repo, "clock", before=W1, now=W3)
+
+    back_then = await repo.believed_at("clock", old)
+    assert [a.assertion_id for a in back_then] == ["clocked"], "it was believed then"
+    assert back_then[0].closed_by == "expired", "and a clock is what ended that"
+    assert await repo.believed_at("clock", W4) == [], "and it is not believed now"
+
+
+async def test_expiry_leaves_the_proposal_under_an_endorsement(repo):
+    """Confirming appends a row, so a meant claim is two rows and one says `stated`.
+
+    Checking `origin` alone takes the proposal out from under the endorsement.
+    Found by running the sweep over a real graph: its only candidate was a claim
+    the owner had confirmed the day before.
+    """
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    proposal = Assertion(
+        "prop", "pair", "person:me", "pet", "animal:canija", Interval(None, OPEN_ENDED), old
+    )
+    await observe(repo, [proposal], now=old)
+    await confirm(repo, proposal, assertion_id="endorsed", now=W1)
+
+    assert await expire_tail(repo, "pair", before=W3, now=W4) == []
+    assert len(await repo.current("pair")) == 2, "both rows stand"

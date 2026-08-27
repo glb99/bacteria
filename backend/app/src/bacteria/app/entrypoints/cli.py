@@ -16,6 +16,7 @@ will eventually be pointed at the wrong one and build it there. Run
 import argparse
 import io
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Mapping, cast
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -40,7 +41,8 @@ from bacteria.app.core.settings import get_settings, load_env_file
 from bacteria.app.evaluation.checks import Policy, evaluate
 from bacteria.app.evaluation.runs import load_runs
 from bacteria.app.graph.catalogue import PROMOTION_THRESHOLD, promotable
-from bacteria.app.graph.repository import tally_relations
+from bacteria.app.graph.repository import SqlGraphRepository, tally_relations
+from bacteria.app.graph.service import expire_tail
 
 
 async def _issue(principal_id: str, label: str) -> int:
@@ -580,6 +582,56 @@ async def _memory_diff(session_id: str) -> int:
     return 0
 
 
+DEFAULT_TAIL_DAYS = 30
+"""How old an unconfirmed tail claim must be before this closes it.
+
+**A guess, and labelled one.** Dialogue 12 asked for the window to be measured —
+how long a claim actually takes to be confirmed — and there is not yet enough
+confirmed to measure. Thirty days is long enough that nobody loses a fact they
+meant to keep and short enough that a junk word does not climb toward promotion
+for a year. Replace it with a number when there is one.
+"""
+
+
+async def _expire_tail(principal_id: str, days: int, apply: bool) -> int:
+    """Close unratified claims nobody came back to, or say which it would close.
+
+    **Reports by default and writes only when asked**, which is the opposite of
+    ``relations`` and deliberate: that one cannot change anything, and this is
+    the only chore in the system that ends belief without a person naming the
+    claim. A sweep that runs before its operator has seen what it would take is
+    how a curation tool becomes a data-loss incident.
+    """
+    now = datetime.now(timezone.utc)
+    before = now - timedelta(days=days)
+
+    async with AsyncSession(get_engine()) as db:
+        repository = SqlGraphRepository(db)
+        labels = {node.node_id: node.label for node in await repository.nodes(principal_id)}
+        if apply:
+            doomed = await expire_tail(repository, principal_id, before=before, now=now)
+            await db.commit()
+        else:
+            doomed = await expire_tail(
+                repository, principal_id, before=before, now=now, dry_run=True
+            )
+
+    if not doomed:
+        print(f"Nothing unratified and unconfirmed is older than {days} days.")
+        return 0
+
+    verb = "Closed" if apply else "Would close"
+    print(f"{verb} {len(doomed)} claim(s) unratified and unconfirmed for {days}+ days:")
+    for claim in doomed:
+        src = labels.get(claim.src, claim.src)
+        dst = labels.get(claim.dst, claim.dst)
+        print(f"  {claim.recorded_at:%Y-%m-%d}  {src} -{claim.rel}-> {dst}")
+    if not apply:
+        print()
+        print("Nothing was written. Pass --apply to close them.")
+    return 0
+
+
 async def _relations(threshold: int) -> int:
     """Report relation names the extractor keeps producing and the catalogue lacks.
 
@@ -744,6 +796,20 @@ def main() -> int:
         help="how many times a name must appear to be listed; the rule of three by default",
     )
 
+    expire = commands.add_parser("expire-tail", help="close unratified claims nobody came back to")
+    expire.add_argument("principal_id", help="whose graph to sweep")
+    expire.add_argument(
+        "--days",
+        type=int,
+        default=DEFAULT_TAIL_DAYS,
+        help="how old an unconfirmed tail claim must be; the default is a guess, not a measurement",
+    )
+    expire.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually close them; without this it only reports what it would close",
+    )
+
     diff = commands.add_parser(
         "memory-diff", help="compare what each memory store holds for a session"
     )
@@ -754,6 +820,8 @@ def main() -> int:
         return platform.run(_memory_diff(args.session_id))
     if args.command == "relations":
         return platform.run(_relations(args.threshold))
+    if args.command == "expire-tail":
+        return platform.run(_expire_tail(args.principal_id, args.days, args.apply))
     if args.command == "issue-key":
         return platform.run(_issue(args.principal_id, args.label or args.principal_id))
     if args.command == "chat":

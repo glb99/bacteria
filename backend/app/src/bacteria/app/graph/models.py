@@ -310,6 +310,14 @@ class GraphExtraction(SQLModel, table=True):
     round trip is held for as long as a vendor feels like taking. Two concurrent
     runs may both pay for a call and reach the same answer, which is money rather
     than correctness.
+
+    **The foreign key is the part that does not generalize.** ``graph_assertion``
+    deliberately refuses one on its own ``session_id`` so that a claim may come
+    from ingestion, or from no session at all; this table takes one, so a source
+    that is not a conversation has nowhere to record how far it has been read.
+    That is the first thing to move when a second source arrives, and
+    :func:`~bacteria.app.graph.extraction.extract_assertions` carries the rest of
+    the list.
     """
 
     __tablename__ = "graph_extraction"

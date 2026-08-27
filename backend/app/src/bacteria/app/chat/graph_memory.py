@@ -17,13 +17,27 @@ the system that reads assertions on behalf of a prompt, and
 function rather than a flag on it.
 
 Not built:
-    A name. ``user_name`` is the one key the tables hold that this store cannot,
-    because ADR 0007 §9 stopped the extractor emitting name-claims and a name is
-    not a preference relation. The obvious repair — emit the owner node's label —
-    is unsafe: a label has no ``origin``, so it would reach a prompt without
-    passing the one filter that decides what may be spoken. What it wants is to
-    be a *claim* in the shape ADR 0008 built, which is a change to that record
-    rather than to this module.
+    **A refusal the model can see.** This store refuses a key the catalogue has
+    no relation for, and expresses it by raising. The agent wraps any handler
+    exception as ``ToolExecutionError`` and the runtime propagates it, so a
+    refused key **takes down the whole turn** — the caller gets a 500 and no
+    answer, for a memory nobody needed.
+
+    Turning ``graph_backed_memory`` on and taking one turn fails this way every
+    time. Twice, on two different keys: the model called ``remember`` with
+    ``user_name`` (since aliased to ``name``) and then, on a retry, invented
+    ``brevity_preference`` for a tone. Inventing keys is what a model does, and
+    the catalogue exists because of it — so this is the ordinary case rather
+    than an edge.
+
+    The gap is in the tool contract rather than here: the table store never
+    refuses anything, so ``propose``/``remember`` have no way to return *I
+    cannot hold that* and let the model adapt. Fixing it means giving a refusal
+    a representation the agent understands, which crosses the package boundary
+    and wants a record.
+
+    No test catches it because the store's tests call ``remember`` directly with
+    catalogue keys. The model does not.
 """
 
 from datetime import datetime, timezone

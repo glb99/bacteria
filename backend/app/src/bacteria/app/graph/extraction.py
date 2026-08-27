@@ -265,6 +265,37 @@ async def extract_assertions(
         Counts, for the caller to log. Not the claims themselves: a task's return
         value is stored in the jobs table, and putting them there would copy the
         content into a second place with its own retention question.
+
+    Not built:
+        **A second source.** A transcript is not the only thing worth extracting
+        from, and the log already says so: ``GraphAssertion.session_id`` is
+        deliberately not a foreign key precisely so that a claim may come "from
+        ingestion, or from a source with no session at all". That decision was
+        made where it was expensive to get wrong — the schema — and never reached
+        this module, which is why it is written down here rather than left to be
+        rediscovered by whoever tries.
+
+        Everything below this function is already source-agnostic:
+        :func:`~bacteria.app.graph.service.observe` takes assertions,
+        :func:`~bacteria.app.graph.service.refer_to` takes labels, and the
+        catalogue takes relation names. None of them knows what a transcript is.
+        Three things in *this* layer are chat-shaped and would have to move:
+
+        - :class:`~bacteria.app.graph.models.GraphExtraction` keys its watermark
+          with a foreign key to ``chat_session``, so a batch with no conversation
+          cannot record how far it has been read. That one is a migration.
+        - This function selects ``ChatTranscriptItem`` and advances by ``seq``. A
+          batch has records rather than an ordered conversation.
+        - :func:`_trust_of` decides trust from ``payload["role"]``. Ingested
+          records have no role, so the tier is undefined for them rather than
+          merely conservative — and ADR 0006 gates *influence* on it.
+
+        The shape it wants is a reader: *what is new since my watermark* and *how
+        do I render it for the model*, with chat and a batch as two
+        implementations. Not designed here, because designing an absent layer to
+        support a stub is how it gets designed for the wrong caller — and no
+        second caller exists yet. ``ingestion/pipeline.py`` is where one would
+        come from; its steps already compose the right way.
     """
     session = await db.get(ChatSession, session_id)
     if session is None:

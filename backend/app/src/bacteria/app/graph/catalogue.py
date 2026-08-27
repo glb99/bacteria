@@ -197,6 +197,7 @@ CATALOGUE: tuple[Relation, ...] = (
         dst_kind="value",
         functional=True,
         aliases=(
+            Alias("user_name"),
             Alias("named"),
             Alias("called"),
             Alias("goes_by"),

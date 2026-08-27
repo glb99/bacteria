@@ -37,8 +37,8 @@ from bacteria.agent.session.store import (
     MemoryScope,
 )
 from bacteria.app.chat.memory import MemoryView
-from bacteria.app.graph.catalogue import is_canonical
 from bacteria.app.graph.catalogue import preferences as preference_relations
+from bacteria.app.graph.catalogue import resolve
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import (
@@ -50,6 +50,28 @@ from bacteria.app.graph.service import (
     retract,
 )
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+
+
+def _canonical_key(key: str) -> str:
+    """The catalogue's own word for a key, or a refusal.
+
+    **Resolved rather than matched exactly**, which the first turn against this
+    store found the hard way: the extractor's relations are canonicalized through
+    aliases and the ``remember`` tool's keys were not, so the same word was
+    accepted when a model wrote it into a claim and refused when a model passed it
+    to a tool. The model reaches for ``user_name``; the catalogue calls it
+    ``name``; nothing was translating between them.
+
+    A converse alias is refused rather than swapped. Swapping is meaningful for a
+    claim, which has two ends; a key has one, so a converse here is a name for a
+    relationship read the other way round and not a spelling of this one.
+    """
+    resolution = resolve(key)
+    if resolution is None or resolution.swap:
+        raise UnknownPreferenceError(key)
+    if resolution.relation not in preference_relations():
+        raise UnknownPreferenceError(key)
+    return resolution.relation.name
 
 
 class UnknownPreferenceError(KeyError):
@@ -212,8 +234,7 @@ class GraphMemoryStore:
         origin: str,
         prompt_version: Optional[str] = None,
     ) -> Assertion:
-        if not is_canonical(key) or key not in {r.name for r in preference_relations()}:
-            raise UnknownPreferenceError(key)
+        key = _canonical_key(key)
 
         now = datetime.now(timezone.utc)
         me = await owner(self._repository, user_id, now=now)

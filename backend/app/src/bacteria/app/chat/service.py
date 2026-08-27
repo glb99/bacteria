@@ -126,6 +126,14 @@ def build_registry(
     Optional so this stays callable without a store that can answer for it, and
     fetched by ``run_turn`` rather than by each entrance, for the reason
     ``run_turn``'s ``extract`` argument gives at length.
+
+    **The graph-backed store also passes the keys it will accept**, because it
+    has a complete list and the table store does not: a key there is a relation,
+    and relations are a governed vocabulary. Without it the model coins a name —
+    it reached for ``brevity_preference`` on the first turn ever taken against
+    that store — and the store refuses, which today costs the whole turn rather
+    than the memory. Telling it the list first is the cheap half of that; letting
+    a refusal be an answer is the other half and is not built.
     """
     registry = ToolRegistry()
     registry.register(
@@ -134,9 +142,25 @@ def build_registry(
             session_id,
             confirmed_keys=tuple(known.active) if known else (),
             suggested_keys=tuple(known.proposed) if known else (),
+            allowed_keys=_accepted_keys(),
         )
     )
     return registry
+
+
+def _accepted_keys() -> tuple[str, ...]:
+    """Every key the configured store will take, or empty for "any".
+
+    Read from settings rather than asked of the repository, because the question
+    is about the *store that was configured* and a repository answers for the one
+    it holds — which is the same thing today and would stop being on the day a
+    third store exists.
+    """
+    if not get_settings().graph_backed_memory:
+        return ()
+    from bacteria.app.graph.catalogue import preferences as preference_relations
+
+    return tuple(relation.name for relation in preference_relations())
 
 
 def _approver(turn: observability.Turn):

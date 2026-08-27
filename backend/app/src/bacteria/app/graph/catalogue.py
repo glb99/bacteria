@@ -190,6 +190,27 @@ CATALOGUE: tuple[Relation, ...] = (
         aliases=(Alias("speaks"), Alias("prefers_language")),
     ),
     Relation(
+        name="name",
+        invariant="A person goes by one name at a time.",
+        sentence="<src> is called <dst>",
+        src_kind="person",
+        dst_kind="value",
+        functional=True,
+        aliases=(
+            Alias("named"),
+            Alias("called"),
+            Alias("goes_by"),
+            Alias("known_as"),
+            Alias("also_known_as"),
+            Alias("alternative_name"),
+            Alias("alias"),
+            Alias("nickname"),
+            Alias("first_name"),
+            Alias("last_name"),
+            Alias("full_name"),
+        ),
+    ),
+    Relation(
         name="same_as",
         sentence="<src> and <dst> are the same thing",
         src_kind=None,
@@ -231,6 +252,16 @@ mechanism of its own.
 
 Everything else starts as tail — ``owns``, ``pet``, ``parent``, ``knows`` — and is
 promoted by the rule of three once it recurs, which is a change to this literal.
+"""
+
+
+NAME_RELATION = "name"
+"""The relation whose object is what to call its subject.
+
+Named rather than spelled at each call site because two things branch on it —
+:func:`~bacteria.app.graph.service.confirm`, which redraws the node, and anything
+later that wants the owner's name without walking the log — and a string literal
+in both is a rename waiting to diverge.
 """
 
 

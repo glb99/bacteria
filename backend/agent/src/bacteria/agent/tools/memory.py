@@ -54,6 +54,21 @@ _KEY_DESCRIPTION = (
     "Reusing a key replaces your earlier suggestion for it."
 )
 
+_KEY_CLOSED = (
+    "These are the only keys that exist. Do not coin one: a fact that fits none "
+    "of them is simply not stored, which is a normal outcome and not a problem "
+    "to report. Never mention this tool or its keys to the user."
+)
+"""Why the last sentence is there, and it was not there first.
+
+Told only that other keys are unavailable, the model explained itself: *\"since
+the memory tool only allows me to save your name directly, I will keep your
+location in mind for this conversation\"*. Accurate, obedient, and a description
+of the storage layer offered to somebody who asked about their mother. A limit
+the model works within is not news; narrating it makes the tool the subject of a
+conversation that was about something else.
+"""
+
 _KEY_REUSE = (
     "Reuse one of these whenever the fact is the same kind; a corrected fact "
     "keeps the key it corrects, and only the value changes. Invent a new key "
@@ -61,7 +76,9 @@ _KEY_REUSE = (
 )
 
 
-def _key_description(confirmed: Sequence[str], suggested: Sequence[str]) -> str:
+def _key_description(
+    confirmed: Sequence[str], suggested: Sequence[str], allowed: Sequence[str] = ()
+) -> str:
     """The ``key`` description, plus the keys this conversation already uses.
 
     A model left to name a fact freely renames it on every occasion. The
@@ -82,16 +99,26 @@ def _key_description(confirmed: Sequence[str], suggested: Sequence[str]) -> str:
     A key that duplicates a fact costs more than a clumsy one, and it is why this
     is worth a dynamic description rather than a fixed string: the two proposers
     have to converge on one name or the same fact is stored twice, forever.
+
+    ``allowed`` is a stronger statement than the other two and is rendered as
+    one. Confirmed and suggested keys say *this is what we call it*; a store may
+    take a new name beside them. ``allowed`` says **there are no other names** —
+    a store that refuses everything else, which the graph-backed one does because
+    a key is a relation and relations are a governed vocabulary. Rendering it as
+    a preference would leave the model coining names the store then rejects, and
+    a rejected key is not a slightly worse name: today it costs the whole turn.
     """
-    if not confirmed and not suggested:
+    if not confirmed and not suggested and not allowed:
         return _KEY_DESCRIPTION
 
     lines = [_KEY_DESCRIPTION]
+    if allowed:
+        lines.append(f"Keys this store accepts: {', '.join(sorted(allowed))}.")
     if confirmed:
         lines.append(f"Confirmed keys, prefer these: {', '.join(sorted(confirmed))}.")
     if suggested:
         lines.append(f"Suggested, not yet confirmed: {', '.join(sorted(suggested))}.")
-    lines.append(_KEY_REUSE)
+    lines.append(_KEY_CLOSED if allowed else _KEY_REUSE)
     return " ".join(lines)
 
 
@@ -103,6 +130,7 @@ def build_remember_tool(
     activate_immediately: bool = False,
     confirmed_keys: Sequence[str] = (),
     suggested_keys: Sequence[str] = (),
+    allowed_keys: Sequence[str] = (),
 ) -> ToolDefinition:
     """Build a ``remember`` tool that proposes into ``session_id``.
 
@@ -121,6 +149,11 @@ def build_remember_tool(
             :func:`_key_description` for what happens without them.
         suggested_keys: Keys only *proposed* so far, kept separate from the
             confirmed ones rather than merged into one list.
+        allowed_keys: The complete set a store will accept, when it has one.
+            Empty means any key is allowed, which is the table store. A store
+            with a closed vocabulary passes it so the model chooses from the
+            list rather than coining a name the store then rejects — see
+            :func:`_key_description` for why that is not merely tidier.
         activate_immediately: Whether the proposal becomes active memory in the
             same call.
 
@@ -197,7 +230,7 @@ def build_remember_tool(
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": _key_description(confirmed_keys, suggested_keys),
+                    "description": _key_description(confirmed_keys, suggested_keys, allowed_keys),
                 },
                 "value": {
                     "type": "string",

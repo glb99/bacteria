@@ -328,3 +328,38 @@ async def test_a_value_is_asked_for_as_a_fact_rather_than_a_sentence():
 
     assert "as briefly as it can be stated" in described
     assert "Never address the user" in described
+
+
+async def test_a_closed_store_says_which_keys_exist_rather_than_which_are_preferred():
+    """ "Prefer these" and "there are no others" are different instructions.
+
+    A store may have a complete list — the graph-backed one does, because a key
+    there is a relation and relations are governed. Told to *prefer* names it
+    still coins one when none fits, which is right against a store that takes any
+    key and wrong against one that takes none of the others.
+    """
+    store, sid = await a_session()
+
+    described = build_remember_tool(store, sid, allowed_keys=("name", "tone")).input_schema[
+        "properties"
+    ]["key"]["description"]
+
+    assert "Keys this store accepts: name, tone." in described
+    assert "only keys that exist" in described
+    assert "Invent a new key" not in described, "an open-store instruction, in a closed store"
+
+
+async def test_an_open_store_is_unchanged():
+    """The table store takes any key, and must keep being told so.
+
+    Passing no allowed keys has to leave the description exactly as it was, or
+    this change quietly narrows the store that has no vocabulary to narrow to.
+    """
+    store, sid = await a_session()
+
+    described = build_remember_tool(store, sid, confirmed_keys=("tone",)).input_schema[
+        "properties"
+    ]["key"]["description"]
+
+    assert "Invent a new key" in described
+    assert "only keys that exist" not in described

@@ -126,10 +126,12 @@ class Settings(BaseSettings):
             answered" unanswerable exactly when the two disagree, which is the
             question this setting exists to let somebody ask.
 
-            On, memory starts **empty**: nothing extracts a preference into the
-            graph yet, so a deployment that flips this loses its memory until
-            somebody states one. That is the honest state of step two and is why
-            the default is the store that works.
+            On, memory is **thinner, not empty**: extraction proposes
+            preferences the catalogue knows and the owner confirms them, so a
+            deployment that flips this keeps what has been confirmed and loses
+            every key the graph's vocabulary has no relation for — ``user_name``
+            among them, which is the one worth knowing about before flipping it.
+            That is why the default is still the store that takes any key.
 
         graph_retrieval_enabled: Whether the graph decides which memories a turn
             is shown, by resolving the message to nodes and returning the

@@ -175,3 +175,36 @@ async def test_what_the_extractor_heard_arrives_as_a_proposal(engine):
     assert view.memory == {}, "the model does not get to write its own memory"
     assert [key for _, key in view.proposals] == ["tone"]
     assert next(iter(view.proposals.values())).reason == "they asked for short answers"
+
+
+async def test_a_key_the_model_reaches_for_resolves_to_the_catalogues_word(store):
+    """Found by the first real turn against this store, as a 500.
+
+    The extractor's relations are canonicalized through aliases and the
+    `remember` tool's keys were not, so `user_name` — which the model reaches for
+    unprompted — was refused while `name` was accepted. The same word, translated
+    on one path and not the other.
+    """
+    memory, session_id = store
+
+    entry = await memory.remember(
+        session_id, USER, "user_name", "Guillermo", "said so", scope=USER_SCOPE
+    )
+
+    assert entry.value == "Guillermo"
+    view = await memory.entries(session_id, USER)
+    assert "name" in view.user_memory, "stored under the catalogue's word"
+    assert "user_name" not in view.user_memory
+
+
+async def test_a_converse_alias_is_not_a_key(store):
+    """Swapping is meaningful for a claim and meaningless for a key.
+
+    `mother_of` names the relationship read the other way round, not a spelling
+    of it — and a key has one end to hang a value on, so there is nothing for the
+    swap to act on.
+    """
+    memory, session_id = store
+
+    with pytest.raises(UnknownPreferenceError):
+        await memory.remember(session_id, USER, "mother_of", "Claudia", "said so")

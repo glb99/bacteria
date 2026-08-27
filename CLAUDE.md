@@ -81,6 +81,22 @@ also need `get_settings.cache_clear()`.
 already has rows. Read every generated migration and apply it to a database
 that has data in it.
 
+**`pkill` matches nothing in this shell, and says so by staying quiet.** It
+returns without killing `bacteria-serve`, so a "restart" leaves the old process
+holding port 8000, the new one exits with `[Errno 10048] error while attempting
+to bind`, and every request after that is answered by a server running the *old*
+configuration. That failure looks exactly like success: the endpoint responds,
+the log has no traceback anyone reads, and the result is confidently wrong. It
+cost two rounds of wrong conclusions in one session while testing a setting that
+had not been reloaded.
+
+Kill by port instead, and check the port is free before believing a restart:
+
+    (Get-NetTCPConnection -LocalPort 8000 -State Listen).OwningProcess | Stop-Process -Force
+
+Then `grep -c "bind on address"` the new log. Zero means the server you are
+talking to is the one you just started.
+
 **Branch every pull request off `main`, never off another branch.** A stacked PR
 merges into its parent branch, and once that parent has itself gone into `main`
 the merge lands somewhere nothing leads to: GitHub shows the PR green and merged,

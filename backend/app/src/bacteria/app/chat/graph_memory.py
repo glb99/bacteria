@@ -17,10 +17,13 @@ the system that reads assertions on behalf of a prompt, and
 function rather than a flag on it.
 
 Not built:
-    Anything that writes a preference into the graph on its own. Extraction does
-    not propose one, so a graph-backed memory starts **empty** — which is honest
-    and will look broken, and is the first thing a comparison against the tables
-    will show.
+    A name. ``user_name`` is the one key the tables hold that this store cannot,
+    because ADR 0007 §9 stopped the extractor emitting name-claims and a name is
+    not a preference relation. The obvious repair — emit the owner node's label —
+    is unsafe: a label has no ``origin``, so it would reach a prompt without
+    passing the one filter that decides what may be spoken. What it wants is to
+    be a *claim* in the shape ADR 0008 built, which is a change to that record
+    rather than to this module.
 """
 
 from datetime import datetime, timezone

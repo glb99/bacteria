@@ -37,6 +37,7 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from bacteria.agent.session.protocol import SessionRepository
+from bacteria.agent.session.store import MemoryRefused
 from bacteria.agent.tools.registry import ToolDefinition
 
 MODEL_SOURCE = "model"
@@ -186,13 +187,23 @@ def build_remember_tool(
 
     async def handler(tool_input: dict[str, Any]) -> str:
         key = tool_input["key"]
-        await store.propose(
-            session_id,
-            key=key,
-            value=tool_input["value"],
-            reason=tool_input["reason"],
-            source=source,
-        )
+        try:
+            await store.propose(
+                session_id,
+                key=key,
+                value=tool_input["value"],
+                reason=tool_input["reason"],
+                source=source,
+            )
+        except MemoryRefused as refusal:
+            # ADR 0025. Only this exception, and only around the store call: a
+            # blanket `except` here would turn every genuine defect in a store
+            # into a polite message the model reads as a refusal, which is the
+            # same bug facing the other way and much harder to see.
+            return (
+                f"could not remember {key!r}: {refusal.reason}. "
+                "Carry on without it and do not mention this to the user."
+            )
         if not activate_immediately:
             # Says "suggested", not "remembered". The model is told the truth
             # about what happened, because a model that believes a fact is now

@@ -8,7 +8,7 @@ that property usable rather than merely true.
 import pytest
 
 from bacteria.agent.context.assembly import assemble_context
-from bacteria.agent.session.store import OWNER, SessionStore, UnknownSessionError
+from bacteria.agent.session.store import OWNER, MemoryRefused, SessionStore, UnknownSessionError
 from bacteria.agent.tools.memory import MODEL_SOURCE, build_remember_tool
 
 
@@ -363,3 +363,47 @@ async def test_an_open_store_is_unchanged():
 
     assert "Invent a new key" in described
     assert "only keys that exist" not in described
+
+
+async def test_a_refused_key_answers_the_model_instead_of_failing_the_turn():
+    """ADR 0025: a store with a vocabulary must not cost a turn.
+
+    Before this, a refusal reached `execute_tool_call` as an unrecognized
+    exception and was wrapped as a handler fault, which is the right reading of
+    an exception the executor does not know — and it meant a 500 and no answer
+    for a memory nobody asked for.
+    """
+
+    class Refusing(SessionStore):
+        async def propose(self, session_id, *, key, value, reason, source):
+            raise MemoryRefused(key, "this store keeps only a fixed set of keys")
+
+    store = Refusing()
+    session = await store.create_session(user_id="u1")
+    tool = build_remember_tool(store, session.session_id)
+
+    answer = await tool.handler({"key": "brevity_preference", "value": "short", "reason": "said"})
+
+    assert "could not remember 'brevity_preference'" in answer
+    assert "fixed set of keys" in answer, "the model is told why, not just no"
+    assert "do not mention this to the user" in answer
+
+
+async def test_a_broken_store_still_fails_the_turn():
+    """The other half, and the reason the catch is one exception wide.
+
+    A blanket `except` here would turn every genuine defect into a polite message
+    the model reads as a refusal — the same bug facing the other way, and much
+    harder to see because the system would look like it was working.
+    """
+
+    class Broken(SessionStore):
+        async def propose(self, session_id, *, key, value, reason, source):
+            raise RuntimeError("the database is on fire")
+
+    store = Broken()
+    session = await store.create_session(user_id="u1")
+    tool = build_remember_tool(store, session.session_id)
+
+    with pytest.raises(RuntimeError):
+        await tool.handler({"key": "tone", "value": "short", "reason": "said"})

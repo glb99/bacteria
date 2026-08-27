@@ -321,3 +321,95 @@ async def test_an_extracted_fact_stays_scoped_to_the_person(db):
 
     stored = await SqlGraphRepository(db).current(USER)
     assert stored[0].scope == "user"
+
+
+async def test_a_name_is_recorded_rather_than_dropped(db):
+    """ADR 0012: the name-claim the denylist used to swallow now lands.
+
+    ADR 0007 §9 dropped every naming spelling because the object became a person
+    node beside the owner. As a `value` it is a word rather than a person, so
+    nothing is minted that would later need joining — which is why this is the
+    catalogue admitting a relation rather than the validator being loosened.
+    """
+    client = FakeClient(
+        json.dumps(
+            [
+                {
+                    "src": {"label": "self", "kind": "person"},
+                    "rel": "name",
+                    "dst": {"label": "Guillermo", "kind": "value"},
+                    "tense": "current",
+                    "reason": "the transcript said I'm Guillermo",
+                }
+            ]
+        )
+    )
+
+    result = await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
+
+    assert result.recorded == 1
+    repository = SqlGraphRepository(db)
+    stored = await repository.current(USER)
+    assert stored[0].rel == "name"
+    labels = {node.node_id: node for node in await repository.nodes(USER)}
+    assert labels[stored[0].dst].kind == "value", "a name is a word, never a person"
+    assert not any(
+        node.kind == "person" and node.label == "Guillermo" for node in labels.values()
+    ), "no second person node to join back"
+
+
+async def test_a_naming_synonym_canonicalizes_onto_name(db):
+    """The twelve-word denylist became eleven aliases and one entry.
+
+    `called`, `nickname`, `alternative_name` and the rest were a literal set with
+    no tail, no promotion path and no evidence trail — the one construct the
+    vocabulary design had to apologise for. They resolve now.
+    """
+    client = FakeClient(
+        json.dumps(
+            [
+                {
+                    "src": {"label": "self", "kind": "person"},
+                    "rel": "nickname",
+                    "dst": {"label": "Gui", "kind": "value"},
+                    "tense": "current",
+                    "reason": "the transcript said call me Gui",
+                }
+            ]
+        )
+    )
+
+    result = await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
+
+    assert result.recorded == 1
+    stored = await SqlGraphRepository(db).current(USER)
+    assert stored[0].rel == "name", "canonicalized, not left in the tail"
+    assert stored[0].attrs["proposed_rel"] == "nickname", "and the model's word is kept"
+
+
+async def test_a_name_whose_object_is_a_person_is_still_refused(db):
+    """The kind signature is the backstop, and the failure mode is the old one.
+
+    ADR 0012 depends on the model saying `kind: "value"` for a name — an
+    instruction it can be given and cannot be held to. When it does not, §6 drops
+    the claim, which is exactly what §9's denylist did: the fact is lost and
+    counted, rather than a person node being minted for a string.
+    """
+    client = FakeClient(
+        json.dumps(
+            [
+                {
+                    "src": {"label": "self", "kind": "person"},
+                    "rel": "name",
+                    "dst": {"label": "Guillermo", "kind": "person"},
+                    "tense": "current",
+                    "reason": "the transcript said I'm Guillermo",
+                }
+            ]
+        )
+    )
+
+    result = await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
+
+    assert result.recorded == 0
+    assert result.dropped == 1

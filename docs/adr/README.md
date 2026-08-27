@@ -28,3 +28,4 @@ conventions do not qualify.
 | [0009](0009-the-graph-is-correctable.md) | Give the graph a write surface: retract, rename, link, reject -- as service verbs behind thin routes | Proposed |
 | [0010](0010-memory-has-a-port.md) | Give memory a port so the graph can back it, selected by configuration, without replacing the repository | Proposed |
 | [0011](0011-a-confirmed-fact-may-be-spoken.md) | Let the owner confirm an extracted fact, making it a retrieval candidate but never a key | Proposed |
+| [0012](0012-a-name-is-a-claim-about-a-value.md) | Admit `name` as a functional relation to a value node, replacing the naming denylist | Proposed |

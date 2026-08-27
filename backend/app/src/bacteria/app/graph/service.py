@@ -26,7 +26,13 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
-from bacteria.app.graph.catalogue import CATALOGUE, Relation, lookup, read_as
+from bacteria.app.graph.catalogue import (
+    CATALOGUE,
+    NAME_RELATION,
+    Relation,
+    lookup,
+    read_as,
+)
 from bacteria.app.graph.catalogue import preferences as preference_relations
 from bacteria.app.graph.conclusions import Conclusion, stale_after
 from bacteria.app.graph.constraints import Conflict, conflicts_for
@@ -750,6 +756,17 @@ async def confirm(
     instant collides on ``uq_assertion_claim_recorded``, which is the constraint
     doing its job: at one moment there is one belief about a claim, and a
     confirmation *is* a second belief about it.
+
+    **Confirming a name also relabels its subject**, which is ADR 0012 §5 and the
+    only place an act on the log reaches the node table. The split it keeps is
+    ADR 0009's: the claim is what is *true* and carries provenance and history;
+    the label is what is *drawn* and carries neither. So the label follows the
+    claim rather than standing in for it — the arrangement 0012 rejected was the
+    reverse, a label with no ``origin`` being read as though it were a fact.
+
+    Only on confirmation, never on the proposal. An extracted name is a guess
+    until somebody says otherwise, and a graph that relabelled its owner the
+    first time a model heard a word would be drawing that guess as settled.
     """
     stated = replace(
         assertion,
@@ -763,7 +780,29 @@ async def confirm(
         recorded_until=None,
         closed_by=None,
     )
-    return await observe(repository, [stated], now=now, relations=relations)
+    outcome = await observe(repository, [stated], now=now, relations=relations)
+
+    if stated.rel == NAME_RELATION:
+        await _relabel_from_name(repository, stated, now=now)
+    return outcome
+
+
+async def _relabel_from_name(
+    repository: SqlGraphRepository, claim: Assertion, *, now: datetime
+) -> None:
+    """Draw the subject of a confirmed name-claim under the name it states.
+
+    Best-effort, and deliberately so: a name already taken by another node of the
+    same kind raises :class:`LabelTakenError`, and that must not undo a
+    confirmation the owner just made. The claim is the record; failing to redraw
+    it leaves the graph looking stale rather than wrong, which is the recoverable
+    direction — and the person can rename by hand from the console.
+    """
+    label = (await _node(repository, claim.user_id, claim.dst)).label
+    try:
+        await rename(repository, claim.user_id, claim.src, label, now=now)
+    except LabelTakenError:
+        return
 
 
 async def retract(

@@ -28,6 +28,7 @@ from bacteria.app.graph.service import (
     observe,
     owner,
     preferences_for,
+    refer_to,
     reject,
     rename,
     retract,
@@ -726,3 +727,90 @@ async def test_a_withdrawn_start_is_not_recorded_as_one_that_was_said(repo):
         "reason": "Marta took over [in February]",
         "since_withdrawn": "2026-02",
     }
+
+
+async def test_confirming_a_name_redraws_the_node_it_is_about(repo):
+    """ADR 0012 §5: the label follows the claim, and only once somebody means it.
+
+    The arrangement 0012 rejected was the reverse — a node label read as though
+    it were a fact, with no `origin` to gate it. So the assertion is that the
+    graph is still drawn as `self` while the name is merely proposed, and takes
+    the name at the moment it is confirmed.
+    """
+    me = await owner(repo, "namer", now=W1)
+    value = await refer_to(repo, "namer", "value", "Guillermo", now=W1)
+    proposed = Assertion(
+        assertion_id="n1",
+        user_id="namer",
+        src=me.node_id,
+        rel="name",
+        dst=value.node_id,
+        valid=Interval(None, OPEN_ENDED),
+        recorded_at=W1,
+    )
+    await observe(repo, [proposed], now=W1)
+
+    assert (await repo.node("namer", me.node_id)).label == "self", "a guess is not a name"
+
+    await confirm(repo, proposed, assertion_id="n2", now=W3)
+
+    assert (await repo.node("namer", me.node_id)).label == "Guillermo"
+
+
+async def test_a_confirmed_name_survives_a_label_already_taken(repo):
+    """A redraw that cannot happen must not undo the confirmation.
+
+    `rename` refuses a label another node of the same kind already carries. The
+    claim is the record; failing to redraw it leaves the graph looking stale
+    rather than wrong, and the person can rename by hand.
+    """
+    me = await owner(repo, "taken", now=W1)
+    await repo.mint_node("taken", "person", "Gui", now=W1)
+    value = await refer_to(repo, "taken", "value", "Gui", now=W1)
+    proposed = Assertion(
+        assertion_id="t1",
+        user_id="taken",
+        src=me.node_id,
+        rel="name",
+        dst=value.node_id,
+        valid=Interval(None, OPEN_ENDED),
+        recorded_at=W1,
+    )
+    await observe(repo, [proposed], now=W1)
+
+    await confirm(repo, proposed, assertion_id="t2", now=W3)
+
+    assert (await repo.node("taken", me.node_id)).label == "self", "the redraw was refused"
+    spoken = await preferences_for(repo, "taken", session_id="s")
+    assert [p.key for p in spoken] == ["name"], "and the confirmation still stands"
+
+
+async def test_a_name_projects_as_keyed_memory(repo):
+    """The point of the whole change: `name` is a key like any other preference.
+
+    It qualifies with no special case — `preferences()` selects functional
+    relations pointing at a value, and this is one — which is what makes it the
+    shape ADR 0008 already built rather than an exception carved for names.
+    """
+    me = await owner(repo, "keyed", now=W1)
+    value = await refer_to(repo, "keyed", "value", "Guillermo", now=W1)
+    await observe(
+        repo,
+        [
+            Assertion(
+                assertion_id="k1",
+                user_id="keyed",
+                src=me.node_id,
+                rel="name",
+                dst=value.node_id,
+                valid=Interval(None, OPEN_ENDED),
+                recorded_at=W1,
+                origin="stated",
+            )
+        ],
+        now=W1,
+    )
+
+    spoken = await preferences_for(repo, "keyed", session_id="s")
+
+    assert [(p.key, p.value) for p in spoken] == [("name", "Guillermo")]

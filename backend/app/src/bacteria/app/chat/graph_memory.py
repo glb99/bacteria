@@ -48,6 +48,7 @@ from bacteria.agent.session.store import (
     SESSION_SCOPE,
     USER_SCOPE,
     MemoryEntry,
+    MemoryRefused,
     MemoryScope,
 )
 from bacteria.app.chat.memory import MemoryView
@@ -64,6 +65,15 @@ from bacteria.app.graph.service import (
     retract,
 )
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+
+_REFUSAL = "this store keeps only a fixed set of keys, and that is not one of them"
+"""What the model is told when a key is refused.
+
+Written for a model to read and act on rather than for a log: it says the shape
+of the limit — a fixed set — without naming the set, because the tool's own
+schema already lists it and repeating it here would be two places to keep in
+step. See the agent's ADR 0025.
+"""
 
 
 def _canonical_key(key: str) -> str:
@@ -82,13 +92,13 @@ def _canonical_key(key: str) -> str:
     """
     resolution = resolve(key)
     if resolution is None or resolution.swap:
-        raise UnknownPreferenceError(key)
+        raise UnknownPreferenceError(key, _REFUSAL)
     if resolution.relation not in preference_relations():
-        raise UnknownPreferenceError(key)
+        raise UnknownPreferenceError(key, _REFUSAL)
     return resolution.relation.name
 
 
-class UnknownPreferenceError(KeyError):
+class UnknownPreferenceError(MemoryRefused):
     """A key the catalogue has no relation for.
 
     **The substantive difference between the two stores**, and it is refused
@@ -101,11 +111,16 @@ class UnknownPreferenceError(KeyError):
     That the vocabulary gates what may be remembered is ADR 0008's design rather
     than an accident: it is what stops the model making its own proposals
     speakable. The cost lands here, on a person naming a key nobody seeded.
+
+    **A subclass of the protocol's own refusal**, which is what makes it an
+    outcome rather than a fault. Raising an application type the agent had never
+    heard of is how a refused key came to cost the whole turn; the agent's ADR
+    0025 gave the protocol somewhere to put this, and the name stays because
+    callers in this package catch it by it.
     """
 
-    def __init__(self, key: str) -> None:
-        super().__init__(key)
-        self.key = key
+    def __init__(self, key: str, reason: str = _REFUSAL) -> None:
+        super().__init__(key, reason)
 
 
 def _entry(preference: Preference) -> MemoryEntry:

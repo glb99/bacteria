@@ -43,6 +43,7 @@ exception in [`../../CLAUDE.md`](../../CLAUDE.md#decision-records).
 | [0022](0022-memory-selection-is-a-named-strategy.md) | Make memory selection a named strategy that reports what it passed over | Accepted |
 | [0023](0023-write-methods-return-what-the-caller-needs.md) | Write methods return what the caller needs, not the whole session | Accepted |
 | [0024](0024-memory-candidates-are-supplied-not-read-whole.md) | Memory candidates are supplied by the host, not read whole from state | Proposed |
+| [0025](0025-a-store-may-refuse-a-key.md) | A store may refuse a key, and the tool answers with the refusal instead of failing the turn | Proposed |
 
 ## Writing a new one
 

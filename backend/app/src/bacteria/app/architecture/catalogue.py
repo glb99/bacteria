@@ -76,6 +76,11 @@ thinks of a word.
 """
 
 
+# Not here: `in_package`. A module's package is its own name minus the last
+# segment, so the relation carries no information the node does not already
+# have, and nothing traverses it. Declaring one nothing emits is how a catalogue
+# becomes a description of what somebody hoped rather than of what exists --
+# which it briefly was, along with `owns_table`, until the two were checked.
 CATALOGUE: tuple[Relation, ...] = (
     Relation(
         name="imports",
@@ -85,18 +90,6 @@ CATALOGUE: tuple[Relation, ...] = (
         dst_kind=MODULE,
         # A module imports as many as it likes, and that is the whole subject.
         functional=False,
-    ),
-    Relation(
-        name="in_package",
-        invariant="A module lives in exactly one package.",
-        sentence="<src> lives in <dst>",
-        src_kind=MODULE,
-        dst_kind=PACKAGE,
-        # True by construction from the path, so nothing can currently violate
-        # it. Declared anyway: an invariant that holds because of how the data
-        # arrives is still an invariant, and the day a second adapter arrives it
-        # is the first thing that could break.
-        functional=True,
     ),
     Relation(
         name="owns_table",

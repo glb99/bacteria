@@ -100,15 +100,24 @@ class TestVocabulary:
 
 
 class TestTheAdapterUsesIt:
-    def test_the_parser_writes_only_declared_relations(self) -> None:
-        """The reason this file exists.
+    def test_every_declared_derived_relation_is_actually_emitted(self) -> None:
+        """Declared and emitted are the same set, in both directions.
 
-        These words used to be string literals inside the parser — the ontology
-        smeared into its adapter. It had not gone wrong only because one module
-        wrote all of them, which is exactly the condition that held for the
-        memory graph's ``rel`` field until it stopped holding.
+        The first version checked only one direction — that the adapter's
+        constants are declared names — and passed while ``in_package`` and
+        ``owns_table`` were declared and emitted by nothing at all. A catalogue
+        listing relations no adapter produces describes what somebody hoped for,
+        not what exists.
         """
-        for name in (derive.RELATION, derive.IN_PACKAGE, derive.OWNS_TABLE):
+        emitted = set(derive.RELATIONS)
+        derived_relations = {
+            entry.name for entry in CATALOGUE if entry.name not in {"is_a", "is_not_a"}
+        }
+
+        assert emitted == derived_relations
+
+    def test_the_parser_writes_only_declared_relations(self) -> None:
+        for name in derive.RELATIONS:
             assert is_known(name), name
 
     def test_the_parser_mints_only_declared_kinds(self) -> None:

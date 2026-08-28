@@ -22,6 +22,7 @@ import {
   readArchitecture,
   runTests,
   type ArchBoundary,
+  type ArchCrossing,
   type ArchProposal,
   type ArchitectureModel,
   type Project,
@@ -413,10 +414,27 @@ function describe(name: string | null): HTMLElement {
   );
   for (const crossing of crossings) {
     wrap.appendChild(
-      card("crossed", crossing.boundary, `${crossing.src}:${crossing.line} imports ${crossing.dst}`),
+      card("crossed", crossing.boundary, crossingLine(crossing)),
     );
   }
   return wrap;
+}
+
+/**
+ * One finding, as a sentence naming the relation it actually broke.
+ *
+ * Both call sites said "imports" whatever the finding was, so a table declared
+ * in the wrong package read as `core.db:0 imports chat_session` — a dependency
+ * that does not exist, described in a relation that was not the one broken. The
+ * API carries `rel` now precisely so this can be right.
+ *
+ * `line` is dropped when it is zero: the offence is a declaration rather than a
+ * statement, and `:0` invites somebody to go looking for a line that is not
+ * there.
+ */
+function crossingLine(crossing: ArchCrossing): string {
+  const where = crossing.line > 0 ? `${crossing.src}:${crossing.line}` : crossing.src;
+  return `${where} ${crossing.rel} ${crossing.dst}`;
 }
 
 function card(state: string, title: string, detail: string): HTMLElement {
@@ -554,7 +572,7 @@ function boundaryCard(boundary: ArchBoundary): HTMLElement {
   } else if (boundary.state === "crossed" && model) {
     for (const crossing of model.crossings.filter((c) => c.boundary === boundary.name)) {
       box.append(
-        text("p", `${crossing.src}:${crossing.line} imports ${crossing.dst}`, "arch-card-detail"),
+        text("p", crossingLine(crossing), "arch-card-detail"),
       );
     }
     // Deliberately not offered yet: accepting a crossing writes to the log, and

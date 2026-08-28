@@ -113,8 +113,18 @@ class BoundaryOut(BaseModel):
 class CrossingOut(BaseModel):
     boundary: str
     src: str
+    rel: str
+    """Which relation the finding is about.
+
+    Sent because not every crossing is an import: a table declared in the wrong
+    package breaks a boundary too, and a client rendering every finding as
+    ``<src> imports <dst>`` would describe it wrongly. The field used to be
+    absent because every finding was forced into an import's shape.
+    """
+
     dst: str
     line: int
+    """``0`` where the offence is a declaration rather than a line of code."""
 
 
 class ClassificationOut(BaseModel):
@@ -259,7 +269,13 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
         tables=list(model.derived.tables),
         boundaries=boundaries,
         crossings=[
-            CrossingOut(boundary=c.boundary.name, src=c.edge.src, dst=c.edge.dst, line=c.edge.line)
+            CrossingOut(
+                boundary=c.boundary.name,
+                src=c.edge.src,
+                rel=c.edge.rel,
+                dst=c.edge.dst,
+                line=c.edge.line,
+            )
             for c in model.verdict.crossings
         ],
         proposals=[

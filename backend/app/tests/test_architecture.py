@@ -10,13 +10,14 @@ from pathlib import Path
 from bacteria.app.architecture.checks import (
     BOUNDARIES,
     Boundary,
+    Cited,
     _agent_reaches_into_the_app,
     _app_reaches_the_agents_own_root,
     _core_declares_a_table,
     _core_names_a_domain_concept,
     evaluate,
 )
-from bacteria.app.architecture.derive import Derived, Import, Module, derive
+from bacteria.app.architecture.derive import IMPORTS, Derived, Import, Module, derive
 from bacteria.app.architecture.layout import python_files
 
 REPO = Path(__file__).resolve().parents[3]
@@ -26,6 +27,16 @@ def _write(root: Path, dotted: str, body: str) -> None:
     path = root.joinpath(*dotted.split(".")).with_suffix(".py")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
+
+
+def _as_cited(edge: Import) -> Cited:
+    """What a rule now yields for an offending import.
+
+    A finding names the relation it broke. Before, every finding was an
+    ``Import`` whatever it was about, so the table rule had to invent one — and
+    a test comparing findings to imports could not have noticed.
+    """
+    return Cited(src=edge.src, rel=IMPORTS, dst=edge.dst, line=edge.line)
 
 
 def _graph(*imports: Import, modules: tuple[str, ...] = ()) -> Derived:
@@ -243,7 +254,7 @@ class TestBoundariesCanFail:
             line=9,
         )
 
-        assert list(_agent_reaches_into_the_app(_graph(offending, clean))) == [offending]
+        assert list(_agent_reaches_into_the_app(_graph(offending, clean))) == [_as_cited(offending)]
 
     def test_the_application_may_not_import_the_agents_own_root(self) -> None:
         """Two composition roots stay two.
@@ -259,7 +270,7 @@ class TestBoundariesCanFail:
             line=12,
         )
 
-        assert list(_app_reaches_the_agents_own_root(_graph(offending))) == [offending]
+        assert list(_app_reaches_the_agents_own_root(_graph(offending))) == [_as_cited(offending)]
 
     def test_core_may_not_name_a_feature_at_module_level(self) -> None:
         """Core importing a feature on load is a crossing; deferring is not.
@@ -288,7 +299,7 @@ class TestBoundariesCanFail:
 
         found = list(_core_names_a_domain_concept(_graph(offending, deferred, inward)))
 
-        assert found == [offending]
+        assert found == [_as_cited(offending)]
 
     def test_core_may_not_declare_a_table(self) -> None:
         """A table under ``core/`` means a domain concept moved into it.
@@ -314,7 +325,14 @@ class TestBoundariesCanFail:
             imports=(),
         )
 
-        assert [edge.dst for edge in _core_declares_a_table(derived)] == ["chat_session"]
+        found = list(_core_declares_a_table(derived))
+
+        # The relation is the point: this finding used to arrive shaped as an
+        # import, so nothing downstream could tell a misplaced table from a
+        # dependency.
+        assert [(c.src, c.rel, c.dst) for c in found] == [
+            ("bacteria.app.core.db", "owns_table", "chat_session")
+        ]
 
 
 class TestVerdict:
@@ -349,7 +367,7 @@ class TestVerdict:
         verdict = evaluate(_graph(offending), BOUNDARIES)
 
         assert verdict.clean is False
-        assert [c.edge for c in verdict.crossings] == [offending]
+        assert [c.edge for c in verdict.crossings] == [_as_cited(offending)]
 
     def test_this_codebase_holds_every_boundary_it_can_decide(self) -> None:
         """The real tree passes, and this is the regression the feature is for.

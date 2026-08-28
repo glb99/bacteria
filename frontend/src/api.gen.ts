@@ -869,6 +869,8 @@ export interface components {
             dst: string;
             /** Line */
             line: number;
+            /** Rel */
+            rel: string;
             /** Src */
             src: string;
         };

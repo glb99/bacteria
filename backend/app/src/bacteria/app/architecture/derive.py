@@ -42,8 +42,7 @@ from pathlib import Path
 from bacteria.app.architecture.catalogue import MODULE, PACKAGE, TABLE
 from bacteria.app.architecture.layout import python_files
 
-RELATION = "imports"
-IN_PACKAGE = "in_package"
+IMPORTS = "imports"
 OWNS_TABLE = "owns_table"
 """The relations this adapter produces, named rather than implied.
 
@@ -51,6 +50,9 @@ Declared in :mod:`~bacteria.app.architecture.catalogue` and referenced here, so
 that the ontology can be read without reading the parser and a second adapter
 for another language writes the same words by construction.
 """
+
+RELATIONS = (IMPORTS, OWNS_TABLE)
+"""Every relation this adapter emits. Nothing declared is unemitted."""
 
 KINDS = (MODULE, PACKAGE, TABLE)
 """The node kinds this adapter mints."""
@@ -77,6 +79,22 @@ class Import:
     dst: str
     deferred: bool
     line: int
+
+
+@dataclass(frozen=True)
+class Owned:
+    """One table a module declares.
+
+    A fact in its own right rather than a field on :class:`Module`, because the
+    catalogue declares ``owns_table`` as a relation and a relation that exists
+    only as an attribute is a relation nothing can point at. The check for
+    *features own their tables* had to fabricate an ``Import`` to report a
+    finding, and said so in its own docstring -- *"a small dishonesty in the
+    return type"*. This is the honest half of removing it.
+    """
+
+    module: str
+    table: str
 
 
 @dataclass(frozen=True)
@@ -116,6 +134,22 @@ class Derived:
     @property
     def tables(self) -> tuple[str, ...]:
         return tuple(sorted({t for module in self.modules.values() for t in module.tables}))
+
+    @property
+    def owns(self) -> tuple[Owned, ...]:
+        """Every table declaration, as facts rather than as fields.
+
+        A projection and not a second copy: :attr:`Module.tables` is what the
+        parse produced per file, and this is the same information in the shape
+        the catalogue promises. Computed rather than stored for the same reason
+        everything else here is -- it is free, and a stored copy is one that can
+        disagree.
+        """
+        return tuple(
+            Owned(module=module.name, table=table)
+            for module in sorted(self.modules.values(), key=lambda m: m.name)
+            for table in module.tables
+        )
 
     def within(self, prefix: str) -> tuple[str, ...]:
         """Module names under a dotted prefix, the prefix itself included.

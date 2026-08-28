@@ -29,15 +29,43 @@ Not built:
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
-from bacteria.app.architecture.derive import Derived, Import
+from bacteria.app.architecture.derive import IMPORTS, OWNS_TABLE, Derived, Import
 
 AGENT = "bacteria.agent"
 APP = "bacteria.app"
 CORE = "bacteria.app.core"
 INTERFACES = "bacteria.agent.interfaces"
 
-Rule = Callable[[Derived], Iterable[Import]]
-"""Selects the edges that cross a boundary. Yields nothing when it holds."""
+
+@dataclass(frozen=True)
+class Cited:
+    """The one fact a rule is pointing at, named as the relation it is.
+
+    A finding used to be an :class:`Import` whatever it was about, so the rule
+    for *features own their tables* fabricated one -- ``src`` a module, ``dst`` a
+    table name, ``line`` zero -- and its docstring admitted the lie. A reader,
+    or a client, had no way to tell that finding from a real dependency.
+
+    Carrying ``rel`` costs one field and makes every finding say which relation
+    it broke, which is also what lets a second kind of rule arrive without a
+    second kind of finding.
+    """
+
+    src: str
+    rel: str
+    dst: str
+    line: int
+    """Where to look, or ``0`` where the offence is a declaration rather than a
+    line of code. Zero is honest here: a table is owned by a module, not by a
+    statement in it."""
+
+
+Rule = Callable[[Derived], Iterable[Cited]]
+"""Selects the facts that cross a boundary. Yields nothing when it holds."""
+
+
+def _cited(edge: Import) -> Cited:
+    return Cited(src=edge.src, rel=IMPORTS, dst=edge.dst, line=edge.line)
 
 
 @dataclass(frozen=True)
@@ -88,7 +116,7 @@ class Crossing:
     """
 
     boundary: Boundary
-    edge: Import
+    edge: Cited
 
 
 @dataclass(frozen=True)
@@ -111,21 +139,21 @@ class Verdict:
         return not self.crossings
 
 
-def _agent_reaches_into_the_app(derived: Derived) -> Iterable[Import]:
+def _agent_reaches_into_the_app(derived: Derived) -> Iterable[Cited]:
     for edge in derived.imports:
         if edge.src.startswith(f"{AGENT}.") and edge.dst.startswith(f"{APP}."):
-            yield edge
+            yield _cited(edge)
 
 
-def _app_reaches_the_agents_own_root(derived: Derived) -> Iterable[Import]:
+def _app_reaches_the_agents_own_root(derived: Derived) -> Iterable[Cited]:
     for edge in derived.imports:
         if edge.src.startswith(f"{APP}.") and (
             edge.dst == INTERFACES or edge.dst.startswith(f"{INTERFACES}.")
         ):
-            yield edge
+            yield _cited(edge)
 
 
-def _core_names_a_domain_concept(derived: Derived) -> Iterable[Import]:
+def _core_names_a_domain_concept(derived: Derived) -> Iterable[Cited]:
     """Core importing a feature, at module level only.
 
     The deferred exemption is the one piece of judgment in this file and it is
@@ -144,23 +172,20 @@ def _core_names_a_domain_concept(derived: Derived) -> Iterable[Import]:
         into_app = edge.dst.startswith(f"{APP}.")
         outside_core = not (edge.dst == CORE or edge.dst.startswith(f"{CORE}."))
         if in_core and into_app and outside_core:
-            yield edge
+            yield _cited(edge)
 
 
-def _core_declares_a_table(derived: Derived) -> Iterable[Import]:
+def _core_declares_a_table(derived: Derived) -> Iterable[Cited]:
     """A table declared anywhere in ``core/``.
 
-    Yields a self-edge rather than a real import, because the offence is a
-    declaration and not a dependency. That is a small dishonesty in the return
-    type and the alternative is a second finding shape for one rule; if a third
-    such check ever appears, this is the one that should force the split.
+    Reads ``derived.owns`` -- real ``owns_table`` facts -- rather than walking
+    modules and inventing an import to carry the answer, which is what it used
+    to do. The relation the catalogue declares and the relation this reports are
+    now the same one.
     """
-    for module in derived.modules.values():
-        if not module.tables:
-            continue
-        if module.name == CORE or module.name.startswith(f"{CORE}."):
-            for table in module.tables:
-                yield Import(src=module.name, dst=table, deferred=False, line=0)
+    for owned in derived.owns:
+        if owned.module == CORE or owned.module.startswith(f"{CORE}."):
+            yield Cited(src=owned.module, rel=OWNS_TABLE, dst=owned.table, line=0)
 
 
 BOUNDARIES: tuple[Boundary, ...] = (

@@ -91,3 +91,38 @@ test.describe("architecture", () => {
     await expect(page.locator("#arch-svg .arch-glyph.dim")).toHaveCount(0);
   });
 });
+
+test.describe("judging a proposal", () => {
+  test.skip(!KEY, "needs BACTERIA_KEY and a project already added");
+
+  test("agreeing and disagreeing both stick, and both are counted", async ({ page }) => {
+    await openArchitecture(page);
+    const cards = page.locator("#arch-proposals .arch-card");
+    await expect(cards.first()).toBeVisible();
+
+    await cards.first().locator("button", { hasText: "agree" }).first().click();
+    await expect(page.locator("#arch-proposals .arch-card.agreed").first()).toBeVisible();
+
+    await cards.nth(1).locator("button", { hasText: "disagree" }).click();
+    await expect(page.locator("#arch-proposals .arch-card.disagreed").first()).toBeVisible();
+
+    // The tally is the number this whole surface exists to produce: a review
+    // everyone approves is worse than no review. Asserting the cards changed
+    // without asserting the count would miss a tally that never updates.
+    await expect(page.locator("#arch-verdicts")).toContainText("disagreed");
+  });
+
+  test("a rejected proposal keeps its place in the list", async ({ page }) => {
+    await openArchitecture(page);
+    const first = page.locator("#arch-proposals .arch-card").first();
+    await expect(first).toBeVisible();
+    const before = await page.locator("#arch-proposals .arch-card").count();
+
+    await first.locator("button", { hasText: "disagree" }).click();
+    await expect(page.locator("#arch-proposals .arch-card.disagreed").first()).toBeVisible();
+
+    // Vanishing on rejection would leave the surface unable to show that
+    // anything was ever rejected.
+    expect(await page.locator("#arch-proposals .arch-card").count()).toBe(before);
+  });
+});

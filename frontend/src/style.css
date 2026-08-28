@@ -960,6 +960,17 @@ button.act.danger[data-armed="yes"] {
 
 .arch-split { border-top: 1px solid var(--edge); }
 
+/* A judged proposal is no longer a question, so it stops being drawn as one --
+   but it keeps its place in the list. Vanishing on rejection would make the
+   surface unable to show that anything was ever rejected. */
+.arch-card.proposed.agreed { border-style: solid; border-left-color: var(--holo); }
+.arch-card.proposed.disagreed { border-style: solid; border-left-color: var(--ghost); opacity: 0.6; }
+
+.arch-acts { display: flex; gap: 6px; margin-top: 7px; }
+
+.arch-act.tiny { padding: 2px 8px; font-size: 11px; color: var(--dim); }
+.arch-act.tiny.on { border-color: color-mix(in oklch, var(--holo) 55%, transparent); color: var(--holo); }
+
 .arch-card-title { margin: 0; font: 500 12px var(--ui); }
 .arch-card-detail { margin: 3px 0 0; font: 400 11px/1.5 var(--mono); color: var(--dim); }
 .arch-card-note { margin: 5px 0 0; font: 400 10px var(--mono); color: var(--ghost); }

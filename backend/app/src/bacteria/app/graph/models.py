@@ -95,6 +95,21 @@ class GraphNode(SQLModel, table=True):
 
     user_id: str = Field(primary_key=True)
     node_id: str = Field(primary_key=True)
+    ontology: Optional[str] = Field(default=None, index=True)
+    """Which model this node belongs to, or ``NULL`` for the owner's memory.
+
+    A partition, kept apart from ``user_id`` on purpose. That column answers
+    *whose* and every query already filters on it; this one answers *which
+    model*, and the two stopped coinciding the moment a second ontology existed.
+    Folding an architecture model into ``user_id`` would have made one column
+    mean a person on some rows and a project on others -- and left nowhere to
+    record who stated a claim, since the person was only ever implied by it.
+
+    ``NULL`` rather than a sentinel so that every row written before this
+    existed keeps its meaning without being rewritten, which is the backfilling
+    the log forbids.
+    """
+
     label: str
     kind: str
     attrs: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -162,6 +177,22 @@ class GraphAssertion(SQLModel, table=True):
 
     assertion_id: str = Field(primary_key=True)
     user_id: str = Field(index=True)
+    ontology: Optional[str] = Field(default=None, index=True)
+    """Which model this claim belongs to; ``NULL`` is the owner's memory."""
+
+    stated_by: Optional[str] = Field(default=None)
+    """The principal who said it, where anybody did.
+
+    ``trust`` records *how* a claim arrived and nothing recorded *who believes
+    it*, which is invisible in a graph with one owner and the first question
+    anybody asks of a shared one. Added now rather than later because a row
+    written unattributed can never be attributed afterwards -- inventing an
+    author for an existing row is exactly the false history this log forbids.
+
+    Nullable, and the nulls are honest: nobody was recorded for the rows written
+    before this column, and pretending otherwise would be the same lie.
+    """
+
     src: str
     rel: str
     dst: str

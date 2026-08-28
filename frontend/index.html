@@ -15,6 +15,7 @@
       <div id="tabs" class="tabs">
         <button type="button" data-tab="chat" class="on">chat</button>
         <button type="button" data-tab="graph">graph</button>
+        <button type="button" data-tab="architecture">architecture</button>
       </div>
 
       <span class="spacer"></span>
@@ -95,6 +96,58 @@
           <summary>Diagnostics</summary>
           <dl id="graph-verdict" class="verdict"></dl>
         </details>
+      </section>
+
+      <!-- The reworked surface: a conversation column and a scene it scopes.
+           Its own visual language, scoped to this panel, because the memory
+           tabs have not been reworked yet and two half-applied palettes read
+           worse than two whole ones. -->
+      <section id="tab-architecture" class="tab-panel arch" hidden>
+        <div class="arch-deck">
+          <span class="arch-brand">bacteria</span>
+          <span class="arch-rule"></span>
+          <div class="arch-domains">
+            <span class="arch-pill on">ARCHITECTURE</span>
+            <span class="arch-pill off" title="not built">BUSINESS</span>
+            <span class="arch-pill off" title="not built">RESEARCH</span>
+          </div>
+          <select id="arch-project" class="arch-select" aria-label="project"></select>
+          <button id="arch-add" type="button" class="arch-act">add a checkout</button>
+          <span class="arch-spacer"></span>
+          <span id="arch-counts" class="arch-data"></span>
+          <div id="arch-tallies" class="arch-domains"></div>
+        </div>
+
+        <div class="arch-body">
+          <aside class="arch-ask">
+            <div class="arch-ask-head">
+              <span class="arch-k">ASK</span>
+              <span id="arch-ask-note" class="arch-data arch-ghost">every answer moves the scene</span>
+            </div>
+            <div id="arch-thread" class="arch-thread"></div>
+            <form id="arch-form" class="arch-composer">
+              <input id="arch-input" autocomplete="off" spellcheck="false"
+                     placeholder="name a module or package to scope the scene…" />
+              <button type="submit" class="arch-act">→</button>
+            </form>
+          </aside>
+
+          <div class="arch-scene">
+            <div id="arch-svg" class="arch-svg"></div>
+            <div class="arch-legend">
+              <span><i class="swatch beam"></i>import</span>
+              <span><i class="swatch deferred"></i>deferred — runs on call</span>
+              <span><i class="swatch crossed"></i>crosses a boundary</span>
+              <span><i class="swatch glyph-slab"></i>code only</span>
+              <span><i class="swatch glyph-drum"></i>owns tables</span>
+            </div>
+          </div>
+
+          <aside class="arch-reading">
+            <div class="arch-ask-head"><span class="arch-k">BOUNDARIES</span></div>
+            <div id="arch-boundaries" class="arch-cards"></div>
+          </aside>
+        </div>
       </section>
     </main>
 

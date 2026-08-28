@@ -29,6 +29,12 @@ export type GraphNode = components["schemas"]["NodeOut"];
 export type GraphAssertion = components["schemas"]["AssertionOut"];
 export type GraphConflict = components["schemas"]["ConflictOut"];
 export type GraphConclusion = components["schemas"]["ConclusionOut"];
+export type Project = components["schemas"]["ProjectOut"];
+export type ArchitectureModel = components["schemas"]["ModelOut"];
+export type ArchModule = components["schemas"]["ModuleOut"];
+export type ArchImport = components["schemas"]["ImportOut"];
+export type ArchBoundary = components["schemas"]["BoundaryOut"];
+export type ArchCrossing = components["schemas"]["CrossingOut"];
 
 /** Raised when the API refuses the session, so callers can send the user back to sign-in. */
 export class Unauthenticated extends Error {}
@@ -194,3 +200,22 @@ export const renameNode = (nodeId: string, label: string) =>
 
 export const linkNodes = (left: string, right: string) =>
   unwrap(api.POST("/graph/links", { body: { left, right } }));
+
+export const listProjects = () => unwrap(api.GET("/architecture/projects"));
+
+export const addProject = (location: string, name = "") =>
+  unwrap(api.POST("/architecture/projects", { body: { location, name } }));
+
+/**
+ * The codebase as it stands on disk right now, judged against its rules.
+ *
+ * Re-read server-side on every call rather than cached, so this is the one
+ * endpoint here where asking twice can honestly answer differently — which is
+ * the point when the thing being described is a working tree.
+ */
+export const readArchitecture = (projectId: string) =>
+  unwrap(
+    api.GET("/architecture/projects/{project_id}/model", {
+      params: { path: { project_id: projectId } },
+    }),
+  );

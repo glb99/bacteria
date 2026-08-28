@@ -39,7 +39,21 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from bacteria.app.architecture.catalogue import MODULE, PACKAGE, TABLE
 from bacteria.app.architecture.layout import python_files
+
+RELATION = "imports"
+IN_PACKAGE = "in_package"
+OWNS_TABLE = "owns_table"
+"""The relations this adapter produces, named rather than implied.
+
+Declared in :mod:`~bacteria.app.architecture.catalogue` and referenced here, so
+that the ontology can be read without reading the parser and a second adapter
+for another language writes the same words by construction.
+"""
+
+KINDS = (MODULE, PACKAGE, TABLE)
+"""The node kinds this adapter mints."""
 
 
 @dataclass(frozen=True)

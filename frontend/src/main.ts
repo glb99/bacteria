@@ -10,6 +10,7 @@ import { closeSession, openSession, Unauthenticated } from "./api";
 import * as chat from "./chat";
 import { el } from "./dom";
 import * as graph from "./graph";
+import * as architecture from "./architecture";
 
 const signIn = el("sign-in");
 const signInForm = el<HTMLFormElement>("sign-in-form");
@@ -23,6 +24,7 @@ const tabError = el("tab-error");
 const panels = {
   chat: el("tab-chat"),
   graph: el("tab-graph"),
+  architecture: el("tab-architecture"),
 };
 
 type Tab = keyof typeof panels;
@@ -56,6 +58,8 @@ async function refresh(): Promise<void> {
   try {
     if (tab === "chat") {
       await chat.refresh();
+    } else if (tab === "architecture") {
+      await architecture.refresh();
     } else {
       graph.setSession(chat.currentSession());
       await graph.refresh(chat.currentSession());

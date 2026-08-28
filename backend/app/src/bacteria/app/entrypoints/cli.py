@@ -17,6 +17,7 @@ import argparse
 import io
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Mapping, cast
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -27,6 +28,8 @@ from bacteria.agent.session.store import (
     MemoryScope,
     UnknownSessionError,
 )
+from bacteria.app.architecture.checks import evaluate as check_boundaries
+from bacteria.app.architecture.derive import derive
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, list_keys, principal_is_known, revoke_key
 from bacteria.app.chat import review
@@ -682,6 +685,54 @@ async def _revoke(key_id: str) -> int:
     return 0
 
 
+def _architecture(root: Path) -> int:
+    """Judge the source against the boundaries stated about it.
+
+    **Synchronous, and touches no database**, which makes it the only chore here
+    that runs on a checkout rather than on a deployment. Everything it reads is
+    derivable from the files, so requiring Postgres to answer a question about
+    the source would be demanding a fact-holder for facts nobody holds.
+
+    Exits non-zero on a crossing so this can be a gate. It reports the
+    undecidable boundaries either way: a run that printed only the ones it can
+    settle would imply it had settled all of them.
+    """
+    roots = {path: path.parts[-2] for path in sorted((root / "backend").glob("*/src"))}
+    if not roots:
+        print(f"no source roots under {(root / 'backend').as_posix()}")
+        return 1
+
+    derived = derive(roots)
+    verdict = check_boundaries(derived)
+
+    print(
+        f"{len(derived.modules)} modules, {len(derived.packages)} packages, "
+        f"{len(derived.tables)} tables, {len(derived.imports)} imports"
+    )
+    print()
+
+    for boundary in verdict.held:
+        print(f"  holds        {boundary.sentence}")
+    for boundary in verdict.undecidable:
+        print(f"  undecidable  {boundary.sentence}")
+        print(f"               checked by: {boundary.elsewhere}")
+
+    if verdict.clean:
+        print()
+        print(
+            f"{len(verdict.held)} boundaries checked and holding; "
+            f"{len(verdict.undecidable)} that no import can decide."
+        )
+        return 0
+
+    print()
+    for crossing in verdict.crossings:
+        edge = crossing.edge
+        print(f"  CROSSED      {crossing.boundary.sentence}")
+        print(f"               {edge.src}:{edge.line} imports {edge.dst}")
+    return 1
+
+
 def main() -> int:
     """Parse arguments and run the requested command."""
     # Before anything prints. This command relays arbitrary model output --
@@ -810,12 +861,27 @@ def main() -> int:
         help="actually close them; without this it only reports what it would close",
     )
 
+    arch = commands.add_parser(
+        "arch", help="check the source against the boundaries stated about it"
+    )
+    arch.add_argument(
+        "root",
+        nargs="?",
+        default=".",
+        type=Path,
+        help="the checkout to read; source roots are its backend/*/src",
+    )
+
     diff = commands.add_parser(
         "memory-diff", help="compare what each memory store holds for a session"
     )
     diff.add_argument("session_id", help="the conversation to compare")
 
     args = parser.parse_args()
+    if args.command == "arch":
+        # Not `platform.run`: nothing here awaits, because nothing here
+        # touches the database.
+        return _architecture(args.root)
     if args.command == "memory-diff":
         return platform.run(_memory_diff(args.session_id))
     if args.command == "relations":

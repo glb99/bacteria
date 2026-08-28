@@ -81,6 +81,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/architecture/projects/{project_id}/probes/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Probe Tests
+         * @description Run the project's own test command and report what happened.
+         *
+         *     **A world-action**, and the first thing in this feature that is not a read.
+         *     It changes nothing in the model: the answer is returned, shown and
+         *     forgotten, because the tests were green four minutes ago and may be red now.
+         *     A fact with a shelf life of one commit has no business in a log built to
+         *     reconstruct what was believed last March.
+         *
+         *     Takes no body. The command is the project's, set when it was configured, and
+         *     a caller says *take the reading* rather than *run this*.
+         */
+        post: operations["probe_tests_architecture_projects__project_id__probes_tests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/session": {
         parameters: {
             query?: never;
@@ -1020,6 +1049,11 @@ export interface components {
              * @default
              */
             name: string;
+            /**
+             * Test Command
+             * @default
+             */
+            test_command: string;
         };
         /**
          * NodeOut
@@ -1073,6 +1107,8 @@ export interface components {
             name: string;
             /** Project Id */
             project_id: string;
+            /** Test Command */
+            test_command?: string | null;
         };
         /**
          * ProposalOut
@@ -1113,6 +1149,30 @@ export interface components {
             source: string;
             /** Value */
             value: unknown;
+        };
+        /**
+         * ReadingOut
+         * @description What the world said when we asked, and when.
+         *
+         *     Deliberately not shaped like an assertion. It has no validity interval and
+         *     no author because nobody said it — a process exited with a status, which is
+         *     a different kind of thing from a claim, and giving it a claim's shape would
+         *     invite it into a log it must never enter.
+         */
+        ReadingOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Detail */
+            detail: string;
+            /** Output */
+            output: string;
+            /** Probe */
+            probe: string;
+            /** State */
+            state: string;
         };
         /** RejectionOut */
         RejectionOut: {
@@ -1385,6 +1445,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_tests_architecture_projects__project_id__probes_tests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadingOut"];
                 };
             };
             /** @description Validation Error */

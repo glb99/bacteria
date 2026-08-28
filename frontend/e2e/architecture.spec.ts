@@ -126,3 +126,28 @@ test.describe("judging a proposal", () => {
     expect(await page.locator("#arch-proposals .arch-card").count()).toBe(before);
   });
 });
+
+test.describe("running the tests", () => {
+  test.skip(!KEY, "needs BACTERIA_KEY and a project with a test command");
+
+  test("a reading appears and is marked as a reading", async ({ page }) => {
+    await openArchitecture(page);
+    // Wait for the model, not merely the panel. Clicking sooner used to do
+    // nothing at all, which is how the button's missing disabled state was
+    // found — by a test that failed for the right reason.
+    await expect(page.locator("#arch-svg .arch-glyph").first()).toBeVisible();
+    await expect(page.locator("#arch-run-tests")).toBeEnabled();
+
+    await page.locator("#arch-run-tests").click();
+
+    // Up to ten minutes is allowed server-side; a real suite here is seconds.
+    await expect(page.locator("#arch-reading")).not.toHaveText("not checked", {
+      timeout: 60_000,
+    });
+
+    // The state is a word, but the output is what somebody acts on — and the
+    // note is what stops it being read as something the model now believes.
+    await expect(page.locator(".arch-output").last()).toBeVisible();
+    await expect(page.locator(".arch-answer").last()).toContainText("not a belief");
+  });
+});

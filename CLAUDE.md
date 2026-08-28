@@ -113,6 +113,24 @@ Checking is one command, and a PR's "Merged" badge is not it:
 
     git merge-base --is-ancestor <sha> origin/main
 
+**Do not use `asyncio.create_subprocess_*` anywhere in the application.** This
+process runs on `SelectorEventLoop` on Windows *on purpose* — psycopg's async
+mode refuses the Proactor loop — and the selector loop has **no subprocess
+support at all**. The async spelling raises a bare `NotImplementedError` from
+inside asyncio, in production as well as under test, and the traceback names
+`base_events.py` rather than anything you wrote.
+
+Run the process in a thread instead: `await asyncio.to_thread(subprocess.run,
+..., timeout=...)`. It blocks a worker rather than the loop and behaves the same
+on every platform. `architecture/probes.py` is the one place that does this and
+says why.
+
+**A test command runs through the platform shell, so quoting is not portable.**
+`"py" -c 'import sys; sys.exit(3)'` is one program under `sh` and a syntax error
+under `cmd` — which exits 1, and is then reported as a failing suite. Write the
+script to a file and run the file. This cost a wrong assertion that looked like
+a bug in the probe.
+
 **Alembic must keep ignoring `procrastinate_*` tables.** They come from
 procrastinate's own SQL via a migration, not from SQLModel metadata, so
 autogenerate would write a migration to drop them. The filter is

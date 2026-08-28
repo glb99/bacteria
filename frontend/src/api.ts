@@ -36,6 +36,7 @@ export type ArchImport = components["schemas"]["ImportOut"];
 export type ArchBoundary = components["schemas"]["BoundaryOut"];
 export type ArchCrossing = components["schemas"]["CrossingOut"];
 export type ArchProposal = components["schemas"]["ClassificationOut"];
+export type ArchReading = components["schemas"]["ReadingOut"];
 
 /** Raised when the API refuses the session, so callers can send the user back to sign-in. */
 export class Unauthenticated extends Error {}
@@ -204,8 +205,12 @@ export const linkNodes = (left: string, right: string) =>
 
 export const listProjects = () => unwrap(api.GET("/architecture/projects"));
 
-export const addProject = (location: string, name = "") =>
-  unwrap(api.POST("/architecture/projects", { body: { location, name } }));
+export const addProject = (location: string, name = "", testCommand = "") =>
+  unwrap(
+    api.POST("/architecture/projects", {
+      body: { location, name, test_command: testCommand },
+    }),
+  );
 
 /**
  * The codebase as it stands on disk right now, judged against its rules.
@@ -238,5 +243,22 @@ export const judgeClassification = (
     api.POST("/architecture/projects/{project_id}/classifications", {
       params: { path: { project_id: projectId } },
       body: { subject, claim, verdict },
+    }),
+  );
+
+/**
+ * Run the project's own test command and report what happened.
+ *
+ * Takes no command. The one this runs belongs to the project and was set when
+ * it was configured; a caller says *take the reading*, never *run this*.
+ *
+ * The answer is shown and forgotten. It is a reading, not a belief: the tests
+ * were green four minutes ago and may be red now, and nothing with that shelf
+ * life belongs in a log built to reconstruct what was believed last March.
+ */
+export const runTests = (projectId: string) =>
+  unwrap(
+    api.POST("/architecture/projects/{project_id}/probes/tests", {
+      params: { path: { project_id: projectId } },
     }),
   );

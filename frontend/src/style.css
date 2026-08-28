@@ -971,6 +971,30 @@ button.act.danger[data-armed="yes"] {
 .arch-act.tiny { padding: 2px 8px; font-size: 11px; color: var(--dim); }
 .arch-act.tiny.on { border-color: color-mix(in oklch, var(--holo) 55%, transparent); color: var(--holo); }
 
+/* A world-action is badged apart from a model-action, because a view that does
+   both makes the distinction invisible at the moment it starts to matter. This
+   one runs somebody's test suite; the others change what we believe. */
+.arch-act.world { border-style: dashed; color: var(--warn); }
+
+.arch-pill.ok { color: var(--holo); border-color: color-mix(in oklch, var(--holo) 45%, transparent); }
+.arch-pill.failing { color: var(--alarm); border-color: color-mix(in oklch, var(--alarm) 50%, transparent); }
+
+/* Never checked is not fine, and must not be drawn as though it were. */
+.arch-pill.unavailable { color: var(--ghost); border-style: dashed; }
+
+.arch-output {
+  margin: 0;
+  max-height: 190px;
+  overflow: auto;
+  padding: 7px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  background: oklch(0.16 0.024 255);
+  font: 400 10.5px/1.5 var(--mono);
+  color: var(--dim);
+  white-space: pre-wrap;
+}
+
 .arch-card-title { margin: 0; font: 500 12px var(--ui); }
 .arch-card-detail { margin: 3px 0 0; font: 400 11px/1.5 var(--mono); color: var(--dim); }
 .arch-card-note { margin: 5px 0 0; font: 400 10px var(--mono); color: var(--ghost); }

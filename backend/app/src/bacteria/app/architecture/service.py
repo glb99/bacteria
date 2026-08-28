@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Sequence
 
 from bacteria.app.architecture.checks import BOUNDARIES, Boundary, Verdict, evaluate
+from bacteria.app.architecture.classify import Proposal, propose
 from bacteria.app.architecture.derive import Derived, derive
 from bacteria.app.architecture.layout import source_roots
 from bacteria.app.architecture.models import ArchitectureProject, Project
@@ -52,6 +53,7 @@ class Model:
     roots: tuple[str, ...]
     derived: Derived
     verdict: Verdict
+    proposals: tuple[Proposal, ...]
 
 
 async def add_project(
@@ -125,4 +127,8 @@ def model_of(project: Project, boundaries: Sequence[Boundary] = BOUNDARIES) -> M
         roots=tuple(sorted(roots.values())),
         derived=derived,
         verdict=evaluate(derived, boundaries),
+        # Recomputed with everything else rather than stored. A proposal is a
+        # reading of the current tree; one kept from last week would be arguing
+        # about a codebase that no longer exists.
+        proposals=propose(derived),
     )

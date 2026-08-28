@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from bacteria.app.architecture.checks import Boundary, Crossing
+from bacteria.app.architecture.classify import sentence
 from bacteria.app.architecture.models import Project
 from bacteria.app.architecture.repository import SqlProjectRepository
 from bacteria.app.architecture.service import UnusableLocation, add_project, model_of
@@ -82,6 +83,26 @@ class CrossingOut(BaseModel):
     line: int
 
 
+class ClassificationOut(BaseModel):
+    """One claim about this codebase that a person may accept or reject.
+
+    The only uncertain thing this feature produces. An import is exact and not
+    worth arguing about; *"chat is a feature"* is a judgment drawn from a
+    regularity, and the surface has to draw the two differently or the second
+    gets trusted like the first.
+
+    ``because`` travels because a proposal nobody can check is one they will
+    approve without checking, which is the review-fatigue failure rather than a
+    convenience.
+    """
+
+    subject: str
+    relation: str
+    claim: str
+    sentence: str
+    because: str
+
+
 class ModelOut(BaseModel):
     project: ProjectOut
     roots: list[str]
@@ -90,6 +111,7 @@ class ModelOut(BaseModel):
     tables: list[str]
     boundaries: list[BoundaryOut]
     crossings: list[CrossingOut]
+    proposals: list[ClassificationOut]
 
 
 def _project_out(project: Project) -> ProjectOut:
@@ -177,6 +199,16 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
         crossings=[
             CrossingOut(boundary=c.boundary.name, src=c.edge.src, dst=c.edge.dst, line=c.edge.line)
             for c in model.verdict.crossings
+        ],
+        proposals=[
+            ClassificationOut(
+                subject=p.subject,
+                relation=p.relation,
+                claim=p.claim,
+                sentence=sentence(p),
+                because=p.because,
+            )
+            for p in model.proposals
         ],
     )
 

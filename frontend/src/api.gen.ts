@@ -724,6 +724,31 @@ export interface components {
             state: string;
         };
         /**
+         * ClassificationOut
+         * @description One claim about this codebase that a person may accept or reject.
+         *
+         *     The only uncertain thing this feature produces. An import is exact and not
+         *     worth arguing about; *"chat is a feature"* is a judgment drawn from a
+         *     regularity, and the surface has to draw the two differently or the second
+         *     gets trusted like the first.
+         *
+         *     ``because`` travels because a proposal nobody can check is one they will
+         *     approve without checking, which is the review-fatigue failure rather than a
+         *     convenience.
+         */
+        ClassificationOut: {
+            /** Because */
+            because: string;
+            /** Claim */
+            claim: string;
+            /** Relation */
+            relation: string;
+            /** Sentence */
+            sentence: string;
+            /** Subject */
+            subject: string;
+        };
+        /**
          * ConclusionOut
          * @description A belief the system drew, and the claims it rests on.
          *
@@ -924,6 +949,8 @@ export interface components {
             /** Modules */
             modules: components["schemas"]["ModuleOut"][];
             project: components["schemas"]["ProjectOut"];
+            /** Proposals */
+            proposals: components["schemas"]["ClassificationOut"][];
             /** Roots */
             roots: string[];
             /** Tables */

@@ -29,6 +29,7 @@ from bacteria.agent.session.store import (
     UnknownSessionError,
 )
 from bacteria.app.architecture.checks import evaluate as check_boundaries
+from bacteria.app.architecture.classify import propose, sentence
 from bacteria.app.architecture.derive import derive
 from bacteria.app.architecture.layout import source_roots
 from bacteria.app.auth import keys
@@ -720,6 +721,17 @@ def _architecture(root: Path) -> int:
     for boundary in verdict.inapplicable:
         print(f"  n/a          {boundary.sentence}")
         print(f"               nothing here matches {', '.join(boundary.about)}")
+
+    proposals = propose(derived)
+    if proposals:
+        print()
+        print(f"  proposed, from what this codebase repeats ({len(proposals)}):")
+        for proposal in proposals:
+            print(f"    {sentence(proposal)}")
+            print(f"        because {proposal.because}")
+    else:
+        print()
+        print("  nothing proposed -- this codebase repeats no module names three times over.")
 
     if verdict.clean:
         print()

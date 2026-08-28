@@ -35,6 +35,7 @@ export type ArchModule = components["schemas"]["ModuleOut"];
 export type ArchImport = components["schemas"]["ImportOut"];
 export type ArchBoundary = components["schemas"]["BoundaryOut"];
 export type ArchCrossing = components["schemas"]["CrossingOut"];
+export type ArchProposal = components["schemas"]["ClassificationOut"];
 
 /** Raised when the API refuses the session, so callers can send the user back to sign-in. */
 export class Unauthenticated extends Error {}

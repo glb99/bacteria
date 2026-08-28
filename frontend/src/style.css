@@ -949,6 +949,17 @@ button.act.danger[data-armed="yes"] {
 .arch-card.undecidable { border-left-color: var(--ghost); border-left-style: dashed; }
 .arch-card.inapplicable { border-left-color: var(--edge); border-left-style: dashed; opacity: 0.7; }
 
+/* Nothing has agreed to a proposal, so it must not be drawn as a fact.
+   Every other mark on this surface is read off the syntax and is exact; a
+   proposal drawn the same way would be trusted the same way. */
+.arch-card.proposed {
+  border-style: dashed;
+  border-left-color: var(--warn);
+  background: transparent;
+}
+
+.arch-split { border-top: 1px solid var(--edge); }
+
 .arch-card-title { margin: 0; font: 500 12px var(--ui); }
 .arch-card-detail { margin: 3px 0 0; font: 400 11px/1.5 var(--mono); color: var(--dim); }
 .arch-card-note { margin: 5px 0 0; font: 400 10px var(--mono); color: var(--ghost); }

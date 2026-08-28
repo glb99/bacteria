@@ -90,13 +90,15 @@ def _to_assertion(row: GraphAssertion) -> Assertion:
         scope=row.scope,  # ty: ignore[invalid-argument-type]
         session_id=row.session_id,
         run_id=row.run_id,
+        stated_by=row.stated_by,
     )
 
 
-def _to_row(assertion: Assertion) -> GraphAssertion:
+def _to_row(assertion: Assertion, ontology: Optional[str] = None) -> GraphAssertion:
     return GraphAssertion(
         assertion_id=assertion.assertion_id,
         user_id=assertion.user_id,
+        ontology=ontology,
         src=assertion.src,
         rel=assertion.rel,
         dst=assertion.dst,
@@ -111,6 +113,7 @@ def _to_row(assertion: Assertion) -> GraphAssertion:
         scope=assertion.scope,
         session_id=assertion.session_id,
         run_id=assertion.run_id,
+        stated_by=assertion.stated_by,
     )
 
 
@@ -149,8 +152,29 @@ class SqlGraphRepository:
             this class knowing what else is in flight.
     """
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, ontology: Optional[str] = None) -> None:
         self._db = session
+        self._ontology = ontology
+
+    def _mine(self, statement):
+        """Narrow a query to this repository's ontology.
+
+        **Every read goes through here**, which is the whole reason the ontology
+        is a property of the repository rather than an argument to each method.
+        Fifteen call sites each remembering to filter is fifteen chances to
+        leak an architecture claim into somebody's personal memory, and the one
+        that forgets is the one that ships. The service layer is unchanged for
+        the same reason: it never learns there is more than one model.
+        """
+        if self._ontology is None:
+            return statement.where(col(GraphAssertion.ontology).is_(None))
+        return statement.where(col(GraphAssertion.ontology) == self._ontology)
+
+    def _my_nodes(self, statement):
+        """The same, for nodes. Kept separate because the column lives on both."""
+        if self._ontology is None:
+            return statement.where(col(GraphNode.ontology).is_(None))
+        return statement.where(col(GraphNode.ontology) == self._ontology)
 
     async def record(self, assertions: Iterable[Assertion]) -> None:
         """Append claims. Nothing here updates anything.
@@ -169,7 +193,9 @@ class SqlGraphRepository:
         about how ids are derived, which is worth hearing about rather than
         silently resolving.
         """
-        rows = [_to_row(assertion) for assertion in assertions]
+        # The ontology is stamped here rather than carried on the claim: it is a
+        # property of the store a caller opened, not of the thing being said.
+        rows = [_to_row(assertion, self._ontology) for assertion in assertions]
         if not rows:
             return
         statement = pg_insert(GraphAssertion).values([row.model_dump() for row in rows])
@@ -186,7 +212,7 @@ class SqlGraphRepository:
         believed up to it and not at it, so a revision and the claim it replaces
         never both count.
         """
-        statement = select(GraphAssertion).where(
+        statement = self._mine(select(GraphAssertion)).where(
             col(GraphAssertion.user_id) == user_id,
             col(GraphAssertion.recorded_at) <= moment,
             or_(
@@ -205,7 +231,7 @@ class SqlGraphRepository:
         predicate and because a caller passing a naive ``now()`` would compare
         local time against stored UTC and get a subtly wrong graph.
         """
-        statement = select(GraphAssertion).where(
+        statement = self._mine(select(GraphAssertion)).where(
             col(GraphAssertion.user_id) == user_id,
             col(GraphAssertion.recorded_until).is_(None),
         )
@@ -265,7 +291,11 @@ class SqlGraphRepository:
         such assertion" from "not yours" can enumerate the second by guessing.
         """
         row = await self._db.get(GraphAssertion, assertion_id)
-        if row is None or row.user_id != user_id:
+        # The ontology is checked here rather than filtered, because this is a
+        # primary-key fetch. A claim from another model is refused exactly like
+        # another owner's, for the same reason: telling them apart hands a
+        # guesser a way to confirm an id is real.
+        if row is None or row.user_id != user_id or row.ontology != self._ontology:
             raise UnknownAssertionError(assertion_id)
         return _to_assertion(row)
 
@@ -285,7 +315,7 @@ class SqlGraphRepository:
         """
         rows = (
             await self._db.exec(
-                select(GraphNode).where(
+                self._my_nodes(select(GraphNode)).where(
                     col(GraphNode.user_id) == user_id,
                     col(GraphNode.kind) == kind,
                 )
@@ -300,7 +330,9 @@ class SqlGraphRepository:
     async def node(self, user_id: str, node_id: str) -> Optional[Node]:
         """One node by id, or ``None``. Scoped by owner like every other read."""
         row = await self._db.get(GraphNode, (user_id, node_id))
-        return None if row is None else _to_node(row)
+        if row is None or row.ontology != self._ontology:
+            return None
+        return _to_node(row)
 
     async def nodes(self, user_id: str) -> list[Node]:
         """Every node in this person's graph.
@@ -311,7 +343,9 @@ class SqlGraphRepository:
         one.
         """
         rows = (
-            await self._db.exec(select(GraphNode).where(col(GraphNode.user_id) == user_id))
+            await self._db.exec(
+                self._my_nodes(select(GraphNode)).where(col(GraphNode.user_id) == user_id)
+            )
         ).all()
         return [_to_node(row) for row in rows]
 
@@ -348,6 +382,7 @@ class SqlGraphRepository:
             GraphNode(
                 user_id=node.user_id,
                 node_id=node.node_id,
+                ontology=self._ontology,
                 label=node.label,
                 kind=node.kind,
                 first_seen=node.first_seen,

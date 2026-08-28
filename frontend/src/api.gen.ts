@@ -29,6 +29,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/architecture/projects/{project_id}/classifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Judge Classification
+         * @description Agree or disagree with something the codebase suggested about itself.
+         *
+         *     The only write on this surface, and the only place a person's opinion enters
+         *     a model that is otherwise entirely read off the syntax. It is recorded with
+         *     their name on it, which is what ``stated_by`` exists for.
+         *
+         *     A claim the classifier no longer makes is refused rather than stored. The
+         *     tree moves under these proposals, and a judgment about a regularity that has
+         *     since gone is a decision about a codebase that no longer exists.
+         */
+        post: operations["judge_classification_architecture_projects__project_id__classifications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/architecture/projects/{project_id}/model": {
         parameters: {
             query?: never;
@@ -745,8 +773,12 @@ export interface components {
             relation: string;
             /** Sentence */
             sentence: string;
+            /** Stated By */
+            stated_by?: string | null;
             /** Subject */
             subject: string;
+            /** Verdict */
+            verdict?: string | null;
         };
         /**
          * ConclusionOut
@@ -872,6 +904,18 @@ export interface components {
             line: number;
             /** Src */
             src: string;
+        };
+        /** Judgment */
+        Judgment: {
+            /** Claim */
+            claim: string;
+            /** Subject */
+            subject: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "agreed" | "disagreed";
         };
         /**
          * KeyExchange
@@ -1271,6 +1315,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    judge_classification_architecture_projects__project_id__classifications_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Judgment"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassificationOut"];
                 };
             };
             /** @description Validation Error */

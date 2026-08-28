@@ -103,6 +103,15 @@ class Assertion:
     attrs: dict[str, Any] | None = None
     session_id: Optional[str] = None
     run_id: Optional[str] = None
+    stated_by: Optional[str] = None
+    """The principal who said it, where anybody did.
+
+    ``trust`` records how a claim arrived and ``origin`` whether anybody meant
+    it; neither says *who*. That was invisible while a graph had one owner and
+    is the first question anybody asks of a shared one -- and it cannot be
+    added afterwards, because inventing an author for a row already written is
+    the false history this log exists to prevent.
+    """
 
     def believed_at(self, moment: datetime) -> bool:
         """Was this claim believed at ``moment``?

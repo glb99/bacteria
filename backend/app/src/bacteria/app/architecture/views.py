@@ -8,7 +8,7 @@ a large repository, the client needs all of it to lay out a scene, and a paged
 graph is a graph the client has to reassemble before it can draw anything.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -17,11 +17,13 @@ from pydantic import BaseModel, Field
 
 from bacteria.app.architecture.checks import Boundary, Crossing
 from bacteria.app.architecture.classify import sentence
+from bacteria.app.architecture.decisions import Verdict, decide, decisions, ontology_of
 from bacteria.app.architecture.models import Project
 from bacteria.app.architecture.repository import SqlProjectRepository
 from bacteria.app.architecture.service import UnusableLocation, add_project, model_of
 from bacteria.app.auth.dependencies import CurrentPrincipal
 from bacteria.app.core.dependencies import DbSession
+from bacteria.app.graph.repository import SqlGraphRepository
 
 router = APIRouter(prefix="/architecture", tags=["architecture"])
 
@@ -102,6 +104,22 @@ class ClassificationOut(BaseModel):
     sentence: str
     because: str
 
+    verdict: Optional[str] = None
+    """``agreed``, ``disagreed``, or absent while nobody has said.
+
+    Three states rather than a boolean, because *not yet judged* and *judged no*
+    are the two a review surface must never conflate — and the second is the one
+    worth measuring.
+    """
+
+    stated_by: Optional[str] = None
+
+
+class Judgment(BaseModel):
+    subject: str
+    claim: str
+    verdict: Verdict
+
 
 class ModelOut(BaseModel):
     project: ProjectOut
@@ -176,6 +194,16 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
             status.HTTP_409_CONFLICT, detail=f"cannot read {project.location}"
         ) from exc
 
+    # A proposal already judged still appears, carrying its verdict. Hiding
+    # what somebody rejected would make the surface unable to show that anything
+    # was ever rejected, which is the one number it exists to produce.
+    judged = {
+        (d.subject, d.claim): (d.verdict, d.stated_by)
+        for d in await decisions(
+            SqlGraphRepository(db, ontology=ontology_of(project)), project=project
+        )
+    }
+
     # Crossed first: the list is read top-down and the thing to act on belongs
     # where a reader starts, not after everything that is fine.
     boundaries = [_boundary_out(b, "crossed") for b in _crossed_boundaries(model.verdict.crossings)]
@@ -207,6 +235,8 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
                 claim=p.claim,
                 sentence=sentence(p),
                 because=p.because,
+                verdict=judged.get((p.subject, p.claim), (None, None))[0],
+                stated_by=judged.get((p.subject, p.claim), (None, None))[1],
             )
             for p in model.proposals
         ],
@@ -244,3 +274,56 @@ def _permitted_roots() -> tuple[Path, ...]:
     an edit here and not a search through the routes.
     """
     return ()
+
+
+@router.post("/projects/{project_id}/classifications", response_model=ClassificationOut)
+async def judge_classification(
+    project_id: str, body: Judgment, principal: CurrentPrincipal, db: DbSession
+) -> ClassificationOut:
+    """Agree or disagree with something the codebase suggested about itself.
+
+    The only write on this surface, and the only place a person's opinion enters
+    a model that is otherwise entirely read off the syntax. It is recorded with
+    their name on it, which is what ``stated_by`` exists for.
+
+    A claim the classifier no longer makes is refused rather than stored. The
+    tree moves under these proposals, and a judgment about a regularity that has
+    since gone is a decision about a codebase that no longer exists.
+    """
+    repository = SqlProjectRepository(db)
+    project = await repository.owned(principal.id, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such project")
+
+    model = model_of(project)
+    matched = next(
+        (p for p in model.proposals if p.subject == body.subject and p.claim == body.claim),
+        None,
+    )
+    if matched is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="this codebase no longer suggests that",
+        )
+
+    graph = SqlGraphRepository(db, ontology=ontology_of(project))
+    decision = await decide(
+        graph,
+        project=project,
+        subject=body.subject,
+        claim=body.claim,
+        verdict=body.verdict,
+        stated_by=principal.id,
+        now=datetime.now(timezone.utc),
+    )
+    await db.commit()
+
+    return ClassificationOut(
+        subject=matched.subject,
+        relation=matched.relation,
+        claim=matched.claim,
+        sentence=sentence(matched),
+        because=matched.because,
+        verdict=decision.verdict,
+        stated_by=decision.stated_by,
+    )

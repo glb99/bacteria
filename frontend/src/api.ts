@@ -220,3 +220,23 @@ export const readArchitecture = (projectId: string) =>
       params: { path: { project_id: projectId } },
     }),
   );
+
+/**
+ * Agree or disagree with something the codebase suggested about itself.
+ *
+ * The only write this surface has. It answers with the proposal carrying its
+ * verdict, so a caller repaints one card rather than re-reading a whole model
+ * to discover that one line changed.
+ */
+export const judgeClassification = (
+  projectId: string,
+  subject: string,
+  claim: string,
+  verdict: "agreed" | "disagreed",
+) =>
+  unwrap(
+    api.POST("/architecture/projects/{project_id}/classifications", {
+      params: { path: { project_id: projectId } },
+      body: { subject, claim, verdict },
+    }),
+  );

@@ -58,12 +58,24 @@ class Boundary:
     ``elsewhere`` names what does check it, where something does. Without it an
     undecidable boundary reads as unguarded, and two of these are in fact
     guarded by tests that have nothing to do with this feature.
+
+    ``about`` names the module regions the rule speaks about. A boundary whose
+    regions are absent from a codebase is **inapplicable**, not satisfied:
+    pointed at somebody else's repository, *"the agent knows nothing about the
+    application"* came back ``holds`` because neither package existed. A rule
+    that passes by describing nothing is the vacuous truth this feature reports
+    ``undecidable`` to avoid, arriving through a different door.
     """
 
     name: str
     sentence: str
     decides: Rule | None = None
     elsewhere: str | None = None
+    about: tuple[str, ...] = ()
+
+    def applies_to(self, derived: Derived) -> bool:
+        """Whether this codebase contains what the rule is about."""
+        return all(derived.within(prefix) for prefix in self.about)
 
 
 @dataclass(frozen=True)
@@ -91,6 +103,7 @@ class Verdict:
     held: tuple[Boundary, ...]
     crossings: tuple[Crossing, ...]
     undecidable: tuple[Boundary, ...]
+    inapplicable: tuple[Boundary, ...] = ()
 
     @property
     def clean(self) -> bool:
@@ -155,21 +168,25 @@ BOUNDARIES: tuple[Boundary, ...] = (
         name="the-agent-knows-nothing-of-the-application",
         sentence="The application depends on the agent; the agent knows nothing about the application.",
         decides=_agent_reaches_into_the_app,
+        about=(AGENT, APP),
     ),
     Boundary(
         name="two-composition-roots",
         sentence="The application never imports bacteria.agent.interfaces.",
         decides=_app_reaches_the_agents_own_root,
+        about=(APP, INTERFACES),
     ),
     Boundary(
         name="core-names-no-domain-concept",
         sentence="Features own their tables, tasks, and routes. core/ holds nothing that names a domain concept.",
         decides=_core_names_a_domain_concept,
+        about=(CORE,),
     ),
     Boundary(
         name="features-own-their-tables",
         sentence="Features own their tables, so core/ declares none.",
         decides=_core_declares_a_table,
+        about=(CORE,),
     ),
     Boundary(
         name="entrypoints-hold-configuration",
@@ -205,13 +222,16 @@ def evaluate(derived: Derived, boundaries: Sequence[Boundary] = BOUNDARIES) -> V
     held: list[Boundary] = []
     crossings: list[Crossing] = []
     undecidable: list[Boundary] = []
+    inapplicable: list[Boundary] = []
 
     for boundary in boundaries:
         if boundary.decides is None:
             undecidable.append(boundary)
-            continue
-        found = [Crossing(boundary=boundary, edge=edge) for edge in boundary.decides(derived)]
-        if found:
+        elif not boundary.applies_to(derived):
+            inapplicable.append(boundary)
+        elif found := [
+            Crossing(boundary=boundary, edge=edge) for edge in boundary.decides(derived)
+        ]:
             crossings.extend(found)
         else:
             held.append(boundary)
@@ -220,4 +240,5 @@ def evaluate(derived: Derived, boundaries: Sequence[Boundary] = BOUNDARIES) -> V
         held=tuple(held),
         crossings=tuple(crossings),
         undecidable=tuple(undecidable),
+        inapplicable=tuple(inapplicable),
     )

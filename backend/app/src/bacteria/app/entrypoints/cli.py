@@ -30,6 +30,7 @@ from bacteria.agent.session.store import (
 )
 from bacteria.app.architecture.checks import evaluate as check_boundaries
 from bacteria.app.architecture.derive import derive
+from bacteria.app.architecture.layout import source_roots
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, list_keys, principal_is_known, revoke_key
 from bacteria.app.chat import review
@@ -697,9 +698,9 @@ def _architecture(root: Path) -> int:
     undecidable boundaries either way: a run that printed only the ones it can
     settle would imply it had settled all of them.
     """
-    roots = {path: path.parts[-2] for path in sorted((root / "backend").glob("*/src"))}
+    roots = source_roots(root)
     if not roots:
-        print(f"no source roots under {(root / 'backend').as_posix()}")
+        print(f"no Python packages found under {root.as_posix()}")
         return 1
 
     derived = derive(roots)
@@ -716,12 +717,16 @@ def _architecture(root: Path) -> int:
     for boundary in verdict.undecidable:
         print(f"  undecidable  {boundary.sentence}")
         print(f"               checked by: {boundary.elsewhere}")
+    for boundary in verdict.inapplicable:
+        print(f"  n/a          {boundary.sentence}")
+        print(f"               nothing here matches {', '.join(boundary.about)}")
 
     if verdict.clean:
         print()
         print(
             f"{len(verdict.held)} boundaries checked and holding; "
-            f"{len(verdict.undecidable)} that no import can decide."
+            f"{len(verdict.undecidable)} that no import can decide; "
+            f"{len(verdict.inapplicable)} about code this repository does not have."
         )
         return 0
 
@@ -869,7 +874,7 @@ def main() -> int:
         nargs="?",
         default=".",
         type=Path,
-        help="the checkout to read; source roots are its backend/*/src",
+        help="the checkout to read; its source roots are discovered",
     )
 
     diff = commands.add_parser(

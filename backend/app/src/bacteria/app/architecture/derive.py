@@ -39,6 +39,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from bacteria.app.architecture.layout import python_files
+
 
 @dataclass(frozen=True)
 class Import:
@@ -131,7 +133,7 @@ def derive(roots: Mapping[Path, str]) -> Derived:
     trees: dict[str, ast.Module] = {}
 
     for root, _label in roots.items():
-        for path in sorted(root.rglob("*.py")):
+        for path in python_files(root):
             name = _dotted(path, root)
             package = name.rsplit(".", 1)[0] if "." in name else name
             tree = _parse(path)
@@ -174,11 +176,17 @@ def _dotted(path: Path, root: Path) -> str:
 
 
 def _tables(tree: ast.Module | None) -> tuple[str, ...]:
-    """Table names declared by a ``__tablename__`` literal in a class body.
+    """Table names a module declares, read without importing it.
 
-    Only a literal. A computed table name would need the class evaluated, and a
-    derivation that imports the code it is describing is a derivation that can
-    be broken by the code it is describing.
+    Two spellings, because only recognising one made every repository but this
+    codebase report zero tables. An explicit ``__tablename__`` literal wins; a
+    class declared ``table=True`` with no such literal falls back to SQLModel's
+    own default, the class name lowercased. The FastAPI template's ``User`` and
+    ``Item`` are the second kind, and this returned nothing for them.
+
+    Only literals either way. A computed table name would need the class
+    evaluated, and a derivation that imports the code it describes is one the
+    code it describes can break.
     """
     if tree is None:
         return ()
@@ -186,13 +194,32 @@ def _tables(tree: ast.Module | None) -> tuple[str, ...]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        for statement in node.body:
-            if not isinstance(statement, ast.Assign):
-                continue
-            names = (t.id for t in statement.targets if isinstance(t, ast.Name))
-            if "__tablename__" in names and isinstance(statement.value, ast.Constant):
-                found.add(str(statement.value.value))
+        declared = _tablename_literal(node)
+        if declared is not None:
+            found.add(declared)
+        elif _is_table(node):
+            found.add(node.name.lower())
     return tuple(sorted(found))
+
+
+def _tablename_literal(node: ast.ClassDef) -> str | None:
+    for statement in node.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        names = (t.id for t in statement.targets if isinstance(t, ast.Name))
+        if "__tablename__" in names and isinstance(statement.value, ast.Constant):
+            return str(statement.value.value)
+    return None
+
+
+def _is_table(node: ast.ClassDef) -> bool:
+    """``class X(Base, table=True)`` -- SQLModel's way of saying this is a table."""
+    return any(
+        keyword.arg == "table"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+        for keyword in node.keywords
+    )
 
 
 def _imports(tree: ast.Module, own: str, known: frozenset[str]) -> Iterable[Import]:

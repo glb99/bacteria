@@ -4,6 +4,55 @@
  */
 
 export interface paths {
+    "/architecture/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Projects */
+        get: operations["list_projects_architecture_projects_get"];
+        put?: never;
+        /**
+         * Create Project
+         * @description Point the service at a checkout.
+         *
+         *     Adding the same location twice returns the existing project rather than
+         *     failing. It is the same statement made again, and a duplicate-key error for
+         *     "I already told you that" is a worse answer than the row.
+         */
+        post: operations["create_project_architecture_projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/architecture/projects/{project_id}/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Model
+         * @description The codebase as it stands on disk right now, judged against its rules.
+         *
+         *     Re-read on every request. The alternative is a stored copy that disagrees
+         *     with the working tree exactly when somebody is editing it, which is the only
+         *     time anybody looks.
+         */
+        get: operations["read_model_architecture_projects__project_id__model_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/session": {
         parameters: {
             query?: never;
@@ -663,6 +712,17 @@ export interface components {
             /** Rejected */
             rejected: components["schemas"]["RejectionOut"][];
         };
+        /** BoundaryOut */
+        BoundaryOut: {
+            /** Elsewhere */
+            elsewhere?: string | null;
+            /** Name */
+            name: string;
+            /** Sentence */
+            sentence: string;
+            /** State */
+            state: string;
+        };
         /**
          * ConclusionOut
          * @description A belief the system drew, and the claims it rests on.
@@ -715,6 +775,17 @@ export interface components {
             /** State */
             state: string;
         };
+        /** CrossingOut */
+        CrossingOut: {
+            /** Boundary */
+            boundary: string;
+            /** Dst */
+            dst: string;
+            /** Line */
+            line: number;
+            /** Src */
+            src: string;
+        };
         /**
          * ExtractionProgressOut
          * @description How far memory extraction has read this conversation.
@@ -765,6 +836,17 @@ export interface components {
             scope: "session" | "user";
             /** Value */
             value: unknown;
+        };
+        /** ImportOut */
+        ImportOut: {
+            /** Deferred */
+            deferred: boolean;
+            /** Dst */
+            dst: string;
+            /** Line */
+            line: number;
+            /** Src */
+            src: string;
         };
         /**
          * KeyExchange
@@ -831,6 +913,43 @@ export interface components {
             /** Value */
             value: unknown;
         };
+        /** ModelOut */
+        ModelOut: {
+            /** Boundaries */
+            boundaries: components["schemas"]["BoundaryOut"][];
+            /** Crossings */
+            crossings: components["schemas"]["CrossingOut"][];
+            /** Imports */
+            imports: components["schemas"]["ImportOut"][];
+            /** Modules */
+            modules: components["schemas"]["ModuleOut"][];
+            project: components["schemas"]["ProjectOut"];
+            /** Roots */
+            roots: string[];
+            /** Tables */
+            tables: string[];
+        };
+        /** ModuleOut */
+        ModuleOut: {
+            /** Name */
+            name: string;
+            /** Package */
+            package: string;
+            /** Path */
+            path: string;
+            /** Tables */
+            tables: string[];
+        };
+        /** NewProject */
+        NewProject: {
+            /** Location */
+            location: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+        };
         /**
          * NodeOut
          * @description One thing the graph knows about.
@@ -869,6 +988,20 @@ export interface components {
             inferred: components["schemas"]["ConclusionOut"][];
             /** Stale */
             stale: components["schemas"]["ConclusionOut"][];
+        };
+        /** ProjectOut */
+        ProjectOut: {
+            /**
+             * Added At
+             * Format: date-time
+             */
+            added_at: string;
+            /** Location */
+            location: string;
+            /** Name */
+            name: string;
+            /** Project Id */
+            project_id: string;
         };
         /**
          * ProposalOut
@@ -1058,6 +1191,105 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_projects_architecture_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_architecture_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewProject"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_model_architecture_projects__project_id__model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     open_session_auth_session_post: {
         parameters: {
             query?: never;

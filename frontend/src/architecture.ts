@@ -17,6 +17,7 @@
 
 import {
   addProject,
+  askAbout,
   judgeClassification,
   listProjects,
   readArchitecture,
@@ -647,29 +648,55 @@ addButton.addEventListener("click", async () => {
   await refresh();
 });
 
-form.addEventListener("submit", (event) => {
+form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const asked = input.value.trim();
-  if (!asked) return;
+  if (!asked || !model) return;
   input.value = "";
-  if (!model) return;
 
+  // Scope first, from the question itself, so the scene has moved before the
+  // model has answered. A name in the question is a scope the person meant even
+  // when the answer takes four seconds to arrive.
   const match =
     model.modules.find((m) => m.name === asked) ??
     model.modules.find((m) => m.name.endsWith("." + asked)) ??
     model.modules.find((m) => m.name.includes(asked));
-
-  if (!match) {
-    say(asked, text("p", "nothing here is called that", "arch-answer"));
-    return;
+  if (match) {
+    scope = match.name.split(".").slice(0, -1).join(".") || match.name;
+    render();
   }
-  scope = match.name.split(".").slice(0, -1).join(".") || match.name;
-  say(asked, describe(scope));
-  render();
-});
 
-// Disabled until a project has loaded; see `load`.
-runTestsButton.disabled = true;
+  const pending = text("p", "…", "arch-answer");
+  say(asked, pending);
+
+  try {
+    const answer = await askAbout(model.project.project_id, asked);
+    const wrap = document.createElement("div");
+    wrap.className = "arch-answer";
+    wrap.append(text("p", answer.reply));
+
+    // Which tools it used, because an answer read off the parse and one
+    // invented from a plausible package name look identical. An empty list is
+    // the signal to distrust the reply, and hiding it removes the only way to
+    // tell.
+    const provenance =
+      answer.tools_used.length > 0
+        ? `read: ${answer.tools_used.join(", ")}`
+        : "answered without reading anything — treat with suspicion";
+    wrap.append(text("p", provenance, "arch-card-note"));
+
+    if (answer.refused.length > 0) {
+      // The gate saying no, out loud. Normally empty; non-empty means a model
+      // reached for something this surface does not offer.
+      wrap.append(
+        text("p", `refused: ${answer.refused.join(", ")}`, "arch-card-note"),
+      );
+    }
+    pending.replaceWith(wrap);
+  } catch (error) {
+    pending.replaceWith(text("p", `could not answer — ${String(error)}`, "arch-answer"));
+  }
+});
 
 runTestsButton.addEventListener("click", async () => {
   if (!model) return;

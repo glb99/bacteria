@@ -112,6 +112,49 @@ test.describe("judging a proposal", () => {
     await expect(page.locator("#arch-verdicts")).toContainText("disagreed");
   });
 
+  test("agreeing repaints the scene, not only the card", async ({ page }) => {
+    await openArchitecture(page);
+    await expect(page.locator("#arch-svg .arch-glyph").first()).toBeVisible();
+
+    // A *feature*, not whatever card is first. The first is usually a role — a
+    // claim about a word rather than a package — and a role correctly has no
+    // glyph, so agreeing to one moves nothing.
+    const card = page
+      .locator("#arch-proposals .arch-card")
+      .filter({ hasText: "is a feature" })
+      .first();
+    const title = (await card.locator(".arch-card-title").textContent()) ?? "";
+    const subject = title.replace(" is a feature", "").trim();
+
+    // Asserted on this one glyph rather than on a count of them. These tests
+    // write, and they share a database with each other — `graph.spec.ts` says
+    // why that matters, having eaten eight assertions once. A delta over all
+    // glyphs passed alone and failed in the suite, because a sibling test
+    // judged something else at the same time.
+    const glyph = page.locator(`#arch-svg .arch-glyph[data-package="${subject}"]`);
+    await expect(glyph).toHaveCount(1);
+
+    await card.locator("button", { hasText: "disagree" }).click();
+    await expect(glyph).not.toHaveClass(/agreed/);
+
+    // The whole sentence, not the subject alone. A role card lists its evidence
+    // as module names, so `hasText: "bacteria.app.architecture"` matched a role
+    // proposal first and agreed to that instead — the click landed, the tally
+    // moved, and the glyph correctly did not.
+    await page
+      .locator("#arch-proposals .arch-card")
+      .filter({ hasText: `${subject} is a feature` })
+      .first()
+      .locator("button", { hasText: "agree" })
+      .first()
+      .click();
+
+    // The scene used to keep drawing the classification as still proposed while
+    // the tally said it was agreed — the picture and the count disagreeing
+    // about the same click, which is worse than either being wrong alone.
+    await expect(glyph).toHaveClass(/agreed/);
+  });
+
   test("a rejected proposal keeps its place in the list", async ({ page }) => {
     await openArchitecture(page);
     const first = page.locator("#arch-proposals .arch-card").first();

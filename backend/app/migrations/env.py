@@ -30,6 +30,7 @@ from sqlmodel import SQLModel
 # Without every model module imported here, autogenerate sees a table it does
 # not know about and cheerfully writes a migration to drop it.
 from bacteria.app import models as _root_models  # noqa: F401
+from bacteria.app.architecture import models as _architecture_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
 from bacteria.app.chat import models as _chat_models  # noqa: F401
 from bacteria.app.core.db import include_name

@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from bacteria.app.architecture.views import router as architecture_router
 from bacteria.app.auth.views import router as auth_router
 from bacteria.app.chat.views import router as chat_router
 from bacteria.app.graph.views import router as graph_router
@@ -58,6 +59,7 @@ def create_app(lifespan=None, console_dir: Path | None = None) -> FastAPI:
     # First, and only because it reads that way in `/docs`: establishing a
     # session is the first thing a browser does, and the generated page lists
     # tags in the order routers are added.
+    app.include_router(architecture_router)
     app.include_router(auth_router)
     app.include_router(chat_router)
     app.include_router(graph_router)

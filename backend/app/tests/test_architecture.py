@@ -17,6 +17,7 @@ from bacteria.app.architecture.checks import (
     evaluate,
 )
 from bacteria.app.architecture.derive import Derived, Import, Module, derive
+from bacteria.app.architecture.layout import python_files
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -364,3 +365,97 @@ class TestVerdict:
 
         assert verdict.crossings == ()
         assert len(verdict.held) + len(verdict.undecidable) == len(BOUNDARIES)
+
+
+class TestReadingOtherRepositories:
+    """Three defects found by pointing this at repositories that are not this one.
+
+    Each looked like a working answer. That is the whole reason they are here:
+    a wrong parse reports a small tidy codebase, and nothing about the output
+    says it is wrong.
+    """
+
+    def test_a_virtualenv_inside_the_root_is_not_parsed(self, tmp_path: Path) -> None:
+        """The ignore list applies when reading, not only when finding roots.
+
+        It used to apply only to discovery, so a flat repository with its
+        environment inside parsed the environment: one checkout reported 1793
+        modules of which 1757 were installed dependencies, and took eight
+        seconds per request to do it.
+        """
+        _write(tmp_path, "mypkg.__init__", "")
+        _write(tmp_path, "mypkg.thing", "")
+        venv = tmp_path / ".venv" / "Lib" / "site-packages" / "requests"
+        venv.mkdir(parents=True)
+        (venv / "__init__.py").write_text("", encoding="utf-8")
+
+        names = [p.name for p in python_files(tmp_path)]
+
+        assert "thing.py" in names
+        assert all("site-packages" not in p.as_posix() for p in python_files(tmp_path))
+
+    def test_a_sqlmodel_table_without_an_explicit_name_is_found(self, tmp_path: Path) -> None:
+        """``class Item(Base, table=True)`` declares ``item``.
+
+        Only ``__tablename__`` was recognised, so every repository but this one
+        reported zero tables -- including the FastAPI template, whose ``User``
+        and ``Item`` are declared the other way.
+        """
+        _write(
+            tmp_path,
+            "pkg",
+            """
+class Item(Base, table=True):
+    pass
+""",
+        )
+
+        assert derive({tmp_path: "t"}).tables == ("item",)
+
+    def test_an_explicit_tablename_wins_over_the_class_name(self, tmp_path: Path) -> None:
+        """A declared name is the name, whatever the class is called."""
+        _write(
+            tmp_path,
+            "pkg",
+            """
+class Item(Base, table=True):
+    __tablename__ = "catalogue_item"
+""",
+        )
+
+        assert derive({tmp_path: "t"}).tables == ("catalogue_item",)
+
+    def test_a_boundary_about_absent_code_is_inapplicable_not_held(self) -> None:
+        """A rule that passes by describing nothing must not read as satisfied.
+
+        Pointed at somebody else's repository, all four decidable boundaries
+        came back ``holds`` because none of the packages they name existed --
+        a clean bill of health issued about code that was not there.
+        """
+        rule = Boundary(
+            name="agent-knows-nothing",
+            sentence="The agent knows nothing about the application.",
+            decides=_agent_reaches_into_the_app,
+            about=("bacteria.agent", "bacteria.app"),
+        )
+        stranger = _graph(modules=("someone_else.main",))
+
+        verdict = evaluate(stranger, [rule])
+
+        assert verdict.inapplicable == (rule,)
+        assert verdict.held == ()
+
+    def test_a_boundary_about_present_code_is_still_judged(self) -> None:
+        """Applicability must not become a way for a real rule to opt out."""
+        rule = Boundary(
+            name="agent-knows-nothing",
+            sentence="The agent knows nothing about the application.",
+            decides=_agent_reaches_into_the_app,
+            about=("bacteria.agent", "bacteria.app"),
+        )
+        here = _graph(modules=("bacteria.agent.session.store", "bacteria.app.core.db"))
+
+        verdict = evaluate(here, [rule])
+
+        assert verdict.held == (rule,)
+        assert verdict.inapplicable == ()

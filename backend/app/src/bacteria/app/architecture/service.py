@@ -13,7 +13,7 @@ Not built:
     then a cache is a second source of truth for a fact that is free.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -62,6 +62,7 @@ async def add_project(
     principal_id: str,
     name: str,
     location: str,
+    test_command: str = "",
     permitted: Sequence[Path] = (),
 ) -> Project:
     """Register a checkout, after checking it is one.
@@ -92,6 +93,14 @@ async def add_project(
 
     existing = await repository.named(principal_id, resolved.as_posix())
     if existing is not None:
+        # Saying it again is not an error and does not mint a second project.
+        # But saying it again *with a test command* is new information, and
+        # dropping it silently meant a project added before the probe existed
+        # could never be told how to check itself -- which is exactly how it
+        # failed the first time it was run against a real server.
+        if test_command and test_command != existing.test_command:
+            await repository.set_test_command(existing.project_id, test_command)
+            return replace(existing, test_command=test_command)
         return existing
 
     return await repository.add(
@@ -99,6 +108,7 @@ async def add_project(
             principal_id=principal_id,
             name=name or resolved.name,
             location=resolved.as_posix(),
+            test_command=test_command or None,
         )
     )
 

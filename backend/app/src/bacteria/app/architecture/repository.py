@@ -20,6 +20,7 @@ def _project(row: ArchitectureProject) -> Project:
         principal_id=row.principal_id,
         name=row.name,
         location=row.location,
+        test_command=row.test_command,
         added_at=row.added_at,
     )
 
@@ -66,3 +67,18 @@ class SqlProjectRepository:
         )
         row = rows.first()
         return _project(row) if row is not None else None
+
+    async def set_test_command(self, project_id: str, command: str) -> None:
+        """Tell an existing project how to check itself.
+
+        A plain update, and one of the very few in this codebase that overwrites
+        rather than appends. It is allowed because a test command is
+        *configuration* and not a claim about the world: what it says is "run
+        this", not "this was true", and there is no past value anybody would
+        want to reconstruct.
+        """
+        row = await self._db.get(ArchitectureProject, project_id)
+        if row is not None:
+            row.test_command = command
+            self._db.add(row)
+            await self._db.flush()

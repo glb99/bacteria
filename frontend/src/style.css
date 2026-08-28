@@ -971,6 +971,30 @@ button.act.danger[data-armed="yes"] {
 .arch-act.tiny { padding: 2px 8px; font-size: 11px; color: var(--dim); }
 .arch-act.tiny.on { border-color: color-mix(in oklch, var(--holo) 55%, transparent); color: var(--holo); }
 
+/* A world-action is badged apart from a model-action, because a view that does
+   both makes the distinction invisible at the moment it starts to matter. This
+   one runs somebody's test suite; the others change what we believe. */
+.arch-act.world { border-style: dashed; color: var(--warn); }
+
+.arch-pill.ok { color: var(--holo); border-color: color-mix(in oklch, var(--holo) 45%, transparent); }
+.arch-pill.failing { color: var(--alarm); border-color: color-mix(in oklch, var(--alarm) 50%, transparent); }
+
+/* Never checked is not fine, and must not be drawn as though it were. */
+.arch-pill.unavailable { color: var(--ghost); border-style: dashed; }
+
+.arch-output {
+  margin: 0;
+  max-height: 190px;
+  overflow: auto;
+  padding: 7px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  background: oklch(0.16 0.024 255);
+  font: 400 10.5px/1.5 var(--mono);
+  color: var(--dim);
+  white-space: pre-wrap;
+}
+
 .arch-card-title { margin: 0; font: 500 12px var(--ui); }
 .arch-card-detail { margin: 3px 0 0; font: 400 11px/1.5 var(--mono); color: var(--dim); }
 .arch-card-note { margin: 5px 0 0; font: 400 10px var(--mono); color: var(--ghost); }
@@ -1001,7 +1025,32 @@ button.act.danger[data-armed="yes"] {
 }
 
 .arch-glyph path { fill: none; }
-.arch-glyph.drum ellipse { fill: oklch(0.19 0.028 255); }
+.arch-glyph.feature ellipse { fill: oklch(0.19 0.028 255); }
+
+/* Agreed, proposed, unjudged -- three treatments, because a package somebody
+   ratified as a feature and one the classifier merely suspects are different
+   claims about the world, and the second must not borrow the first's authority. */
+.arch-glyph.agreed ellipse,
+.arch-glyph.agreed rect,
+.arch-glyph.agreed path { stroke-width: 1.8; }
+
+.arch-glyph.proposed ellipse,
+.arch-glyph.proposed rect,
+.arch-glyph.proposed path {
+  stroke-dasharray: 5 4;
+  fill: transparent;
+}
+
+/* Nothing has been said about it, which is most of a repository on the day it
+   is added. Quiet rather than alarming: unjudged is not wrong. */
+.arch-glyph.unclassified ellipse,
+.arch-glyph.unclassified rect,
+.arch-glyph.unclassified path {
+  stroke: var(--ghost);
+  fill: transparent;
+}
+
+.arch-glyph.unclassified text { fill: var(--dim); }
 .arch-glyph text {
   fill: var(--ink);
   font: 400 11px var(--mono);
@@ -1030,8 +1079,10 @@ button.act.danger[data-armed="yes"] {
 .arch-legend .swatch.beam { background: var(--holo); }
 .arch-legend .swatch.deferred { border-top: 3px dashed var(--holo); height: 0; }
 .arch-legend .swatch.crossed { border-top: 3px dashed var(--alarm); height: 0; }
-.arch-legend .swatch.glyph-slab { height: 9px; border: 1px solid var(--holo); }
 .arch-legend .swatch.glyph-drum { height: 9px; border: 1px solid var(--holo); border-radius: 50%; }
+.arch-legend .swatch.glyph-slab { height: 7px; width: 16px; border: 1px solid var(--holo); }
+.arch-legend .swatch.glyph-proposed { height: 9px; border: 1px dashed var(--holo); }
+.arch-legend .swatch.glyph-none { height: 9px; border: 1px solid var(--ghost); }
 
 @media (max-width: 70rem) {
   .arch-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr auto; }

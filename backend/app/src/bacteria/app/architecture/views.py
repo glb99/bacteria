@@ -19,6 +19,7 @@ from bacteria.app.architecture.checks import Boundary, Crossing
 from bacteria.app.architecture.classify import sentence
 from bacteria.app.architecture.decisions import Verdict, decide, decisions, ontology_of
 from bacteria.app.architecture.models import Project
+from bacteria.app.architecture.probes import Reading, run_tests
 from bacteria.app.architecture.repository import SqlProjectRepository
 from bacteria.app.architecture.service import UnusableLocation, add_project, model_of
 from bacteria.app.auth.dependencies import CurrentPrincipal
@@ -31,13 +32,44 @@ router = APIRouter(prefix="/architecture", tags=["architecture"])
 class NewProject(BaseModel):
     location: str = Field(min_length=1)
     name: str = ""
+    test_command: str = ""
+    """What to run to check this project, set once when it is configured.
+
+    Accepted here and nowhere else. The probe that runs it never takes a command
+    from a request — a route that did would be remote code execution with extra
+    steps, whatever the intent of whoever added it.
+    """
 
 
 class ProjectOut(BaseModel):
     project_id: str
     name: str
     location: str
+    test_command: Optional[str] = None
     added_at: datetime
+
+
+class ReadingOut(BaseModel):
+    """What the world said when we asked, and when.
+
+    Deliberately not shaped like an assertion. It has no validity interval and
+    no author because nobody said it — a process exited with a status, which is
+    a different kind of thing from a claim, and giving it a claim's shape would
+    invite it into a log it must never enter.
+    """
+
+    probe: str
+    state: str
+    """``ok``, ``failing`` or ``unavailable``.
+
+    Three and not two: a project that never said how to test itself has not been
+    checked, which is not the same as having been checked and found fine. A
+    surface drawing them alike reports a green tick for a suite nobody ran.
+    """
+
+    detail: str
+    output: str
+    at: datetime
 
 
 class ModuleOut(BaseModel):
@@ -137,6 +169,7 @@ def _project_out(project: Project) -> ProjectOut:
         project_id=project.project_id,
         name=project.name,
         location=project.location,
+        test_command=project.test_command,
         added_at=project.added_at,
     )
 
@@ -158,6 +191,7 @@ async def create_project(
             principal_id=principal.id,
             name=body.name,
             location=body.location,
+            test_command=body.test_command,
             permitted=_permitted_roots(),
         )
     except UnusableLocation as exc:
@@ -327,3 +361,34 @@ async def judge_classification(
         verdict=decision.verdict,
         stated_by=decision.stated_by,
     )
+
+
+def _reading_out(reading: Reading) -> ReadingOut:
+    return ReadingOut(
+        probe=reading.probe,
+        state=reading.state,
+        detail=reading.detail,
+        output=reading.output,
+        at=reading.at,
+    )
+
+
+@router.post("/projects/{project_id}/probes/tests", response_model=ReadingOut)
+async def probe_tests(project_id: str, principal: CurrentPrincipal, db: DbSession) -> ReadingOut:
+    """Run the project's own test command and report what happened.
+
+    **A world-action**, and the first thing in this feature that is not a read.
+    It changes nothing in the model: the answer is returned, shown and
+    forgotten, because the tests were green four minutes ago and may be red now.
+    A fact with a shelf life of one commit has no business in a log built to
+    reconstruct what was believed last March.
+
+    Takes no body. The command is the project's, set when it was configured, and
+    a caller says *take the reading* rather than *run this*.
+    """
+    repository = SqlProjectRepository(db)
+    project = await repository.owned(principal.id, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such project")
+
+    return _reading_out(await run_tests(project))

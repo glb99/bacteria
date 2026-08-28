@@ -12,6 +12,7 @@ So the row answers *which codebases are we watching* and nothing else.
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
@@ -58,6 +59,19 @@ class ArchitectureProject(SQLModel, table=True):
     principal_id: str = Field(index=True)
     name: str
     location: str
+    test_command: Optional[str] = Field(default=None)
+    """What to run to find out whether this project's tests pass.
+
+    Stored on the project rather than accepted per request, and that is the
+    whole security posture of the probe that runs it: a route taking a command
+    would be remote code execution with extra steps, whatever the intent of
+    whoever added it. Configured once by the operator, who already has a shell
+    on this machine.
+
+    ``None`` means nobody has said, which the probe reports as *unavailable* and
+    never as passing.
+    """
+
     added_at: datetime = Field(default_factory=_utcnow, sa_column=_tz_column())
 
 
@@ -79,4 +93,5 @@ class Project:
     principal_id: str
     name: str
     location: str
+    test_command: Optional[str]
     added_at: datetime

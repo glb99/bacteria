@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Optional
 
+from bacteria.app.architecture.catalogue import KIND, PACKAGE, WORD
 from bacteria.app.architecture.models import Project
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -43,13 +44,6 @@ Verdict = Literal["agreed", "disagreed"]
 
 AGREE = "is_a"
 DISAGREE = "is_not_a"
-
-WORD = "word"
-"""A vocabulary term the codebase repeats — ``service``, ``models``."""
-
-PACKAGE = "package"
-KIND = "kind"
-"""What something is said to be — ``role``, ``feature``, ``layer``."""
 
 
 def ontology_of(project: Project) -> str:

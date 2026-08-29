@@ -29,7 +29,7 @@ Not built:
 
 import hashlib
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal, Optional
 
@@ -108,7 +108,13 @@ async def decide(
             # The same judgment restated. Rewriting it would move its date and
             # lose when it was actually made.
             return _decision(existing, subject, claim)
-        await repository.close(existing)
+        # Stamped before closing, because `close` copies the timestamp off the
+        # assertion it is handed rather than setting one. Passing the row back
+        # unchanged assigns `recorded_until = None` over `None` and returns
+        # quietly, which left every reversal in this database standing beside
+        # the judgment it was meant to replace -- `is_a` and `is_not_a` both
+        # current, and whichever the reader happened to see last winning.
+        await repository.close(replace(existing, recorded_until=now, closed_by="superseded"))
 
     claim_row = Assertion(
         assertion_id=_decision_id(ontology, subject, claim, now),

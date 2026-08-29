@@ -16,6 +16,7 @@ from bacteria.app.architecture.catalogue import (
 )
 from bacteria.app.architecture.classify import propose
 from bacteria.app.architecture.derive import Derived, Import, Module
+from bacteria.app.architecture.views import ClassificationOut, ImportOut, ModelOut, ModuleOut
 
 
 class TestVocabulary:
@@ -139,3 +140,62 @@ class TestTheAdapterUsesIt:
 
         assert found is not None
         assert found.invariant == "A subject is one kind of thing at a time."
+
+
+CARRIED_BY: dict[str, tuple[str, type, tuple[str, ...]]] = {
+    # relation -> (field on ModelOut, item model, fields that carry the edge)
+    "imports": ("imports", ImportOut, ("src", "dst")),
+    # Flattened rather than listed: a module carries the tables it declares,
+    # so the edge is `ModuleOut.name` x each entry of `ModuleOut.tables`.
+    "owns_table": ("modules", ModuleOut, ("name", "tables")),
+    # Both judgments ride one field. `verdict` is what separates them, which
+    # is why it is named here: drop it and `is_a` and `is_not_a` become
+    # indistinguishable on the wire while both still look carried.
+    "is_a": ("proposals", ClassificationOut, ("subject", "claim", "verdict")),
+    "is_not_a": ("proposals", ClassificationOut, ("subject", "claim", "verdict")),
+}
+"""How each declared relation reaches a client, if it does.
+
+Relation -> the field on ``ModelOut``, the item model, and the fields that
+carry the edge.
+"""
+
+
+class TestTheWireFormatCarriesIt:
+    """The seam between the declared ontology and what a client actually reads.
+
+    ``read_model`` never imports this catalogue. It does not mint anything, so
+    the closed ``KINDS`` set cannot be violated there — but it is the only view
+    of this ontology any client has, and it was written independently of the
+    words the ontology declares. ``ModelOut`` is a nested document rather than
+    triples: ``imports`` matches a relation name by coincidence, and
+    ``owns_table`` does not appear at all, being flattened into
+    ``ModuleOut.tables``.
+
+    So the catalogue could go on declaring a relation the API had quietly
+    stopped expressing, and nothing would say so. That is the defect PR #87
+    fixed by hand for the adapter — ``in_package`` and ``owns_table`` declared
+    and emitted by nothing — arriving through the other door.
+    """
+
+    def test_every_declared_relation_reaches_a_client(self) -> None:
+        """Adding a relation to the catalogue must fail until somebody sends it.
+
+        The point is the failure, not the pass. A relation declared and never
+        serialised is invisible to every consumer of this ontology, which makes
+        the catalogue a description of what somebody hoped for — the exact
+        wording the adapter's own guard uses, for the same reason.
+        """
+        assert set(CARRIED_BY) == {entry.name for entry in CATALOGUE}
+
+    def test_the_fields_that_carry_each_relation_exist(self) -> None:
+        """Renaming a field on the wire breaks the mapping above, loudly.
+
+        Checked against ``model_fields`` rather than by serialising a response,
+        because the contract is the schema: a client reads these names, and a
+        rename is exactly the silent drift this class exists to catch.
+        """
+        for name, (on_model, item, fields) in CARRIED_BY.items():
+            assert on_model in ModelOut.model_fields, f"{name}: ModelOut.{on_model}"
+            for field in fields:
+                assert field in item.model_fields, f"{name}: {item.__name__}.{field}"

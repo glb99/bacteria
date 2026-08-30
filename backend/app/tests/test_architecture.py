@@ -248,7 +248,7 @@ class TestBoundariesCanFail:
             line=4,
         )
         clean = Import(
-            src="bacteria.app.chat.service",
+            src="bacteria.app.personal.service",
             dst="bacteria.agent.session.store",
             deferred=False,
             line=9,
@@ -280,18 +280,18 @@ class TestBoundariesCanFail:
         """
         offending = Import(
             src="bacteria.app.core.db",
-            dst="bacteria.app.chat.models",
+            dst="bacteria.app.personal.models",
             deferred=False,
             line=7,
         )
         deferred = Import(
             src="bacteria.app.core.jobs",
-            dst="bacteria.app.chat.tasks",
+            dst="bacteria.app.personal.tasks",
             deferred=True,
             line=117,
         )
         inward = Import(
-            src="bacteria.app.chat.service",
+            src="bacteria.app.personal.service",
             dst="bacteria.app.core.db",
             deferred=False,
             line=3,
@@ -315,10 +315,10 @@ class TestBoundariesCanFail:
                     package="bacteria.app.core",
                     tables=("chat_session",),
                 ),
-                "bacteria.app.chat.models": Module(
-                    name="bacteria.app.chat.models",
+                "bacteria.app.personal.models": Module(
+                    name="bacteria.app.personal.models",
                     path="chat/models.py",
-                    package="bacteria.app.chat",
+                    package="bacteria.app.personal",
                     tables=("chat_transcript_item",),
                 ),
             },
@@ -359,7 +359,7 @@ class TestVerdict:
         """One crossing is enough to fail, which is what makes this a gate."""
         offending = Import(
             src="bacteria.agent.tools.memory",
-            dst="bacteria.app.chat.models",
+            dst="bacteria.app.personal.models",
             deferred=False,
             line=2,
         )

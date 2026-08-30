@@ -21,9 +21,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.model.protocol import ModelResponse
 from bacteria.agent.session.store import TranscriptItem
-from bacteria.app.chat.extraction import EXTRACTOR_SOURCE, PROMPT_VERSION, extract_memories
-from bacteria.app.chat.models import ChatMemoryEntry, ChatMemoryExtraction, ChatMemoryProposal
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.personal.memory_extraction import (
+    EXTRACTOR_SOURCE,
+    PROMPT_VERSION,
+    extract_memories,
+)
+from bacteria.app.personal.models import ChatMemoryEntry, ChatMemoryExtraction, ChatMemoryProposal
+from bacteria.app.personal.repository import SqlSessionRepository
 
 
 class _FakeClient:

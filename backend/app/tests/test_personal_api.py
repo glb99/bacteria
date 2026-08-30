@@ -13,10 +13,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.model.protocol import ModelResponse
 from bacteria.app.auth.service import issue_key
-from bacteria.app.chat import service
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.core import model_client
 from bacteria.app.core.db import session_scope
 from bacteria.app.core.settings import get_settings
+from bacteria.app.personal import service
+from bacteria.app.personal.repository import SqlSessionRepository
 from bacteria.app.views import create_app
 
 
@@ -48,7 +49,7 @@ def _client(engine, monkeypatch, backend_options):
         async with AsyncSession(engine) as session:
             yield session
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", FakeModelClient)
     monkeypatch.setenv("BACTERIA_MODEL_PROVIDER", "fake")
 
     # No lifespan: conftest builds the schema once per run, which is the same
@@ -148,14 +149,14 @@ async def test_a_failed_turn_still_leaves_evidence(client, token, monkeypatch):
     conversation shows nothing happened.
     """
     session_id = new_session(client, token)
-    monkeypatch.setitem(service.PROVIDERS, "fake", FailingModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", FailingModelClient)
 
     with pytest.raises(RuntimeError):
         client.post(
             f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "doomed"}
         )
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", FakeModelClient)
     transcript = client.get(f"/chat/sessions/{session_id}/transcript", headers=auth(token)).json()
 
     assert transcript[0]["payload"] == {"role": "user", "text": "doomed"}
@@ -165,7 +166,7 @@ async def test_a_failed_turn_still_leaves_evidence(client, token, monkeypatch):
 def test_an_unknown_provider_is_rejected_rather_than_defaulted():
     """A typo must not quietly bill a different vendor."""
     with pytest.raises(ValueError):
-        service.build_model_client("clyde")
+        model_client.build_model_client("clyde")
 
 
 def remember(client, token, session_id, key, value, reason="because"):
@@ -193,7 +194,7 @@ async def test_a_written_memory_reaches_the_model_as_a_system_prompt(client, tok
             return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
 
     remember(client, token, session_id, "tone", "prefers concise answers")
-    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", Capturing)
 
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
@@ -255,7 +256,7 @@ async def test_a_forgotten_memory_stops_reaching_the_model(client, token, monkey
     response = client.delete(f"/chat/sessions/{session_id}/memory/tone", headers=auth(token))
     assert response.status_code == 204
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", Capturing)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
     assert seen["system"] is None
@@ -329,7 +330,7 @@ async def test_a_model_proposal_does_not_reach_the_next_turn(client, token, monk
     shows only a tool call that succeeded.
     """
     session_id = new_session(client, token)
-    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", ProposingModelClient)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
     seen = {}
@@ -339,7 +340,7 @@ async def test_a_model_proposal_does_not_reach_the_next_turn(client, token, monk
             seen["system"] = kwargs.get("system")
             return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", Capturing)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "again"})
 
     assert seen["system"] is None
@@ -348,7 +349,7 @@ async def test_a_model_proposal_does_not_reach_the_next_turn(client, token, monk
 async def test_a_model_proposal_is_visible_to_the_owner_for_review(client, token, monkeypatch):
     """It reached the queue, so the test above is not passing by nothing happening."""
     session_id = new_session(client, token)
-    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", ProposingModelClient)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
     pending = client.get(
@@ -370,7 +371,7 @@ async def test_activating_a_proposal_makes_it_reach_the_model(client, token, mon
     only then did it become an instruction.
     """
     session_id = new_session(client, token)
-    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", ProposingModelClient)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
     activated = client.post(
@@ -386,7 +387,7 @@ async def test_activating_a_proposal_makes_it_reach_the_model(client, token, mon
             seen["system"] = kwargs.get("system")
             return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", Capturing)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "again"})
 
     assert "prefers bullet points" in seen["system"]
@@ -399,7 +400,7 @@ async def test_activating_a_proposal_makes_it_reach_the_model(client, token, mon
 
 async def test_rejecting_a_proposal_leaves_no_memory(client, token, monkeypatch):
     session_id = new_session(client, token)
-    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", ProposingModelClient)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
     response = client.delete(
@@ -430,7 +431,7 @@ async def test_a_listing_says_what_accepting_a_proposal_would_replace(client, to
     session_id = new_session(client, token)
     remember(client, token, session_id, "tone", "terse, no lists")
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", ProposingModelClient)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
     pending = client.get(
@@ -461,7 +462,7 @@ async def test_two_proposers_for_one_key_are_not_listed_as_independent(
     accepting both means the second silently undoes the first.
     """
     session_id = new_session(client, token)
-    monkeypatch.setitem(service.PROVIDERS, "fake", ProposingModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", ProposingModelClient)
     client.post(f"/chat/sessions/{session_id}/turns", headers=auth(token), json={"text": "hi"})
 
     async with AsyncSession(engine) as db:
@@ -594,7 +595,7 @@ async def test_a_turn_offers_the_model_the_keys_memory_already_uses(engine, monk
             seen["key"] = tools[0]["input_schema"]["properties"]["key"]["description"]
             return ModelResponse(text="ok", tool_calls=[], stop_reason="end_turn", raw=None)
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", Capturing)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", Capturing)
 
     async with AsyncSession(engine) as db:
         repository = SqlSessionRepository(db)
@@ -633,7 +634,7 @@ async def test_a_turn_refuses_before_the_model_when_it_cannot_enqueue(engine, mo
             called = True
             raise AssertionError("the model was called despite the queue being closed")
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", MustNotBeCalled)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", MustNotBeCalled)
 
     async with AsyncSession(engine) as db:
         repository = SqlSessionRepository(db)

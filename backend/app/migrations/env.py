@@ -32,11 +32,11 @@ from sqlmodel import SQLModel
 from bacteria.app import models as _root_models  # noqa: F401
 from bacteria.app.architecture import models as _architecture_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
-from bacteria.app.chat import models as _chat_models  # noqa: F401
 from bacteria.app.core.db import include_name
 from bacteria.app.core.settings import get_settings
 from bacteria.app.graph import models as _graph_models  # noqa: F401
 from bacteria.app.ingestion import models as _ingestion_models  # noqa: F401
+from bacteria.app.personal import models as _personal_models  # noqa: F401
 
 config = context.config
 

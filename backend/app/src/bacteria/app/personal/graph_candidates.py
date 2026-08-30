@@ -41,6 +41,7 @@ from bacteria.agent.session.store import MemoryEntry
 from bacteria.app.graph.identity import normalize
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import claims_for
+from bacteria.app.personal.catalogue import VOCABULARY
 
 _MIN_ANCHOR_CHARS = 3
 """How short a label may be and still be looked for in a message.
@@ -93,7 +94,7 @@ class GraphCandidateSupplier:
         session scope would make it win precedence over a preference stated in
         this very conversation — which is exactly backwards.
         """
-        repository = SqlGraphRepository(self._db)
+        repository = SqlGraphRepository(self._db, vocabulary=VOCABULARY)
         everything = await claims_for(repository, self._user_id, as_of=self._as_of)
         if not everything:
             return Candidates(considered=0)

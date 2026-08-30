@@ -1,4 +1,4 @@
-"""The vocabulary, and the two things about it that are easy to get wrong.
+"""The personal domain's vocabulary, and what is easy to get wrong about it.
 
 A converse alias applied without swapping the ends produces a *confidently
 backwards* edge — worse than the ungoverned name it replaced, because it now
@@ -8,15 +8,8 @@ catalogue rather than about a row, or promoting a relation becomes a migration.
 Pure — no database, no fixtures.
 """
 
-from bacteria.app.graph.catalogue import (
-    CATALOGUE,
-    functional,
-    is_canonical,
-    lookup,
-    promotable,
-    resolve,
-    vocabulary,
-)
+from bacteria.app.graph.catalogue import promotable
+from bacteria.app.personal.catalogue import CATALOGUE, VOCABULARY
 
 
 def test_a_converse_alias_reports_that_the_ends_must_swap():
@@ -27,7 +20,7 @@ def test_a_converse_alias_reports_that_the_ends_must_swap():
     that without swapping would file a backwards claim under an approved
     relation, where nothing downstream can tell it from a correct one.
     """
-    resolution = resolve("mother_of")
+    resolution = VOCABULARY.resolve("mother_of")
 
     assert resolution is not None
     assert resolution.relation.name == "mother"
@@ -36,7 +29,7 @@ def test_a_converse_alias_reports_that_the_ends_must_swap():
 
 def test_a_plain_alias_does_not_swap():
     """``works_for`` says the same thing as ``employer`` and in the same order."""
-    resolution = resolve("works_for")
+    resolution = VOCABULARY.resolve("works_for")
 
     assert resolution is not None
     assert resolution.relation.name == "employer"
@@ -44,7 +37,7 @@ def test_a_plain_alias_does_not_swap():
 
 
 def test_a_relation_resolves_to_itself_without_swapping():
-    resolution = resolve("employer")
+    resolution = VOCABULARY.resolve("employer")
 
     assert resolution is not None
     assert resolution.relation.name == "employer"
@@ -58,19 +51,19 @@ def test_an_unknown_relation_resolves_to_nothing_rather_than_being_rejected():
     under the model's own word, because the tail is the evidence for what the
     catalogue should become.
     """
-    assert resolve("interlocutor") is None
-    assert is_canonical("interlocutor") is False
+    assert VOCABULARY.resolve("interlocutor") is None
+    assert VOCABULARY.is_canonical("interlocutor") is False
 
 
 def test_canonicality_is_a_question_about_the_catalogue():
-    assert is_canonical("employer") is True
-    assert is_canonical("works_for") is False, "an alias is a spelling, not an entry"
+    assert VOCABULARY.is_canonical("employer") is True
+    assert VOCABULARY.is_canonical("works_for") is False, "an alias is a spelling, not an entry"
 
 
 def test_lookup_ignores_aliases():
     """Callers ask about a relation as *recorded*, which is already canonical."""
-    assert lookup("employer") is not None
-    assert lookup("works_for") is None
+    assert VOCABULARY.lookup("employer") is not None
+    assert VOCABULARY.lookup("works_for") is None
 
 
 def test_every_functional_relation_can_state_its_rule():
@@ -81,7 +74,7 @@ def test_every_functional_relation_can_state_its_rule():
     shown a contradiction, and folding them into one field is a mistake this
     catches — it was in ADR 0007's sketch and a route test caught it.
     """
-    for relation in functional():
+    for relation in VOCABULARY.functional():
         assert relation.invariant, f"{relation.name} is functional and states no rule"
 
 
@@ -116,7 +109,7 @@ def test_the_prompt_block_names_every_relation_and_reads_its_direction():
     The previous design wrote the vocabulary beside the prompt and asked the
     model to be consistent with runs it could not see.
     """
-    block = vocabulary()
+    block = VOCABULARY.describe()
 
     for relation in CATALOGUE:
         if not relation.extractable:
@@ -133,8 +126,8 @@ def test_the_prompt_block_never_offers_a_merge():
     collapsing two into one is not. A model handed `same_as` would be guessing in
     the direction that cannot be undone, one plausible suggestion at a time.
     """
-    assert is_canonical("same_as")
-    assert "same_as" not in vocabulary()
+    assert VOCABULARY.is_canonical("same_as")
+    assert "same_as" not in VOCABULARY.describe()
 
 
 def test_the_prompt_block_does_not_advertise_a_converse_alias():
@@ -144,7 +137,7 @@ def test_the_prompt_block_does_not_advertise_a_converse_alias():
     swap undoes it. Listing it as an alternative spelling would encourage the one
     thing the catalogue is there to prevent.
     """
-    block = vocabulary()
+    block = VOCABULARY.describe()
 
     assert "mother_of" not in block
     assert "employs" not in block
@@ -152,7 +145,7 @@ def test_the_prompt_block_does_not_advertise_a_converse_alias():
 
 def test_a_tail_relation_seen_three_times_is_worth_asking_about():
     """The rule of three, deciding when to *ask* and never when to act."""
-    candidates = promotable({"pet": 3, "owns": 1})
+    candidates = promotable({"pet": 3, "owns": 1}, VOCABULARY)
 
     assert [c.name for c in candidates] == ["pet"]
     assert candidates[0].count == 3
@@ -160,11 +153,11 @@ def test_a_tail_relation_seen_three_times_is_worth_asking_about():
 
 def test_a_canonical_relation_is_never_a_candidate():
     """It is already in, so counting it says nothing anyone can act on."""
-    assert promotable({"employer": 99}) == []
+    assert promotable({"employer": 99}, VOCABULARY) == []
 
 
 def test_candidates_lead_with_the_strongest_case_and_break_ties_by_name():
     """Two runs over unchanged data must print the same thing, or a diff lies."""
-    candidates = promotable({"pet": 4, "owns": 9, "knows": 4})
+    candidates = promotable({"pet": 4, "owns": 9, "knows": 4}, VOCABULARY)
 
     assert [c.name for c in candidates] == ["owns", "knows", "pet"]

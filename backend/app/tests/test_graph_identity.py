@@ -20,6 +20,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.app.graph.identity import normalize
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import refer_to
+from bacteria.app.personal.catalogue import VOCABULARY
 
 NOW = datetime(2026, 5, 4, tzinfo=timezone.utc)
 LATER = datetime(2026, 5, 25, tzinfo=timezone.utc)
@@ -28,7 +29,7 @@ LATER = datetime(2026, 5, 25, tzinfo=timezone.utc)
 @pytest.fixture(name="repo")
 async def _repo(engine):
     async with AsyncSession(engine) as session:
-        yield SqlGraphRepository(session)
+        yield SqlGraphRepository(session, vocabulary=VOCABULARY)
         await session.commit()
 
 

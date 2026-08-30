@@ -51,8 +51,9 @@ from bacteria.agent.session.store import (
     TranscriptItemKind,
     UnknownSessionError,
 )
-from bacteria.app.chat.memory import MemoryStore, TableMemoryStore
-from bacteria.app.chat.models import (
+from bacteria.app.core.settings import get_settings
+from bacteria.app.personal.memory import MemoryStore, TableMemoryStore
+from bacteria.app.personal.models import (
     ChatMemoryEntry,
     ChatMemoryExtraction,
     ChatMemoryProposal,
@@ -60,7 +61,6 @@ from bacteria.app.chat.models import (
     ChatTranscriptItem,
     ChatUserMemoryEntry,
 )
-from bacteria.app.core.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -158,7 +158,7 @@ def _configured_store(session: AsyncSession) -> MemoryStore:
         # Imported here rather than at module scope: the graph store imports the
         # graph package, which imports this one for its own models, and a
         # top-level import would close the cycle.
-        from bacteria.app.chat.graph_memory import GraphMemoryStore
+        from bacteria.app.personal.graph_memory import GraphMemoryStore
 
         return GraphMemoryStore(session)
     return TableMemoryStore(session)

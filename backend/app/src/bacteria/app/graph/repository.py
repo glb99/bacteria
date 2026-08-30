@@ -39,6 +39,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from bacteria.app.graph.catalogue import EMPTY, Vocabulary
 from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.identity import Node, normalize
 from bacteria.app.graph.log import Assertion
@@ -152,9 +153,30 @@ class SqlGraphRepository:
             this class knowing what else is in flight.
     """
 
-    def __init__(self, session: AsyncSession, *, ontology: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        ontology: Optional[str] = None,
+        vocabulary: Vocabulary = EMPTY,
+    ) -> None:
         self._db = session
         self._ontology = ontology
+        self.vocabulary = vocabulary
+        """Which relations this partition has agreed to.
+
+        Rides here for the reason the ontology does, stated in :meth:`_mine`: a
+        property of the repository cannot be forgotten at a call site, and the
+        service layer stays a layer that never learns there is more than one
+        model. Before this, every read of every ontology was measured against a
+        personal life's vocabulary, because a module-level literal was the only
+        one the substrate could see.
+
+        Public where ``_ontology`` is private, and deliberately: the ontology is
+        a filter this class applies on the caller's behalf, while the vocabulary
+        is a question the service layer asks it -- ``repository.vocabulary.lookup``
+        is the point.
+        """
 
     def _mine(self, statement):
         """Narrow a query to this repository's ontology.

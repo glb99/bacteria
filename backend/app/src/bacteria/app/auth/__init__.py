@@ -9,7 +9,7 @@ Must not: decide access. "This caller is authenticated" and "this caller may
 read that session" are different questions with different failure modes, and a
 package that answers both makes the second invisible. Authorization lives with
 the resource being protected, because only that feature knows what owning one
-means — see ``bacteria.app.chat.access``.
+means — see ``bacteria.app.personal.access``.
 
 That split is the same one the agent draws between a session and an
 authorization decision, and for the same reason: knowing which record to load is

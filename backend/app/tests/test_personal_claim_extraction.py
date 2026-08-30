@@ -16,14 +16,15 @@ from typing import Any, Optional
 import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
-from bacteria.app.graph.extraction import (
+from bacteria.app.graph.repository import SqlGraphRepository
+from bacteria.app.graph.temporal import OPEN_ENDED
+from bacteria.app.personal.catalogue import VOCABULARY
+from bacteria.app.personal.claim_extraction import (
     PROMPT_VERSION,
     UnknownSessionError,
     extract_assertions,
 )
-from bacteria.app.graph.repository import SqlGraphRepository
-from bacteria.app.graph.temporal import OPEN_ENDED
+from bacteria.app.personal.models import ChatSession, ChatTranscriptItem
 
 NOW = datetime(2026, 5, 4, tzinfo=timezone.utc)
 LATER = datetime(2026, 5, 11, tzinfo=timezone.utc)
@@ -98,7 +99,7 @@ async def test_a_current_claim_is_recorded_with_an_open_end(db):
     result = await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
     assert result.recorded == 1
-    stored = await SqlGraphRepository(db).current(USER)
+    stored = await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER)
     assert stored[0].valid.end == OPEN_ENDED
     assert stored[0].valid.is_open
 
@@ -115,7 +116,7 @@ async def test_a_past_claim_does_not_read_as_still_true(db):
 
     await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
-    stored = (await SqlGraphRepository(db).current(USER))[0]
+    stored = (await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER))[0]
     assert not stored.valid.is_open
     assert stored.valid.end is None
     assert stored.attrs is not None and stored.attrs["tense"] == "past"
@@ -133,7 +134,9 @@ async def test_a_claim_from_a_mixed_slice_is_not_trusted_as_the_users_own(db):
 
     await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
-    assert (await SqlGraphRepository(db).current(USER))[0].trust == "third-party"
+    assert (await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER))[
+        0
+    ].trust == "third-party"
 
 
 async def test_an_unknown_kind_is_dropped_rather_than_accepted(db):
@@ -149,7 +152,7 @@ async def test_an_unknown_kind_is_dropped_rather_than_accepted(db):
     result = await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
     assert (result.recorded, result.dropped) == (0, 1)
-    assert await SqlGraphRepository(db).current(USER) == []
+    assert await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER) == []
 
 
 async def test_unusable_output_advances_the_watermark_without_writing(db):
@@ -165,7 +168,7 @@ async def test_unusable_output_advances_the_watermark_without_writing(db):
 
     assert result.recorded == 0
     assert result.through_seq == 1
-    assert await SqlGraphRepository(db).current(USER) == []
+    assert await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER) == []
 
 
 async def test_a_second_run_reads_nothing_new_and_calls_no_model(db):
@@ -206,7 +209,7 @@ async def test_re_reading_the_same_slice_does_not_duplicate_claims(db):
 
     await extract_assertions(db, FakeClient(payload), SESSION, max_assertions=5, now=NOW)
 
-    assert len(await SqlGraphRepository(db).current(USER)) == 1
+    assert len(await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER)) == 1
 
 
 async def test_the_cap_drops_the_excess_and_counts_it(db):
@@ -228,7 +231,7 @@ async def test_what_was_written_records_which_prompt_produced_it(db):
 
     await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
-    stored = (await SqlGraphRepository(db).current(USER))[0]
+    stored = (await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER))[0]
     assert stored.attrs is not None
     assert stored.attrs["prompt_version"] == PROMPT_VERSION
 
@@ -251,7 +254,7 @@ async def test_what_was_written_records_which_conversation_it_came_from(db):
 
     await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
-    stored = (await SqlGraphRepository(db).current(USER))[0]
+    stored = (await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER))[0]
     assert stored.session_id == SESSION
 
 
@@ -279,7 +282,7 @@ async def test_a_claim_restated_in_a_later_run_is_not_recorded_twice(db):
     result = await extract_assertions(db, FakeClient(payload), SESSION, max_assertions=5, now=LATER)
 
     assert (result.recorded, result.duplicates) == (0, 1)
-    assert len(await SqlGraphRepository(db).current(USER)) == 1
+    assert len(await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER)) == 1
 
 
 async def test_an_extracted_preference_is_proposed_and_never_spoken(db):
@@ -306,7 +309,11 @@ async def test_an_extracted_preference_is_proposed_and_never_spoken(db):
 
     await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
-    claims = [a for a in await SqlGraphRepository(db).current(USER) if a.rel == "tone"]
+    claims = [
+        a
+        for a in await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER)
+        if a.rel == "tone"
+    ]
 
     assert len(claims) == 1
     assert claims[0].origin == "inferred", "a proposal, not a memory"
@@ -319,7 +326,7 @@ async def test_an_extracted_fact_stays_scoped_to_the_person(db):
 
     await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
-    stored = await SqlGraphRepository(db).current(USER)
+    stored = await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER)
     assert stored[0].scope == "user"
 
 
@@ -348,7 +355,7 @@ async def test_a_name_is_recorded_rather_than_dropped(db):
     result = await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
     assert result.recorded == 1
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     stored = await repository.current(USER)
     assert stored[0].rel == "name"
     labels = {node.node_id: node for node in await repository.nodes(USER)}
@@ -382,7 +389,7 @@ async def test_a_naming_synonym_canonicalizes_onto_name(db):
     result = await extract_assertions(db, client, SESSION, max_assertions=5, now=NOW)
 
     assert result.recorded == 1
-    stored = await SqlGraphRepository(db).current(USER)
+    stored = await SqlGraphRepository(db, vocabulary=VOCABULARY).current(USER)
     assert stored[0].rel == "name", "canonicalized, not left in the tail"
     assert stored[0].attrs["proposed_rel"] == "nickname", "and the model's word is kept"
 

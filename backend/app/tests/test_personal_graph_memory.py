@@ -12,8 +12,9 @@ import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.session.store import USER_SCOPE
-from bacteria.app.chat.graph_memory import GraphMemoryStore, UnknownPreferenceError
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.personal.catalogue import VOCABULARY
+from bacteria.app.personal.graph_memory import GraphMemoryStore, UnknownPreferenceError
+from bacteria.app.personal.repository import SqlSessionRepository
 
 USER = "graph-memory"
 
@@ -147,7 +148,7 @@ async def test_what_the_extractor_heard_arrives_as_a_proposal(engine):
     now = datetime.now(timezone.utc)
     async with AsyncSession(engine) as db:
         session = await SqlSessionRepository(db).create_session("heard")
-        graph = SqlGraphRepository(db)
+        graph = SqlGraphRepository(db, vocabulary=VOCABULARY)
         me = await owner(graph, "heard", now=now)
         value = await refer_to(graph, "heard", "value", "concise", now=now)
         # Exactly what `_claim` builds for a preference the extractor heard.

@@ -6,7 +6,7 @@ revokes one — those stay operator commands for the reason
 
 **These are the only paths that answer without `CurrentPrincipal`, apart from
 `/health`.** That is what a credential-establishing route is, and it is also
-why the enumeration in `test_chat_access.py` keeps its exemptions as a named
+why the enumeration in `test_personal_access.py` keeps its exemptions as a named
 constant: adding one has to be a thing somebody wrote down.
 """
 

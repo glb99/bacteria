@@ -13,11 +13,12 @@ from datetime import datetime, timezone
 import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.graph_candidates import GraphCandidateSupplier
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import confirm, observe
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.catalogue import VOCABULARY
+from bacteria.app.personal.graph_candidates import GraphCandidateSupplier
 
 USER = "candidates"
 NOW = datetime(2026, 5, 4, tzinfo=timezone.utc)
@@ -52,7 +53,7 @@ async def _fact(repo, assertion_id: str, src: str, rel: str, dst: str, *, confir
 @pytest.fixture(name="repo")
 async def _repo(engine):
     async with AsyncSession(engine) as session:
-        yield SqlGraphRepository(session)
+        yield SqlGraphRepository(session, vocabulary=VOCABULARY)
         await session.commit()
 
 
@@ -63,7 +64,7 @@ async def _supplier(engine):
 async def test_a_message_naming_a_thing_gets_what_the_graph_knows_about_it(engine):
     """The whole mechanism, in one turn."""
     async with AsyncSession(engine) as db:
-        repo = SqlGraphRepository(db)
+        repo = SqlGraphRepository(db, vocabulary=VOCABULARY)
         await _fact(repo, "a1", "Acme", "cto", "Diane", confirmed=True)
         await db.commit()
 
@@ -79,7 +80,7 @@ async def test_an_unconfirmed_fact_is_never_a_candidate(engine):
     ever could, and it looks like plumbing rather than like a write.
     """
     async with AsyncSession(engine) as db:
-        repo = SqlGraphRepository(db)
+        repo = SqlGraphRepository(db, vocabulary=VOCABULARY)
         await _fact(repo, "a1", "Acme", "cto", "Diane", confirmed=False)
         await db.commit()
 
@@ -92,7 +93,7 @@ async def test_an_unconfirmed_fact_is_never_a_candidate(engine):
 async def test_considered_counts_everything_confirmed_not_everything_returned(engine):
     """ADR 0022's invariant. A memory the owner kept must not vanish silently."""
     async with AsyncSession(engine) as db:
-        repo = SqlGraphRepository(db)
+        repo = SqlGraphRepository(db, vocabulary=VOCABULARY)
         await _fact(repo, "a1", "Acme", "cto", "Diane", confirmed=True)
         await _fact(repo, "a2", "Globex", "ceo", "Marta", confirmed=True)
         await db.commit()
@@ -111,7 +112,7 @@ async def test_a_message_naming_nothing_falls_back_to_everything(engine):
     inventing one.
     """
     async with AsyncSession(engine) as db:
-        repo = SqlGraphRepository(db)
+        repo = SqlGraphRepository(db, vocabulary=VOCABULARY)
         await _fact(repo, "a1", "Acme", "cto", "Diane", confirmed=True)
         await db.commit()
 
@@ -123,13 +124,15 @@ async def test_a_message_naming_nothing_falls_back_to_everything(engine):
 async def test_a_two_letter_label_is_not_an_anchor(engine):
     """An anchor that matches everything narrows nothing and costs a hop."""
     async with AsyncSession(engine) as db:
-        repo = SqlGraphRepository(db)
+        repo = SqlGraphRepository(db, vocabulary=VOCABULARY)
         await repo.mint_node(USER, "person", "Al", now=NOW)
         await _fact(repo, "a1", "Acme", "cto", "Diane", confirmed=True)
         await db.commit()
 
         supplier = GraphCandidateSupplier(db, USER)
-        anchors = await supplier._anchors(SqlGraphRepository(db), "shall we talk")
+        anchors = await supplier._anchors(
+            SqlGraphRepository(db, vocabulary=VOCABULARY), "shall we talk"
+        )
 
     assert anchors == []
 
@@ -141,7 +144,7 @@ async def test_candidates_arrive_in_the_user_scope(engine):
     very conversation, which is backwards.
     """
     async with AsyncSession(engine) as db:
-        repo = SqlGraphRepository(db)
+        repo = SqlGraphRepository(db, vocabulary=VOCABULARY)
         await _fact(repo, "a1", "Acme", "cto", "Diane", confirmed=True)
         await db.commit()
 

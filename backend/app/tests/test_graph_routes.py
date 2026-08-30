@@ -27,6 +27,7 @@ from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import refer_to
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.catalogue import VOCABULARY
 from bacteria.app.views import create_app
 
 NOW = datetime(2026, 5, 4, tzinfo=timezone.utc)
@@ -69,7 +70,7 @@ async def _seed(engine, user_id: str, *, holder: str = "diane", end=OPEN_ENDED) 
     other way first.
     """
     async with AsyncSession(engine) as session:
-        repo = SqlGraphRepository(session)
+        repo = SqlGraphRepository(session, vocabulary=VOCABULARY)
         org = await refer_to(repo, user_id, "organization", "Acme", now=NOW)
         person = await refer_to(repo, user_id, "person", holder, now=NOW)
         await repo.record(
@@ -117,7 +118,7 @@ async def test_a_claim_says_whether_its_relation_was_ever_ratified(client, issue
     token = await issue("acme")
     await _seed(engine, "acme")
     async with AsyncSession(engine) as session:
-        repo = SqlGraphRepository(session)
+        repo = SqlGraphRepository(session, vocabulary=VOCABULARY)
         org = await refer_to(repo, "acme", "organization", "Acme", now=NOW)
         person = await refer_to(repo, "acme", "person", "diane", now=NOW)
         await repo.record(
@@ -212,7 +213,7 @@ async def test_conclusions_come_back_with_their_evidence(client, issue, engine):
     await _seed(engine, "acme")
 
     async with AsyncSession(engine) as session:
-        await SqlGraphRepository(session).record_conclusion(
+        await SqlGraphRepository(session, vocabulary=VOCABULARY).record_conclusion(
             Conclusion(
                 conclusion_id="c1",
                 user_id="acme",
@@ -280,7 +281,9 @@ async def test_renaming_the_owner_node(client, issue, engine):
     token = await issue("named")
     await _seed(engine, "named")
     async with AsyncSession(engine) as session:
-        me = await refer_to(SqlGraphRepository(session), "named", "person", "self", now=NOW)
+        me = await refer_to(
+            SqlGraphRepository(session, vocabulary=VOCABULARY), "named", "person", "self", now=NOW
+        )
         await session.commit()
 
     response = client.post(
@@ -298,7 +301,13 @@ async def test_a_rename_onto_a_taken_name_says_to_link_instead(client, issue, en
     token = await issue("collides")
     await _seed(engine, "collides", holder="diane")
     async with AsyncSession(engine) as session:
-        me = await refer_to(SqlGraphRepository(session), "collides", "person", "self", now=NOW)
+        me = await refer_to(
+            SqlGraphRepository(session, vocabulary=VOCABULARY),
+            "collides",
+            "person",
+            "self",
+            now=NOW,
+        )
         await session.commit()
 
     response = client.post(
@@ -314,7 +323,7 @@ async def test_linking_two_nodes_leaves_both_and_adds_a_claim(client, issue, eng
     token = await issue("links")
     await _seed(engine, "links", holder="diane")
     async with AsyncSession(engine) as session:
-        repo = SqlGraphRepository(session)
+        repo = SqlGraphRepository(session, vocabulary=VOCABULARY)
         me = await refer_to(repo, "links", "person", "self", now=NOW)
         other = await refer_to(repo, "links", "person", "diane", now=NOW)
         await session.commit()

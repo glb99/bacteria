@@ -95,7 +95,7 @@ class TestJudging:
         this* first, and a row written without an author can never be given one
         — inventing one afterwards is the false history the log forbids.
         """
-        response = judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
+        response = judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
 
         assert response.status_code == 200
         assert response.json()["verdict"] == "agreed"
@@ -110,20 +110,20 @@ class TestJudging:
         and the queue becomes something people stop reading. It is also the
         number this surface exists to produce.
         """
-        judge(client, token, project, "bacteria.app.chat", "feature", "disagreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "disagreed")
 
         body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
-        chat = next(p for p in body["proposals"] if p["subject"] == "bacteria.app.chat")
+        chat = next(p for p in body["proposals"] if p["subject"] == "bacteria.app.personal")
 
         assert chat["verdict"] == "disagreed"
 
     async def test_a_judged_proposal_still_appears(self, client, token, project) -> None:
         """Hiding what was rejected would hide that anything was ever rejected."""
-        judge(client, token, project, "bacteria.app.chat", "feature", "disagreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "disagreed")
 
         body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
 
-        assert any(p["subject"] == "bacteria.app.chat" for p in body["proposals"])
+        assert any(p["subject"] == "bacteria.app.personal" for p in body["proposals"])
 
     async def test_an_unjudged_proposal_has_no_verdict(self, client, token, project) -> None:
         """*Not yet judged* and *judged no* must never be the same state.
@@ -141,11 +141,11 @@ class TestJudging:
         March* stays answerable — which is the entire reason these live in a
         bi-temporal log rather than a settings table.
         """
-        judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
-        judge(client, token, project, "bacteria.app.chat", "feature", "disagreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "disagreed")
 
         body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
-        chat = next(p for p in body["proposals"] if p["subject"] == "bacteria.app.chat")
+        chat = next(p for p in body["proposals"] if p["subject"] == "bacteria.app.personal")
 
         assert chat["verdict"] == "disagreed"
 
@@ -170,11 +170,11 @@ class TestIsolation:
         """The property the whole ontology column exists for.
 
         These rows sit in the same table as a person's memory, keyed by the same
-        principal. If the partition leaked, *"bacteria.app.chat is a feature"*
+        principal. If the partition leaked, *"bacteria.app.personal is a feature"*
         would show up in somebody's personal graph — and, worse, could be
         surfaced to a model as something they said about their life.
         """
-        judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
 
         async with AsyncSession(engine) as db:
             memory = SqlGraphRepository(db)
@@ -192,7 +192,7 @@ class TestIsolation:
         Without this the test above passes for the wrong reason — a write that
         silently did nothing would also leave the memory graph clean.
         """
-        judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
 
         async with AsyncSession(engine) as db:
             arch = SqlGraphRepository(db, ontology=f"architecture:{project}")
@@ -210,7 +210,7 @@ class TestIsolation:
         async with AsyncSession(engine) as session:
             other = await issue_key(session, principal_id="stranger", label="tests")
 
-        response = judge(client, other, project, "bacteria.app.chat", "feature", "agreed")
+        response = judge(client, other, project, "bacteria.app.personal", "feature", "agreed")
 
         assert response.status_code == 404
 
@@ -237,8 +237,8 @@ class TestWhatSurvivesAReversal:
         packages in the author's own database ended up simultaneously agreed and
         disagreed.
         """
-        judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
-        judge(client, token, project, "bacteria.app.chat", "feature", "disagreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "disagreed")
 
         async with AsyncSession(engine) as session:
             standing = await architecture_log(session, project).current("tester")
@@ -257,12 +257,12 @@ class TestWhatSurvivesAReversal:
         is not the same act as withdrawing one and saying nothing — and only
         that field records which happened.
         """
-        judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
         async with AsyncSession(engine) as session:
             standing = await architecture_log(session, project).current("tester")
         made_at = standing[0].recorded_at
 
-        judge(client, token, project, "bacteria.app.chat", "feature", "disagreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "disagreed")
 
         async with AsyncSession(engine) as session:
             then = await architecture_log(session, project).believed_at("tester", made_at)
@@ -279,11 +279,11 @@ class TestWhatSurvivesAReversal:
         reopening it would move the date the judgment was actually made, which
         is the one fact the row exists to carry.
         """
-        judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
         async with AsyncSession(engine) as session:
             first = await architecture_log(session, project).current("tester")
 
-        judge(client, token, project, "bacteria.app.chat", "feature", "agreed")
+        judge(client, token, project, "bacteria.app.personal", "feature", "agreed")
 
         async with AsyncSession(engine) as session:
             standing = await architecture_log(session, project).current("tester")

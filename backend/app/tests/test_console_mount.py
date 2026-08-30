@@ -26,7 +26,7 @@ def test_the_console_shadows_no_route_the_api_declares(console, backend_options)
     """Every declared route must still reach the router with a console mounted.
 
     Enumerated from the OpenAPI schema rather than listed, for the reason
-    `test_chat_access.py` gives about the same mistake: a hand-written list only
+    `test_personal_access.py` gives about the same mistake: a hand-written list only
     asserts about routes somebody remembered, and the failure being guarded
     against is a route added *after* the mount — which by definition nobody
     remembered to add here either. The first version of this test hardcoded

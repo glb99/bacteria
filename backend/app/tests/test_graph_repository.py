@@ -28,6 +28,7 @@ from bacteria.app.graph.repository import (
     tally_relations,
 )
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.catalogue import VOCABULARY
 
 JAN = datetime(2026, 1, 15, tzinfo=timezone.utc)
 FEB = datetime(2026, 2, 15, tzinfo=timezone.utc)
@@ -51,7 +52,7 @@ def _assertion(
 @pytest.fixture(name="repo")
 async def _repo(engine):
     async with AsyncSession(engine) as session:
-        yield SqlGraphRepository(session)
+        yield SqlGraphRepository(session, vocabulary=VOCABULARY)
         await session.commit()
 
 
@@ -240,7 +241,7 @@ async def test_the_relation_tally_counts_across_every_owner(engine):
     twice would never reach the rule of three.
     """
     async with AsyncSession(engine) as session:
-        repo = SqlGraphRepository(session)
+        repo = SqlGraphRepository(session, vocabulary=VOCABULARY)
         await repo.record(
             [
                 _assertion("t1", Interval(None, OPEN_ENDED), user="tally-a", dst="person:one"),
@@ -267,7 +268,7 @@ async def test_endorsing_a_claim_does_not_count_as_seeing_the_relation_twice(eng
     ``pet`` reported a count of two.
     """
     async with AsyncSession(engine) as session:
-        repo = SqlGraphRepository(session)
+        repo = SqlGraphRepository(session, vocabulary=VOCABULARY)
         await repo.record(
             [
                 Assertion(
@@ -307,7 +308,7 @@ async def test_the_same_relation_about_different_things_counts_twice(engine):
     satisfied by counting relations rather than claims.
     """
     async with AsyncSession(engine) as session:
-        repo = SqlGraphRepository(session)
+        repo = SqlGraphRepository(session, vocabulary=VOCABULARY)
         await repo.record(
             [
                 Assertion(

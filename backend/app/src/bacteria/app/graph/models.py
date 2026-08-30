@@ -347,7 +347,7 @@ class GraphExtraction(SQLModel, table=True):
     from ingestion, or from no session at all; this table takes one, so a source
     that is not a conversation has nowhere to record how far it has been read.
     That is the first thing to move when a second source arrives, and
-    :func:`~bacteria.app.graph.extraction.extract_assertions` carries the rest of
+    :func:`~bacteria.app.personal.claim_extraction.extract_assertions` carries the rest of
     the list.
     """
 

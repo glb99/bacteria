@@ -14,13 +14,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
 from bacteria.app.evaluation.retrieval import replay
 from bacteria.app.evaluation.runs import RecordedRun
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import refer_to
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.catalogue import VOCABULARY
+from bacteria.app.personal.models import ChatSession, ChatTranscriptItem
 
 TURN = datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc)
 LATER = TURN + timedelta(days=30)
@@ -43,7 +44,7 @@ async def _seed(engine, *, user_id: str = "gui") -> None:
             )
         )
 
-        repo = SqlGraphRepository(db)
+        repo = SqlGraphRepository(db, vocabulary=VOCABULARY)
         acme = await refer_to(repo, user_id, "organization", "Acme", now=TURN)
         diane = await refer_to(repo, user_id, "person", "Diane", now=TURN)
         marta = await refer_to(repo, user_id, "person", "Marta", now=LATER)

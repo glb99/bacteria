@@ -24,8 +24,8 @@ from bacteria.app.architecture.probes import Reading, run_tests
 from bacteria.app.architecture.repository import SqlProjectRepository
 from bacteria.app.architecture.service import UnusableLocation, add_project, model_of
 from bacteria.app.auth.dependencies import CurrentPrincipal
-from bacteria.app.chat.service import build_model_client
 from bacteria.app.core.dependencies import DbSession
+from bacteria.app.core.model_client import build_model_client
 from bacteria.app.core.settings import get_settings
 from bacteria.app.graph.repository import SqlGraphRepository
 

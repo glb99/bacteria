@@ -12,9 +12,9 @@ Pure — no database, no model, no fixtures.
 
 from datetime import datetime, timezone
 
-from bacteria.app.graph.dates import parse_bound, stated_in
-from bacteria.app.graph.extraction import _attrs, _interval
 from bacteria.app.graph.temporal import OPEN_ENDED
+from bacteria.app.personal.claim_extraction import _attrs, _interval
+from bacteria.app.personal.dates import parse_bound, stated_in
 
 
 def test_a_full_date_is_taken_as_written():

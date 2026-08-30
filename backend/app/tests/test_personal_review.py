@@ -13,8 +13,8 @@ import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.session.store import SESSION_SCOPE, USER_SCOPE
-from bacteria.app.chat import review
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.personal import review
+from bacteria.app.personal.repository import SqlSessionRepository
 
 
 @pytest.fixture(name="repo")
@@ -32,7 +32,7 @@ async def _session_id(repo):
 WHENEVER = datetime(2026, 1, 1, tzinfo=timezone.utc)
 """A creation time for entries built by hand.
 
-Every ``held_now`` test below constructs a :class:`~bacteria.app.chat.review.PendingEntry`
+Every ``held_now`` test below constructs a :class:`~bacteria.app.personal.review.PendingEntry`
 and none of them care when it was proposed -- but the field is required rather
 than defaulted, because the surfaces do care and a default would let one ship
 without it.

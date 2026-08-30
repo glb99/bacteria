@@ -34,12 +34,11 @@ from bacteria.agent.runtime.runtime import RunResult, Runtime
 from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.tools.memory import build_remember_tool
 from bacteria.agent.tools.registry import ToolRegistry
-from bacteria.app.chat.repository import KnownKeys, SqlSessionRepository
-from bacteria.app.chat.tasks import extract_memories_task
 from bacteria.app.core import observability
 from bacteria.app.core.jobs import get_app
 from bacteria.app.core.settings import get_settings
-from bacteria.app.graph.tasks import extract_assertions_task
+from bacteria.app.personal.repository import KnownKeys, SqlSessionRepository
+from bacteria.app.personal.tasks import extract_assertions_task, extract_memories_task
 
 # Suppressed for the same reason as bacteria's own table: the annotation is the
 # contract, and a checker inferring the concrete classes from the literal
@@ -108,7 +107,7 @@ def _candidate_supplier(
 
     # Imported here rather than at module scope: the graph package imports this
     # one for its models, and a top-level import would close the cycle.
-    from bacteria.app.chat.graph_candidates import GraphCandidateSupplier
+    from bacteria.app.personal.graph_candidates import GraphCandidateSupplier
 
     return GraphCandidateSupplier(repository.session, principal)
 

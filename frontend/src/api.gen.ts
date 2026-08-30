@@ -299,7 +299,7 @@ export interface paths {
          *     recorded as such in ADR 0017 — proposals accumulate, nothing activates, and
          *     the agent appears to have no memory while behaving exactly as designed.
          *
-         *     Built through :func:`~bacteria.app.chat.review.pending_from` rather than by
+         *     Built through :func:`~bacteria.app.personal.review.pending_from` rather than by
          *     reading ``state.proposals`` here, and that was a real gap rather than tidying.
          *     ``held_by`` — what accepting a proposal would replace — existed only in the
          *     admin CLI's review walk, so the console listed two suggestions for one key as
@@ -960,7 +960,7 @@ export interface components {
          *
          *     The value is carried, not just the scope. Warning that something will be
          *     replaced without saying what is a note that reads as informative and decides
-         *     nothing -- recorded in :class:`~bacteria.app.chat.review.Held` from a review
+         *     nothing -- recorded in :class:`~bacteria.app.personal.review.Held` from a review
          *     walk where it cost a good value.
          */
         HeldOut: {

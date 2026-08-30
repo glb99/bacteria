@@ -22,8 +22,8 @@ from typing import Any
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.graph_memory import GraphMemoryStore
-from bacteria.app.chat.memory import MemoryStore, TableMemoryStore
+from bacteria.app.personal.graph_memory import GraphMemoryStore
+from bacteria.app.personal.memory import MemoryStore, TableMemoryStore
 
 
 @dataclass(frozen=True)

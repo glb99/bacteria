@@ -15,8 +15,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.agent.model.protocol import ModelResponse
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, revoke_key
-from bacteria.app.chat import service
 from bacteria.app.core.db import session_scope
+from bacteria.app.personal import service
 from bacteria.app.views import create_app
 
 

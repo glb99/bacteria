@@ -37,12 +37,12 @@ from sqlmodel import Session, SQLModel
 # which is what both the schema build and the truncation below iterate over.
 from bacteria.app import models as _root_models  # noqa: F401
 from bacteria.app.auth import models as _auth_models  # noqa: F401
-from bacteria.app.chat import models as _chat_models  # noqa: F401
 from bacteria.app.core import observability
 from bacteria.app.core import settings as settings_module
 from bacteria.app.core.settings import ENV_PREFIX, Settings, get_settings
 from bacteria.app.graph import models as _graph_models  # noqa: F401
 from bacteria.app.ingestion import models as _ingestion_models  # noqa: F401
+from bacteria.app.personal import models as _chat_models  # noqa: F401
 
 LOOP_FACTORY = asyncio.SelectorEventLoop if sys.platform == "win32" else None
 """The loop class the tests run on, or ``None`` to accept the default.

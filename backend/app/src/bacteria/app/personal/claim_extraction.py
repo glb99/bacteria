@@ -49,15 +49,15 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.model.protocol import SendsMessages
-from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
 from bacteria.app.graph.catalogue import Relation, resolve, vocabulary
 from bacteria.app.graph.catalogue import preferences as preference_relations
-from bacteria.app.graph.dates import parse_bound, stated_in
 from bacteria.app.graph.log import Assertion, Trust
 from bacteria.app.graph.models import GraphExtraction
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import observe, refer_to
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.dates import parse_bound, stated_in
+from bacteria.app.personal.models import ChatSession, ChatTranscriptItem
 
 logger = logging.getLogger(__name__)
 
@@ -404,7 +404,7 @@ def _interval(claim: dict[str, Any]) -> Interval:
     all until this field existed.
 
     **A bound the supporting words do not carry is refused.** See
-    :func:`~bacteria.app.graph.dates.stated_in`: a model that works a boundary out
+    :func:`~bacteria.app.personal.dates.stated_in`: a model that works a boundary out
     writes it as an assertion, where the engine working the same boundary out
     writes a defeasible conclusion. The first is indistinguishable from an
     observation and the second is not, so the guess has to be caught before it

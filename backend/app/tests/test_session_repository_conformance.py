@@ -18,7 +18,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.session.store import SessionStore, TranscriptItem, UnknownSessionError
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.personal.repository import SqlSessionRepository
 
 
 @pytest.fixture(params=["in_memory", "sql"], name="repo")

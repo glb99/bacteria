@@ -44,9 +44,9 @@ from typing import Optional, Sequence
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.graph_candidates import GraphCandidateSupplier
-from bacteria.app.chat.models import ChatTranscriptItem
 from bacteria.app.evaluation.runs import RecordedRun
+from bacteria.app.personal.graph_candidates import GraphCandidateSupplier
+from bacteria.app.personal.models import ChatTranscriptItem
 
 
 @dataclass(frozen=True)

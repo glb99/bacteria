@@ -189,7 +189,7 @@ class TestAgainstThisRepository:
         assert {"models", "repository", "service", "views"} <= found
 
         features = {p.subject for p in propose(derived) if p.claim == "feature"}
-        assert "bacteria.app.chat" in features
+        assert "bacteria.app.personal" in features
         assert "bacteria.app.graph" in features
 
         layers = {p.subject for p in propose(derived) if p.claim == "layer"}

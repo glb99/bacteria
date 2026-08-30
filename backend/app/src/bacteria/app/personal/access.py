@@ -22,7 +22,7 @@ from fastapi import HTTPException, status
 
 from bacteria.agent.session.store import SessionState, UnknownSessionError
 from bacteria.app.auth.principal import Principal
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.personal.repository import SqlSessionRepository
 
 logger = logging.getLogger(__name__)
 

@@ -16,14 +16,14 @@ from typing import Any, Optional
 import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
-from bacteria.app.graph.extraction import (
+from bacteria.app.graph.repository import SqlGraphRepository
+from bacteria.app.graph.temporal import OPEN_ENDED
+from bacteria.app.personal.claim_extraction import (
     PROMPT_VERSION,
     UnknownSessionError,
     extract_assertions,
 )
-from bacteria.app.graph.repository import SqlGraphRepository
-from bacteria.app.graph.temporal import OPEN_ENDED
+from bacteria.app.personal.models import ChatSession, ChatTranscriptItem
 
 NOW = datetime(2026, 5, 4, tzinfo=timezone.utc)
 LATER = datetime(2026, 5, 11, tzinfo=timezone.utc)

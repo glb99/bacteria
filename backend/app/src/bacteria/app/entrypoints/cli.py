@@ -34,11 +34,6 @@ from bacteria.app.architecture.derive import derive
 from bacteria.app.architecture.layout import source_roots
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, list_keys, principal_is_known, revoke_key
-from bacteria.app.chat import review
-from bacteria.app.chat.comparison import compare
-from bacteria.app.chat.models import ChatSession
-from bacteria.app.chat.repository import SqlSessionRepository
-from bacteria.app.chat.service import run_turn
 from bacteria.app.core import observability, platform
 from bacteria.app.core.db import get_engine
 from bacteria.app.core.jobs import register_tasks
@@ -48,6 +43,11 @@ from bacteria.app.evaluation.runs import load_runs
 from bacteria.app.graph.catalogue import PROMOTION_THRESHOLD, promotable
 from bacteria.app.graph.repository import SqlGraphRepository, tally_relations
 from bacteria.app.graph.service import expire_tail
+from bacteria.app.personal import review
+from bacteria.app.personal.comparison import compare
+from bacteria.app.personal.models import ChatSession
+from bacteria.app.personal.repository import SqlSessionRepository
+from bacteria.app.personal.service import run_turn
 
 
 async def _issue(principal_id: str, label: str) -> int:
@@ -172,8 +172,8 @@ async def _chat(principal_id: str, session_id: str | None) -> int:
     """Hold a conversation against the real database, from a terminal.
 
     Composition only, like everything here: it opens a session, builds the same
-    :class:`~bacteria.app.chat.repository.SqlSessionRepository` the API builds,
-    and calls the same :func:`~bacteria.app.chat.service.run_turn`. There is no
+    :class:`~bacteria.app.personal.repository.SqlSessionRepository` the API builds,
+    and calls the same :func:`~bacteria.app.personal.service.run_turn`. There is no
     second turn implementation and there must not be — the reply, the
     transcript rows, and the extraction trigger are whatever the HTTP path
     produces, because it is the same function.

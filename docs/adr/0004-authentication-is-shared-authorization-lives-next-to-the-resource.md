@@ -22,7 +22,7 @@ eleven. And ingestion has no ownership at all; see the consequences.
 The service authenticates with bearer API keys and has exactly one kind of owned
 resource: a chat session, with its transcript, its memory, and its proposals.
 
-Before ownership existed, the hole was total. `test_chat_access.py` records it:
+Before ownership existed, the hole was total. `test_personal_access.py` records it:
 
 > before it, any caller could name any `user_id` and read any session id they
 > could guess

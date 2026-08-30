@@ -2,7 +2,7 @@
 
 Every route requires an authenticated caller and touches only that caller's
 sessions. The two are separate steps on purpose: ``CurrentPrincipal``
-establishes who, :func:`~bacteria.app.chat.access.load_owned_session` establishes
+establishes who, :func:`~bacteria.app.personal.access.load_owned_session` establishes
 whether.
 
 **One route does not use the second step, and cannot.** ``GET /sessions`` has no
@@ -10,7 +10,7 @@ session id to establish anything about; ownership there is a filter rather than
 a check. The difference matters because the two fail in opposite directions — a
 broken check refuses a legitimate caller, a broken filter hands over everyone
 else's conversations — so that route asserts its refusal in
-`test_chat_access.py` rather than trusting the shape.
+`test_personal_access.py` rather than trusting the shape.
 """
 
 from datetime import datetime
@@ -21,11 +21,11 @@ from pydantic import BaseModel, Field
 
 from bacteria.agent.session.store import SESSION_SCOPE, USER_SCOPE, MemoryScope
 from bacteria.app.auth.dependencies import CurrentPrincipal
-from bacteria.app.chat import review
-from bacteria.app.chat.access import load_owned_session
-from bacteria.app.chat.repository import SqlSessionRepository
-from bacteria.app.chat.service import run_turn
 from bacteria.app.core.dependencies import AppSettings, DbSession
+from bacteria.app.personal import review
+from bacteria.app.personal.access import load_owned_session
+from bacteria.app.personal.repository import SqlSessionRepository
+from bacteria.app.personal.service import run_turn
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -131,7 +131,7 @@ class HeldOut(BaseModel):
 
     The value is carried, not just the scope. Warning that something will be
     replaced without saying what is a note that reads as informative and decides
-    nothing -- recorded in :class:`~bacteria.app.chat.review.Held` from a review
+    nothing -- recorded in :class:`~bacteria.app.personal.review.Held` from a review
     walk where it cost a good value.
     """
 
@@ -412,7 +412,7 @@ async def read_proposals(
     recorded as such in ADR 0017 — proposals accumulate, nothing activates, and
     the agent appears to have no memory while behaving exactly as designed.
 
-    Built through :func:`~bacteria.app.chat.review.pending_from` rather than by
+    Built through :func:`~bacteria.app.personal.review.pending_from` rather than by
     reading ``state.proposals`` here, and that was a real gap rather than tidying.
     ``held_by`` — what accepting a proposal would replace — existed only in the
     admin CLI's review walk, so the console listed two suggestions for one key as

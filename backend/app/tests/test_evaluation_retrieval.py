@@ -14,13 +14,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.models import ChatSession, ChatTranscriptItem
 from bacteria.app.evaluation.retrieval import replay
 from bacteria.app.evaluation.runs import RecordedRun
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import refer_to
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.models import ChatSession, ChatTranscriptItem
 
 TURN = datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc)
 LATER = TURN + timedelta(days=30)

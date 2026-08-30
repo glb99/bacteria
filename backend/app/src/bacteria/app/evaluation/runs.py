@@ -22,7 +22,7 @@ from typing import Any, Optional
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.chat.models import ChatTranscriptItem
+from bacteria.app.personal.models import ChatTranscriptItem
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,6 @@
 """Browser sessions: what a cookie may prove, and for how long.
 
-The two paths `test_chat_access.py` exempts from its route enumeration are
+The two paths `test_personal_access.py` exempts from its route enumeration are
 asserted here instead, which is the deal that exemption makes. Everything else
 leans toward asserting refusals, for the reason `test_auth.py` gives: a wrong
 answer means an unauthorized caller treated as an authorized one.

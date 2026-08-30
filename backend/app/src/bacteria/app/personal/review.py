@@ -37,7 +37,7 @@ from bacteria.agent.session.store import (
     SessionState,
     UnknownSessionError,
 )
-from bacteria.app.chat.repository import SqlSessionRepository
+from bacteria.app.personal.repository import SqlSessionRepository
 
 SCOPES: tuple[MemoryScope, ...] = (SESSION_SCOPE, USER_SCOPE)
 """The scopes a person may activate into, in the order they are offered.

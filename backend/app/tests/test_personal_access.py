@@ -15,8 +15,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from bacteria.agent.model.protocol import ModelResponse
 from bacteria.app.auth import keys
 from bacteria.app.auth.service import issue_key, revoke_key
+from bacteria.app.core import model_client
 from bacteria.app.core.db import session_scope
-from bacteria.app.personal import service
 from bacteria.app.views import create_app
 
 
@@ -31,7 +31,7 @@ def _client(engine, monkeypatch, backend_options):
         async with AsyncSession(engine) as session:
             yield session
 
-    monkeypatch.setitem(service.PROVIDERS, "fake", FakeModelClient)
+    monkeypatch.setitem(model_client.PROVIDERS, "fake", FakeModelClient)
     monkeypatch.setenv("BACTERIA_MODEL_PROVIDER", "fake")
 
     # No lifespan: conftest builds the schema once per run, which is the same

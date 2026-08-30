@@ -25,9 +25,9 @@ from bacteria.app.architecture.repository import SqlProjectRepository
 from bacteria.app.architecture.service import UnusableLocation, add_project, model_of
 from bacteria.app.auth.dependencies import CurrentPrincipal
 from bacteria.app.core.dependencies import DbSession
+from bacteria.app.core.model_client import build_model_client
 from bacteria.app.core.settings import get_settings
 from bacteria.app.graph.repository import SqlGraphRepository
-from bacteria.app.personal.service import build_model_client
 
 router = APIRouter(prefix="/architecture", tags=["architecture"])
 

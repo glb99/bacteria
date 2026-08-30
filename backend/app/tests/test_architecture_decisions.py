@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from bacteria.app.architecture.decisions import ontology_of
+from bacteria.app.architecture.decisions import decide, ontology_of
 from bacteria.app.architecture.models import Project
 from bacteria.app.auth.service import issue_key
 from bacteria.app.core.db import session_scope
@@ -290,3 +290,180 @@ class TestWhatSurvivesAReversal:
 
         assert len(standing) == 1
         assert standing[0].recorded_at == first[0].recorded_at
+
+
+def project_row(project: str) -> Project:
+    """The stored project as a dataclass, for calls that bypass the route.
+
+    Needed because the only way to create an orphan is to record a judgment
+    about a package the parse no longer produces -- and the route refuses
+    exactly that, which is correct and makes the state unreachable through it.
+    """
+    return Project(
+        project_id=project,
+        principal_id="tester",
+        name="",
+        location=str(REPO),
+        test_command=None,
+        added_at=datetime.now(timezone.utc),
+    )
+
+
+async def judged_long_ago(engine, project: str, subject: str, stated_by: str) -> None:
+    """A standing judgment about a package that has since gone."""
+    async with AsyncSession(engine) as session:
+        await decide(
+            architecture_log(session, project),
+            project=project_row(project),
+            subject=subject,
+            claim="feature",
+            verdict="agreed",
+            stated_by=stated_by,
+            now=datetime.now(timezone.utc),
+        )
+        await session.commit()
+
+
+def rename(client, token, project, was, now_called):
+    return client.post(
+        f"/architecture/projects/{project}/renames",
+        headers=auth(token),
+        json={"was": was, "now_called": now_called},
+    )
+
+
+class TestARenamedPackage:
+    """What happens to a judgment when the thing it was about changes its name.
+
+    Unique to a derived domain, and the gap dialogue 13 listed in scope and
+    nobody built until a refactor produced a live instance of it: renaming
+    ``chat`` to ``personal`` left a standing, true, invisible judgment behind.
+    """
+
+    async def test_a_judgment_about_a_vanished_package_is_reported_as_an_orphan(
+        self, client, token, project, engine
+    ) -> None:
+        """Standing, true, and joined to no proposal.
+
+        Before ``orphans`` existed this decision was invisible on every surface
+        while remaining in the log, which is the worst of the three states it
+        could be in: a person cannot act on a record they cannot see, and the
+        graph must not forget it on their behalf.
+        """
+        await judged_long_ago(engine, project, "bacteria.app.chat", "tester")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+
+        assert [o["subject"] for o in body["orphans"]] == ["bacteria.app.chat"]
+        assert body["orphans"][0]["verdict"] == "agreed"
+
+    async def test_stating_the_rename_moves_the_judgment_and_empties_the_orphans(
+        self, client, token, project, engine
+    ) -> None:
+        """The whole loop, and the reason it is not an ``UPDATE``.
+
+        ``bacteria.app.chat`` was judged on a day that package existed.
+        Rewriting the row to say ``personal`` would claim somebody judged a
+        package that did not yet exist -- the manufactured history the log
+        refuses -- so the row keeps its subject and the *read* resolves it.
+
+        The author travels, which is the difference between this and asking the
+        person to judge the same package again under its new name.
+        """
+        await judged_long_ago(engine, project, "bacteria.app.chat", "somebody-else")
+
+        stated = rename(client, token, project, "bacteria.app.chat", "bacteria.app.personal")
+
+        assert stated.status_code == 200
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+        personal = next(p for p in body["proposals"] if p["subject"] == "bacteria.app.personal")
+
+        assert body["orphans"] == []
+        assert personal["verdict"] == "agreed"
+        assert personal["stated_by"] == "somebody-else"
+
+    async def test_the_old_row_keeps_its_own_subject(self, client, token, project, engine) -> None:
+        """Resolved at read time, never rewritten.
+
+        Checked at the log rather than through the response, because the whole
+        argument for doing it this way is invisible from outside: both spellings
+        produce the same screen, and only the rows say whether a date and an
+        author were preserved or invented.
+        """
+        await judged_long_ago(engine, project, "bacteria.app.chat", "somebody-else")
+        rename(client, token, project, "bacteria.app.chat", "bacteria.app.personal")
+
+        async with AsyncSession(engine) as session:
+            standing = await architecture_log(session, project).current("tester")
+
+        judgments = [c for c in standing if c.rel in ("is_a", "is_not_a")]
+        assert [c.attrs["subject"] for c in judgments] == ["bacteria.app.chat"]
+
+    async def test_renaming_to_a_package_that_is_not_here_is_refused(
+        self, client, token, project
+    ) -> None:
+        """Otherwise the judgment moves to a subject nothing can display.
+
+        That failure is silent and worse than the orphan it was meant to fix:
+        the decision leaves a name a person recognises and arrives at one that
+        appears nowhere at all.
+        """
+        response = rename(client, token, project, "bacteria.app.chat", "not.a.package")
+
+        assert response.status_code == 409
+        assert "no package called" in response.json()["detail"]
+
+    async def test_renaming_something_still_here_is_refused(self, client, token, project) -> None:
+        """A rename between two live packages says one codebase holds it twice.
+
+        The plausible typo -- two real names, both recognised, in the wrong
+        order -- and it would carry judgments backwards into a subject the parse
+        still produces.
+        """
+        response = rename(client, token, project, "bacteria.app.graph", "bacteria.app.architecture")
+
+        assert response.status_code == 409
+        assert "still here" in response.json()["detail"]
+
+    async def test_a_judgment_about_the_current_name_wins(
+        self, client, token, project, engine
+    ) -> None:
+        """Two statements about one package, and one is about it as it now is.
+
+        A carried judgment is at best what somebody thought before the rename;
+        one made about the current name was made with the package in front of
+        them.
+        """
+        await judged_long_ago(engine, project, "bacteria.app.chat", "somebody-else")
+        rename(client, token, project, "bacteria.app.chat", "bacteria.app.personal")
+
+        judge(client, token, project, "bacteria.app.personal", "feature", "disagreed")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+        personal = next(p for p in body["proposals"] if p["subject"] == "bacteria.app.personal")
+
+        # Asserted together, because the verdict alone passes for the wrong
+        # reason: with the rename unresolved the carried judgment never reaches
+        # the response at all, and the direct one wins by being the only one
+        # there. An empty `orphans` is what says the carried judgment arrived
+        # and then lost on merit.
+        assert body["orphans"] == []
+        assert personal["verdict"] == "disagreed"
+        assert personal["stated_by"] == "tester"
+
+    async def test_saying_the_same_rename_twice_keeps_the_first_one(
+        self, client, token, project, engine
+    ) -> None:
+        """Restating is not a second rename.
+
+        The date is the only fact the row holds that cannot be recovered from
+        the tree, so re-stating must not move it -- the same rule ``decide``
+        applies to a restated judgment, in the same file, for the same reason.
+        """
+        rename(client, token, project, "bacteria.app.chat", "bacteria.app.personal")
+        rename(client, token, project, "bacteria.app.chat", "bacteria.app.personal")
+
+        async with AsyncSession(engine) as session:
+            standing = await architecture_log(session, project).current("tester")
+
+        assert len([c for c in standing if c.rel == "same_as"]) == 1

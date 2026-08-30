@@ -15,10 +15,18 @@ from typing import Optional, Sequence
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
+from bacteria.app.architecture.catalogue import SAME_AS
 from bacteria.app.architecture.checks import Boundary, Crossing
 from bacteria.app.architecture.classify import sentence
 from bacteria.app.architecture.conversation import ask
-from bacteria.app.architecture.decisions import Verdict, decide, decisions, ontology_of
+from bacteria.app.architecture.decisions import (
+    NothingToRename,
+    Verdict,
+    decide,
+    decisions,
+    ontology_of,
+    rename,
+)
 from bacteria.app.architecture.models import Project
 from bacteria.app.architecture.probes import Reading, run_tests
 from bacteria.app.architecture.repository import SqlProjectRepository
@@ -191,6 +199,32 @@ class Judgment(BaseModel):
     verdict: Verdict
 
 
+class Rename(BaseModel):
+    """A statement that a package this codebase had is one it still has."""
+
+    was: str
+    now_called: str
+
+
+class OrphanOut(BaseModel):
+    """A judgment about something the parse no longer produces.
+
+    Reported rather than dropped. A decision whose subject has gone keeps
+    standing in the log and joins to no proposal, so before this it disappeared
+    from every surface while remaining true — which is the worst of both, since
+    nobody can act on a record they cannot see.
+
+    Whether it is an orphan or a rename is not decidable from the tree: a
+    package that vanished and a package that changed name look identical to a
+    parse. So it is shown and a person says which.
+    """
+
+    subject: str
+    claim: str
+    verdict: str
+    stated_by: Optional[str] = None
+
+
 class ModelOut(BaseModel):
     project: ProjectOut
     roots: list[str]
@@ -200,6 +234,13 @@ class ModelOut(BaseModel):
     boundaries: list[BoundaryOut]
     crossings: list[CrossingOut]
     proposals: list[ClassificationOut]
+    orphans: list[OrphanOut]
+    """Judgments about subjects this codebase no longer has.
+
+    Empty in the ordinary case. Non-empty after somebody renames or deletes a
+    package, and the number is the one thing the model can say without
+    guessing which of the two happened.
+    """
 
 
 def _project_out(project: Project) -> ProjectOut:
@@ -269,12 +310,21 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
     # A proposal already judged still appears, carrying its verdict. Hiding
     # what somebody rejected would make the surface unable to show that anything
     # was ever rejected, which is the one number it exists to produce.
-    judged = {
-        (d.subject, d.claim): (d.verdict, d.stated_by)
-        for d in await decisions(
-            SqlGraphRepository(db, ontology=ontology_of(project)), project=project
-        )
-    }
+    standing = await decisions(
+        SqlGraphRepository(db, ontology=ontology_of(project)), project=project
+    )
+    judged = {(d.subject, d.claim): (d.verdict, d.stated_by) for d in standing}
+
+    # A judgment lands nowhere when the parse stopped producing its subject.
+    # Computed against the proposals rather than the package list, because a
+    # judgment about a *word* -- `service is a role` -- is orphaned when the word
+    # stops recurring, not when a package disappears.
+    proposed = {(p.subject, p.claim) for p in model.proposals}
+    orphans = [
+        OrphanOut(subject=d.subject, claim=d.claim, verdict=d.verdict, stated_by=d.stated_by)
+        for d in standing
+        if (d.subject, d.claim) not in proposed
+    ]
 
     # Crossed first: the list is read top-down and the thing to act on belongs
     # where a reader starts, not after everything that is fine.
@@ -306,6 +356,7 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
             )
             for c in model.verdict.crossings
         ],
+        orphans=orphans,
         proposals=[
             ClassificationOut(
                 subject=p.subject,
@@ -477,4 +528,64 @@ async def ask_about(
         reply=answer.reply,
         tools_used=list(answer.tools_used),
         refused=list(answer.refused),
+    )
+
+
+@router.post("/projects/{project_id}/renames", response_model=ClassificationOut)
+async def rename_package(
+    project_id: str, body: Rename, principal: CurrentPrincipal, db: DbSession
+) -> ClassificationOut:
+    """Say that a package the parse no longer finds is one it does, renamed.
+
+    The judgments recorded under the old name then report under the new one,
+    with their dates and authors intact. Nothing is rewritten: the rename is an
+    assertion like every other statement on this surface, and retracting it puts
+    the old judgments back where they were.
+
+    **Both ends are checked against the tree**, and this is the only validation
+    that matters. ``now_called`` must be something the parse currently produces
+    or the judgments move to a subject nothing can display; ``was`` must be
+    something it no longer produces, because a rename between two live packages
+    is a claim that one codebase contains the same package twice.
+    """
+    repository = SqlProjectRepository(db)
+    project = await repository.owned(principal.id, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such project")
+
+    model = model_of(project)
+    live = set(model.derived.packages)
+    if body.now_called not in live:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"this codebase has no package called {body.now_called}",
+        )
+    if body.was in live:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"{body.was} is still here, so it was not renamed",
+        )
+
+    graph = SqlGraphRepository(db, ontology=ontology_of(project))
+    try:
+        stated = await rename(
+            graph,
+            project=project,
+            was=body.was,
+            now_called=body.now_called,
+            stated_by=principal.id,
+            now=datetime.now(timezone.utc),
+        )
+    except NothingToRename as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await db.commit()
+
+    return ClassificationOut(
+        subject=stated.subject,
+        relation=SAME_AS,
+        claim=stated.claim,
+        sentence=f"{stated.subject} is {stated.claim} under a new name",
+        because="stated by a person",
+        verdict=stated.verdict,
+        stated_by=stated.stated_by,
     )

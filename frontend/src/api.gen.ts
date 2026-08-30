@@ -140,6 +140,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/architecture/projects/{project_id}/renames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename Package
+         * @description Say that a package the parse no longer finds is one it does, renamed.
+         *
+         *     The judgments recorded under the old name then report under the new one,
+         *     with their dates and authors intact. Nothing is rewritten: the rename is an
+         *     assertion like every other statement on this surface, and retracting it puts
+         *     the old judgments back where they were.
+         *
+         *     **Both ends are checked against the tree**, and this is the only validation
+         *     that matters. ``now_called`` must be something the parse currently produces
+         *     or the judgments move to a subject nothing can display; ``was`` must be
+         *     something it no longer produces, because a rename between two live packages
+         *     is a claim that one codebase contains the same package twice.
+         */
+        post: operations["rename_package_architecture_projects__project_id__renames_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/session": {
         parameters: {
             query?: never;
@@ -1070,6 +1101,8 @@ export interface components {
             imports: components["schemas"]["ImportOut"][];
             /** Modules */
             modules: components["schemas"]["ModuleOut"][];
+            /** Orphans */
+            orphans: components["schemas"]["OrphanOut"][];
             project: components["schemas"]["ProjectOut"];
             /** Proposals */
             proposals: components["schemas"]["ClassificationOut"][];
@@ -1125,6 +1158,29 @@ export interface components {
             last_seen: string;
             /** Node Id */
             node_id: string;
+        };
+        /**
+         * OrphanOut
+         * @description A judgment about something the parse no longer produces.
+         *
+         *     Reported rather than dropped. A decision whose subject has gone keeps
+         *     standing in the log and joins to no proposal, so before this it disappeared
+         *     from every surface while remaining true — which is the worst of both, since
+         *     nobody can act on a record they cannot see.
+         *
+         *     Whether it is an orphan or a rename is not decidable from the tree: a
+         *     package that vanished and a package that changed name look identical to a
+         *     parse. So it is shown and a person says which.
+         */
+        OrphanOut: {
+            /** Claim */
+            claim: string;
+            /** Stated By */
+            stated_by?: string | null;
+            /** Subject */
+            subject: string;
+            /** Verdict */
+            verdict: string;
         };
         /**
          * OutcomeOut
@@ -1238,6 +1294,16 @@ export interface components {
             };
             /** Reason */
             reason: string;
+        };
+        /**
+         * Rename
+         * @description A statement that a package this codebase had is one it still has.
+         */
+        Rename: {
+            /** Now Called */
+            now_called: string;
+            /** Was */
+            was: string;
         };
         /**
          * RenameIn
@@ -1569,6 +1635,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_package_architecture_projects__project_id__renames_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Rename"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassificationOut"];
                 };
             };
             /** @description Validation Error */

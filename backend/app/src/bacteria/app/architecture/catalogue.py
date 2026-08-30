@@ -66,6 +66,22 @@ one [dialogue 11 Q2] made for refusing the relation tail's treatment to kinds,
 and it applies here with the extra comfort that the set is genuinely finite.
 """
 
+SAME_AS = "same_as"
+"""The relation a rename records.
+
+Borrowed rather than invented: the substrate's identity rule already says
+nodes are **linked, never merged**, and ``graph/service.py``'s ``link`` is
+its writer. That module's docstring noted that nothing read the link yet and
+that the first use would "look like a bug"; this is the first use, and it is
+in the domain that needed it second.
+
+A rename is exactly the claim ``same_as`` makes. ``bacteria.app.chat`` and
+``bacteria.app.personal`` are one package under two names, both nodes keep
+their ids and their history, and the judgment recorded against the old name
+stays attached to it rather than being rewritten to pretend it was always
+the new one.
+"""
+
 CLASSIFICATIONS: frozenset[str] = frozenset({"feature", "layer", "role"})
 """What a subject may be said to be.
 
@@ -120,6 +136,20 @@ CATALOGUE: tuple[Relation, ...] = (
         # Emphatically not functional: disagreeing that a package is a feature
         # says nothing about whether it is a layer, and a person may reject
         # several proposals about one subject. Only agreement is exclusive.
+        functional=False,
+    ),
+    Relation(
+        name="same_as",
+        invariant=None,
+        sentence="<src> is <dst> under a new name",
+        # No kinds, because a rename relates two of whatever the pair both are.
+        # A package renamed and a word renamed are the same act, and `link`
+        # refuses a mismatched pair on its own.
+        src_kind=None,
+        dst_kind=None,
+        # A name can be superseded more than once -- `chat` to `personal` to
+        # whatever comes next -- and every hop is worth keeping, because a
+        # decision recorded under the first name has to find its way to the last.
         functional=False,
     ),
 )

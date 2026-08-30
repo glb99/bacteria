@@ -4,6 +4,8 @@ Small, and most of it guards the thing the file exists for: that the model is
 readable without reading the adapter, and that the adapter cannot drift from it.
 """
 
+from typing import Optional
+
 from bacteria.app.architecture import decisions, derive
 from bacteria.app.architecture.catalogue import (
     CATALOGUE,
@@ -16,7 +18,13 @@ from bacteria.app.architecture.catalogue import (
 )
 from bacteria.app.architecture.classify import propose
 from bacteria.app.architecture.derive import Derived, Import, Module
-from bacteria.app.architecture.views import ClassificationOut, ImportOut, ModelOut, ModuleOut
+from bacteria.app.architecture.views import (
+    ClassificationOut,
+    ImportOut,
+    ModelOut,
+    ModuleOut,
+    OrphanOut,
+)
 
 
 class TestVocabulary:
@@ -100,6 +108,17 @@ class TestVocabulary:
         assert emitted <= CLASSIFICATIONS
 
 
+STATED = frozenset({"is_a", "is_not_a", "same_as"})
+"""Relations a person writes, which no parse can produce.
+
+Excluded from the adapter's guard rather than listed inside it, because the
+distinction is the whole feature: a parse is repeatable and a judgment is not.
+``same_as`` joined them when renames arrived -- whether a package vanished or
+changed its name is exactly what a parse cannot tell, which is why a person has
+to say.
+"""
+
+
 class TestTheAdapterUsesIt:
     def test_every_declared_derived_relation_is_actually_emitted(self) -> None:
         """Declared and emitted are the same set, in both directions.
@@ -111,9 +130,7 @@ class TestTheAdapterUsesIt:
         not what exists.
         """
         emitted = set(derive.RELATIONS)
-        derived_relations = {
-            entry.name for entry in CATALOGUE if entry.name not in {"is_a", "is_not_a"}
-        }
+        derived_relations = {entry.name for entry in CATALOGUE} - STATED
 
         assert emitted == derived_relations
 
@@ -142,7 +159,7 @@ class TestTheAdapterUsesIt:
         assert found.invariant == "A subject is one kind of thing at a time."
 
 
-CARRIED_BY: dict[str, tuple[str, type, tuple[str, ...]]] = {
+CARRIED_BY: dict[str, tuple[Optional[str], type, tuple[str, ...]]] = {
     # relation -> (field on ModelOut, item model, fields that carry the edge)
     "imports": ("imports", ImportOut, ("src", "dst")),
     # Flattened rather than listed: a module carries the tables it declares,
@@ -153,11 +170,17 @@ CARRIED_BY: dict[str, tuple[str, type, tuple[str, ...]]] = {
     # indistinguishable on the wire while both still look carried.
     "is_a": ("proposals", ClassificationOut, ("subject", "claim", "verdict")),
     "is_not_a": ("proposals", ClassificationOut, ("subject", "claim", "verdict")),
+    # No field of its own, and that is the honest entry rather than a gap. A
+    # rename is not drawn: it is *applied*, by `decisions()` reporting a
+    # judgment under the package's current name. What a client sees is the
+    # judgment having moved, plus `orphans` shrinking by one. The response to
+    # the rename route carries the edge itself.
+    "same_as": (None, ClassificationOut, ("subject", "claim")),
 }
 """How each declared relation reaches a client, if it does.
 
-Relation -> the field on ``ModelOut``, the item model, and the fields that
-carry the edge.
+Relation -> the field on ``ModelOut`` or ``None`` where the relation is applied
+rather than listed, the model carrying it, and the fields that carry the edge.
 """
 
 
@@ -196,6 +219,20 @@ class TestTheWireFormatCarriesIt:
         rename is exactly the silent drift this class exists to catch.
         """
         for name, (on_model, item, fields) in CARRIED_BY.items():
-            assert on_model in ModelOut.model_fields, f"{name}: ModelOut.{on_model}"
+            if on_model is not None:
+                assert on_model in ModelOut.model_fields, f"{name}: ModelOut.{on_model}"
             for field in fields:
                 assert field in item.model_fields, f"{name}: {item.__name__}.{field}"
+
+    def test_a_judgment_that_lands_nowhere_is_still_reported(self) -> None:
+        """The counterpart to ``same_as`` having no field of its own.
+
+        A rename is how a judgment finds its way home; ``orphans`` is what the
+        model says while it has not. Without that field a decision about a
+        renamed package stands in the log, joins to no proposal, and disappears
+        from every surface -- true, unactionable, and invisible, which is the
+        worst of the three states it could be in.
+        """
+        assert "orphans" in ModelOut.model_fields
+        for field in ("subject", "claim", "verdict"):
+            assert field in OrphanOut.model_fields

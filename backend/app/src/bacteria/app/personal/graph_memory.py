@@ -51,8 +51,6 @@ from bacteria.agent.session.store import (
     MemoryRefused,
     MemoryScope,
 )
-from bacteria.app.graph.catalogue import preferences as preference_relations
-from bacteria.app.graph.catalogue import resolve
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
 from bacteria.app.graph.service import (
@@ -64,6 +62,7 @@ from bacteria.app.graph.service import (
     retract,
 )
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.catalogue import VOCABULARY
 from bacteria.app.personal.memory import MemoryView
 
 _REFUSAL = "this store keeps only a fixed set of keys, and that is not one of them"
@@ -90,10 +89,10 @@ def _canonical_key(key: str) -> str:
     claim, which has two ends; a key has one, so a converse here is a name for a
     relationship read the other way round and not a spelling of this one.
     """
-    resolution = resolve(key)
+    resolution = VOCABULARY.resolve(key)
     if resolution is None or resolution.swap:
         raise UnknownPreferenceError(key, _REFUSAL)
-    if resolution.relation not in preference_relations():
+    if resolution.relation not in VOCABULARY.preferences():
         raise UnknownPreferenceError(key, _REFUSAL)
     return resolution.relation.name
 
@@ -136,7 +135,7 @@ class GraphMemoryStore:
     """Memory as a projection of the assertion log."""
 
     def __init__(self, db: Any) -> None:
-        self._repository = SqlGraphRepository(db)
+        self._repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
         self._db = db
 
     async def entries(self, session_id: str, user_id: str) -> MemoryView:

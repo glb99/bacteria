@@ -1,38 +1,42 @@
-"""Which relationships the graph has agreed to be about.
+"""The shape a vocabulary has, and nothing any particular one says.
 
-`rel` shipped as a free-text field and the first fortnight of real use produced
-ten distinct names across fifteen rows — `parent`, `mother`, `mother_of`,
-`called`, `name`, `alternative_name` and `interlocutor` among them, several of
-them one fact wearing different hats. None of the three constraints that existed
-matched any of them, so the layer that finds contradictions had never run outside
-its own tests.
+A relation has a name, a sentence, a kind signature and a flag saying whether it
+can contradict itself. That shape is domain-neutral: ``mother`` and ``imports``
+are the same kind of thing about different worlds. **Which relations exist is
+not**, and the entries that used to sit here were a personal life's --
+``employer``, ``mother``, ``lives_in`` -- declared in the substrate because for a
+long time there was only one domain to declare them for.
 
-The argument for closing a vocabulary was already made in this package, against
-``_KINDS``: an open set means the same thing arrives under three names across
-three runs and becomes three things. It was applied to ``kind`` and not to
-``rel``, which got a line of prompt asking the model to be consistent with runs
-it cannot see.
+The second domain made the seam visible by not using them.
+:mod:`bacteria.app.architecture.catalogue` reached in for :class:`Relation` and
+declared its own four words locally, and nine of the ten entries here turned out
+to be one domain's policy living in everybody's package. They now live in
+:mod:`bacteria.app.personal.catalogue`, where the domain that means them can be
+read without reading the substrate.
 
-**This is not a closed enum, and ADR 0007 says why at length.** ``kind`` is five
-members describing what sorts of thing exist; ``rel`` is the long tail of a
-personal life, and there is no number at which such an enum is finished. A claim
-using a relation that is not here is written to the log like any other — see
-:func:`is_canonical` — because the tail is the evidence for what this should
-become, and dropping it would discard exactly the information needed to decide.
+**A vocabulary travels on the repository, not on an import.** :class:`Vocabulary`
+is a value a caller constructs and hands to
+:class:`~bacteria.app.graph.repository.SqlGraphRepository`, the same way the
+ontology does and for the same reason it gives: fifteen call sites each
+remembering to pass the right words is fifteen chances to judge one domain's
+claim by another's rules. The service layer asks the repository rather than
+importing a module-level literal, which is what let the entries move without
+changing any of the eighty-two calls to ``observe`` and its siblings.
 
-**Canonicality is derived and never stored.** A relation is canonical iff it is
-in here, computed at read time. A column would make promotion an ``UPDATE``
-across historical rows, which is an append-only log being mutated; derived,
-promotion is an edit to this literal and every past row reclassifies for free.
+**The growth doctrine stays here** -- :data:`PROMOTION_THRESHOLD`,
+:func:`promotable`, the tail. Those are rules *about* vocabularies rather than
+entries in one, and they govern any domain whose words are discovered rather
+than given. What moved is the list; what stayed is everything deciding how a
+list may change.
 
 Not built:
-    Anywhere for an entry to come from. This stays a literal for the reason the
-    constraints it absorbed already gave: it moves to rows keyed by owner when an
-    authoring route exists, since "a person has one employer" is exactly the kind
-    of rule a particular person is entitled to disagree with.
+    Anywhere for an entry to come from. A domain's catalogue stays a literal for
+    the reason the constraints it absorbed already gave: it moves to rows keyed
+    by owner when an authoring route exists, since "a person has one employer" is
+    exactly the kind of rule a particular person is entitled to disagree with.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -121,241 +125,135 @@ class Resolution:
     swap: bool
 
 
-CATALOGUE: tuple[Relation, ...] = (
-    Relation(
-        name="employer",
-        invariant="A person has one employer at a time.",
-        sentence="<src> works for <dst>",
-        src_kind="person",
-        dst_kind="organization",
-        functional=True,
-        aliases=(
-            Alias("works_for"),
-            Alias("employed_by"),
-            Alias("employs", converse=True),
-        ),
-    ),
-    Relation(
-        name="cto",
-        invariant="An organization has one CTO at a time.",
-        sentence="<dst> is the CTO of <src>",
-        src_kind="organization",
-        dst_kind="person",
-        functional=True,
-        aliases=(Alias("chief_technology_officer"),),
-    ),
-    Relation(
-        name="ceo",
-        invariant="An organization has one CEO at a time.",
-        sentence="<dst> is the CEO of <src>",
-        src_kind="organization",
-        dst_kind="person",
-        functional=True,
-        aliases=(Alias("chief_executive_officer"),),
-    ),
-    Relation(
-        name="mother",
-        invariant="A person has one mother.",
-        sentence="<src>'s mother is <dst>",
-        src_kind="person",
-        dst_kind="person",
-        functional=True,
-        aliases=(Alias("mother_of", converse=True),),
-    ),
-    Relation(
-        name="father",
-        invariant="A person has one father.",
-        sentence="<src>'s father is <dst>",
-        src_kind="person",
-        dst_kind="person",
-        functional=True,
-        aliases=(Alias("father_of", converse=True),),
-    ),
-    Relation(
-        name="tone",
-        invariant="A person prefers one tone at a time.",
-        sentence="<src> prefers <dst> answers",
-        src_kind="person",
-        dst_kind="value",
-        functional=True,
-        aliases=(Alias("prefers_tone"), Alias("style")),
-    ),
-    Relation(
-        name="language",
-        invariant="A person is written to in one language at a time.",
-        sentence="<src> is written to in <dst>",
-        src_kind="person",
-        dst_kind="value",
-        functional=True,
-        aliases=(Alias("speaks"), Alias("prefers_language")),
-    ),
-    Relation(
-        name="name",
-        invariant="A person goes by one name at a time.",
-        sentence="<src> is called <dst>",
-        src_kind="person",
-        dst_kind="value",
-        functional=True,
-        aliases=(
-            Alias("user_name"),
-            Alias("named"),
-            Alias("called"),
-            Alias("goes_by"),
-            Alias("known_as"),
-            Alias("also_known_as"),
-            Alias("alternative_name"),
-            Alias("alias"),
-            Alias("nickname"),
-            Alias("first_name"),
-            Alias("last_name"),
-            Alias("full_name"),
-        ),
-    ),
-    Relation(
-        name="same_as",
-        sentence="<src> and <dst> are the same thing",
-        src_kind=None,
-        dst_kind=None,
-        functional=False,
-        extractable=False,
-    ),
-    Relation(
-        name="lives_in",
-        invariant="A person lives in one place at a time.",
-        sentence="<src> lives in <dst>",
-        src_kind="person",
-        dst_kind="place",
-        functional=True,
-        aliases=(Alias("resides_in"), Alias("lives_at")),
-    ),
-)
-"""The relations that are canonical, which is a seeded six.
+@dataclass(frozen=True)
+class Vocabulary:
+    """One domain's relations, and the questions a caller may ask about them.
 
-**Admitted on one test: can anything check it?** Every entry is functional, so
-every entry can produce a contradiction on the day it is used; four also carry an
-asymmetric signature that catches an inversion. A relation nothing can check does
-nothing here that the tail would not do, while costing a line of prompt.
+    Frozen, and built once per domain rather than assembled per call: the two
+    indexes below are the whole reason this is an object rather than a tuple,
+    and rebuilding them inside a loop over the log is how a lookup becomes the
+    expensive part of a read.
 
-**Frequency is deliberately not the criterion**, and the observed rows show why.
-The most common relation real use produced was ``parent`` — and it is excluded,
-because a person has two parents and so nothing can check it. The less common
-``mother`` is in.
+    ``names`` is the relation whose object is what to call its subject, or
+    ``None`` where a domain has no such notion. It is a field rather than a
+    constant in this module because *a claim about a name should relabel the
+    node* is a personal-domain rule that happens to be executed by a substrate
+    function -- architecture has no equivalent and must not inherit one by
+    default.
 
-``cto`` and ``ceo`` are inherited from the three constraints this replaced rather
-than re-earned. They are corporate, they appeared in **zero** real rows, and they
-stay because removing them is a separate decision from governing the field.
+    An empty vocabulary is a legitimate value rather than a missing one: a
+    repository opened on a partition whose words nobody has declared can still
+    read and write rows, it simply has no opinion about which of them
+    contradict.
+    """
 
-``tone`` and ``language`` are the first entries that point at a *value* rather
-than a thing, and they are what makes a preference representable at all. Their
-names are the memory keys: one slot per key and one ``dst`` per ``(src, rel)`` at
-a time are the same statement, which is why a preference needs no keying
-mechanism of its own.
+    relations: tuple[Relation, ...] = ()
+    names: Optional[str] = None
 
-Everything else starts as tail — ``owns``, ``pet``, ``parent``, ``knows`` — and is
-promoted by the rule of three once it recurs, which is a change to this literal.
+    _by_name: dict[str, Relation] = field(
+        init=False, repr=False, compare=False, default_factory=dict
+    )
+    _by_alias: dict[str, Resolution] = field(
+        init=False, repr=False, compare=False, default_factory=dict
+    )
+
+    def __post_init__(self) -> None:
+        # `object.__setattr__` because the dataclass is frozen and these are
+        # derived rather than given.
+        object.__setattr__(self, "_by_name", {r.name: r for r in self.relations})
+        object.__setattr__(
+            self,
+            "_by_alias",
+            {
+                alias.name: Resolution(relation, alias.converse)
+                for relation in self.relations
+                for alias in relation.aliases
+            },
+        )
+
+    def lookup(self, name: str) -> Optional[Relation]:
+        """The entry for a relation name, or ``None`` if this domain has none.
+
+        Exact match. Aliases are not consulted, because the callers that need it
+        -- conflict evaluation, the console's rule list -- are asking about a
+        relation as it was *recorded*, and an assertion's ``rel`` has already
+        been canonicalized by the time it reaches the log.
+        """
+        return self._by_name.get(name)
+
+    def is_canonical(self, name: str) -> bool:
+        """Whether this domain agreed to the name, computed rather than stored.
+
+        A column would make promotion an ``UPDATE`` across historical rows, which
+        is an append-only log being mutated. Derived, promotion is an edit to a
+        literal and every past row reclassifies for free.
+        """
+        return name in self._by_name
+
+    def resolve(self, name: str) -> Optional[Resolution]:
+        """Canonicalize a name a model proposed, or ``None`` for the tail.
+
+        Entries first and aliases second, so a name that is both is read as
+        itself. ``None`` is not a rejection: the caller records the claim under
+        the model's own word, and this only says the vocabulary has nothing to
+        say about it.
+        """
+        relation = self._by_name.get(name)
+        if relation is not None:
+            return Resolution(relation, swap=False)
+        return self._by_alias.get(name)
+
+    def functional(self) -> tuple[Relation, ...]:
+        """Every relation that can produce a contradiction.
+
+        The caller must not assume this is all of them: the admission test says a
+        relation needs *something* able to check it, and an asymmetric kind
+        signature qualifies on its own.
+        """
+        return tuple(relation for relation in self.relations if relation.functional)
+
+    def preferences(self) -> tuple[Relation, ...]:
+        """The relations a projection may turn into keyed memory.
+
+        Functional and pointing at a value: the first because a key holds one
+        answer, the second because a key holds a *word* rather than a reference
+        to something else in the graph. ``mother`` is functional and is not a
+        preference; ``pet`` points at a thing and is not either.
+        """
+        return tuple(r for r in self.relations if r.functional and r.dst_kind == "value")
+
+    def describe(self) -> str:
+        """The vocabulary as an extraction prompt states it.
+
+        Rendered rather than written out beside the prompt, so the two cannot
+        disagree. A prompt version hashing the prompt text therefore moves
+        whenever this does, which is the property retraction wanted and could not
+        have while the vocabulary was implicit in whatever the model chose.
+        """
+        lines = []
+        for relation in self.relations:
+            # A relation the extractor may not propose is not offered to it.
+            # `same_as` is the case: a model suggesting merges would be guessing
+            # in the one direction ADR 0006 calls unrecoverable. Converse aliases
+            # are not advertised either -- they exist to recognize a name a model
+            # reaches for unasked, and listing `mother_of` under a sentence
+            # reading "<src> is the mother of <dst>" would invite exactly the
+            # inversion the flag exists to undo.
+            if not relation.extractable:
+                continue
+            synonyms = ", ".join(alias.name for alias in relation.aliases if not alias.converse)
+            suffix = f" (also: {synonyms})" if synonyms else ""
+            lines.append(f"  {relation.name} - {relation.sentence}{suffix}")
+        return "\n".join(lines)
+
+
+EMPTY = Vocabulary()
+"""What a repository carries when nobody said which words apply.
+
+Named rather than written as ``Vocabulary()`` at the default, so a reader of a
+signature sees that *no vocabulary* is a decision somebody can make rather than
+an oversight.
 """
-
-
-NAME_RELATION = "name"
-"""The relation whose object is what to call its subject.
-
-Named rather than spelled at each call site because two things branch on it —
-:func:`~bacteria.app.graph.service.confirm`, which redraws the node, and anything
-later that wants the owner's name without walking the log — and a string literal
-in both is a rename waiting to diverge.
-"""
-
-
-def preferences() -> tuple[Relation, ...]:
-    """The relations a projection may turn into keyed memory.
-
-    Functional and pointing at a value: the first because a key holds one answer,
-    the second because a key holds a *word* rather than a reference to something
-    else in the graph. ``mother`` is functional and is not a preference; ``pet``
-    points at a thing and is not either.
-    """
-    return tuple(r for r in CATALOGUE if r.functional and r.dst_kind == "value")
-
-
-_BY_NAME: dict[str, Relation] = {relation.name: relation for relation in CATALOGUE}
-
-_BY_ALIAS: dict[str, Resolution] = {
-    alias.name: Resolution(relation, alias.converse)
-    for relation in CATALOGUE
-    for alias in relation.aliases
-}
-
-
-def lookup(name: str) -> Optional[Relation]:
-    """The catalogue entry for a relation name, or ``None`` if it has none.
-
-    Exact match. Aliases are not consulted, because the callers that need this —
-    conflict evaluation, the console's rule list — are asking about a relation as
-    it was *recorded*, and an assertion's ``rel`` has already been canonicalized
-    by the time it reaches the log.
-    """
-    return _BY_NAME.get(name)
-
-
-def is_canonical(name: str) -> bool:
-    """Is this relation one the catalogue has agreed to?
-
-    The whole of the derived predicate ADR 0007 decided on. There is no column
-    and no cached copy: a relation's status is a fact about the catalogue as it
-    stands now, not about the row, and promoting one reclassifies every past
-    assertion without touching any of them.
-    """
-    return name in _BY_NAME
-
-
-def resolve(name: str) -> Optional[Resolution]:
-    """Canonicalize a relation name the model proposed, or ``None`` for the tail.
-
-    Consults the catalogue first and aliases second, so a name that is both is
-    read as itself.
-
-    Returning ``None`` is not a rejection. The caller records the claim under the
-    model's own word; this only says the catalogue has nothing to say about it.
-    """
-    relation = _BY_NAME.get(name)
-    if relation is not None:
-        return Resolution(relation, swap=False)
-    return _BY_ALIAS.get(name)
-
-
-def functional() -> tuple[Relation, ...]:
-    """Every relation that can produce a contradiction.
-
-    Which is currently all of them, and the caller must not assume that: the
-    admission test says a relation needs *something* able to check it, and an
-    asymmetric kind signature qualifies on its own.
-    """
-    return tuple(relation for relation in CATALOGUE if relation.functional)
-
-
-def vocabulary() -> str:
-    """The catalogue as the extraction prompt states it.
-
-    Rendered rather than written out beside the prompt, so the two cannot
-    disagree. ``PROMPT_VERSION`` is a hash of the prompt text and therefore moves
-    whenever this does, which is the property retraction wanted and could not
-    have while the vocabulary was implicit in whatever the model chose.
-    """
-    lines = []
-    for relation in CATALOGUE:
-        # A relation the extractor may not propose is not offered to it. `same_as`
-        # is the case: a model suggesting merges would be guessing in the one
-        # direction ADR 0006 calls unrecoverable.
-        # Converse aliases are deliberately not advertised. They exist to
-        # recognize a name a model reaches for unasked, and listing `mother_of`
-        # under a sentence reading "<src>'s mother is <dst>" would invite exactly
-        # the inversion the flag exists to undo.
-        if not relation.extractable:
-            continue
-        synonyms = ", ".join(alias.name for alias in relation.aliases if not alias.converse)
-        suffix = f" (also: {synonyms})" if synonyms else ""
-        lines.append(f"  {relation.name} - {relation.sentence}{suffix}")
-    return "\n".join(lines)
 
 
 def read_as(relation: Relation, src: str, dst: str) -> str:
@@ -390,7 +288,12 @@ class Candidate:
     count: int
 
 
-def promotable(tally: dict[str, int], *, threshold: int = PROMOTION_THRESHOLD) -> list[Candidate]:
+def promotable(
+    tally: dict[str, int],
+    vocabulary: Vocabulary,
+    *,
+    threshold: int = PROMOTION_THRESHOLD,
+) -> list[Candidate]:
     """Which relations outside the catalogue have earned a question.
 
     Pure, and takes the counts rather than fetching them, so the rule is testable
@@ -399,10 +302,15 @@ def promotable(tally: dict[str, int], *, threshold: int = PROMOTION_THRESHOLD) -
     Sorted by how often each was seen, because a reader working down the list
     should meet the strongest case first — and ties by name, so two runs over
     unchanged data print the same thing and a diff means something.
+
+    ``vocabulary`` is a parameter rather than a module-level lookup because
+    *already canonical* is a question only a domain can answer, and this rule
+    governs every domain whose words are discovered. Asked against the wrong
+    vocabulary it proposes promoting words that are already in.
     """
     candidates = [
         Candidate(name, count)
         for name, count in tally.items()
-        if count >= threshold and not is_canonical(name)
+        if count >= threshold and not vocabulary.is_canonical(name)
     ]
     return sorted(candidates, key=lambda c: (-c.count, c.name))

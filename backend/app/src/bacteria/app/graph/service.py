@@ -26,15 +26,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
-from bacteria.app.graph.catalogue import (
-    CATALOGUE,
-    NAME_RELATION,
-    Relation,
-    is_canonical,
-    lookup,
-    read_as,
-)
-from bacteria.app.graph.catalogue import preferences as preference_relations
+from bacteria.app.graph.catalogue import Relation, read_as
 from bacteria.app.graph.conclusions import Conclusion, stale_after
 from bacteria.app.graph.constraints import Conflict, conflicts_for
 from bacteria.app.graph.identity import SELF, Node, normalize, owner_node_id
@@ -142,7 +134,7 @@ async def observe(
     assertions: Sequence[Assertion],
     *,
     now: datetime,
-    relations: Sequence[Relation] = CATALOGUE,
+    relations: Optional[Sequence[Relation]] = None,
 ) -> Outcome:
     """Record claims, then say what they collide with.
 
@@ -372,7 +364,7 @@ async def revise(
     replacement: Assertion,
     *,
     now: datetime,
-    relations: Sequence[Relation] = CATALOGUE,
+    relations: Optional[Sequence[Relation]] = None,
 ) -> Outcome:
     """Correct a claim, and mark everything that had been resting on it.
 
@@ -561,7 +553,7 @@ async def preferences_for(
     that asked for the tone needs *an* answer, and returning none for a key under
     dispute is worse than returning the newer of two.
     """
-    wanted = {r.name for r in (relations or preference_relations())}
+    wanted = {r.name for r in (relations or repository.vocabulary.preferences())}
     if not wanted:
         return []
 
@@ -664,7 +656,7 @@ async def claims_for(
     for assertion in believed:
         if assertion.origin != "stated":
             continue
-        relation = lookup(assertion.rel)
+        relation = repository.vocabulary.lookup(assertion.rel)
         if relation is None:
             # Tail relations are excluded, and not to be tidy: the sentence a
             # claim renders with comes from the catalogue, so a relation without
@@ -707,7 +699,7 @@ async def proposals_from(
 
     Everything here is ``inferred``: something worked it out, nobody said it.
     """
-    wanted = {r.name for r in (relations or preference_relations())}
+    wanted = {r.name for r in (relations or repository.vocabulary.preferences())}
     if not wanted:
         return []
 
@@ -732,7 +724,7 @@ async def confirm(
     *,
     assertion_id: str,
     now: datetime,
-    relations: Sequence[Relation] = CATALOGUE,
+    relations: Optional[Sequence[Relation]] = None,
 ) -> Outcome:
     """Endorse a claim the extractor proposed, making it speakable.
 
@@ -783,7 +775,7 @@ async def confirm(
     )
     outcome = await observe(repository, [stated], now=now, relations=relations)
 
-    if stated.rel == NAME_RELATION:
+    if stated.rel == repository.vocabulary.names:
         await _relabel_from_name(repository, stated, now=now)
     return outcome
 
@@ -811,7 +803,7 @@ async def retract(
     assertion: Assertion,
     *,
     now: datetime,
-    relations: Sequence[Relation] = CATALOGUE,
+    relations: Optional[Sequence[Relation]] = None,
 ) -> Outcome:
     """Stop believing a claim, without stating anything in its place.
 
@@ -910,7 +902,7 @@ async def expire_tail(
     doomed = [
         claim
         for claim in believed
-        if not is_canonical(claim.rel)
+        if not repository.vocabulary.is_canonical(claim.rel)
         and claim.origin == "inferred"
         and claim.recorded_at < before
         and _claim_of(claim)[:5] not in endorsed
@@ -943,7 +935,7 @@ async def reject(
     conclusion_id: str,
     *,
     now: datetime,
-    relations: Sequence[Relation] = CATALOGUE,
+    relations: Optional[Sequence[Relation]] = None,
 ) -> Outcome:
     """Withdraw an inferred belief the owner disagrees with.
 
@@ -994,7 +986,7 @@ async def _reconcile(
     repository: SqlGraphRepository,
     owner: str,
     affected: set[str],
-    relations: Sequence[Relation],
+    relations: Optional[Sequence[Relation]],
     now: datetime,
 ) -> tuple[list[Conflict], list[Conclusion]]:
     """Evaluate the affected rules, explain what can be explained, evaluate again.
@@ -1013,9 +1005,16 @@ async def _reconcile(
     conclusions. The alternative — checking for an existing conclusion before
     inferring — is the same test written twice, in two places that can disagree.
     """
+    # The single place a missing vocabulary is resolved, and the reason every
+    # caller above may leave `relations` as `None`. It falls back to the words
+    # the repository was opened with rather than to a module-level literal: the
+    # rules that fire on an architecture claim must be architecture's, and until
+    # the vocabulary rode here there was only one set the substrate could reach.
+    vocabulary = relations if relations is not None else repository.vocabulary.relations
+
     believed = await repository.current(owner)
     conclusions = await repository.depending_on(owner, [a.assertion_id for a in believed])
-    applicable = [r for r in relations if r.name in affected]
+    applicable = [r for r in vocabulary if r.name in affected]
 
     # Read once, and only when a rule might fire: this is the only thing in the
     # reconciliation that needs a node's *name* rather than its id, and it needs

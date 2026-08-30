@@ -97,7 +97,11 @@ class TestWhatTheToolsAnswer:
         """The point of the tool: a real dependency, not a plausible one.
 
         A model asked what ``graph`` depends on will answer confidently from
-        every codebase it has read. This one answers from this one.
+        every codebase it has read. This one answers from this one — and the
+        answer changed under this test, which is the point being made twice.
+        It asserted a dependency on ``core`` until the personal domain got its
+        own package and took the substrate's only route there with it. A model
+        answering from memory would still be saying ``core``.
         """
         tool = build_describe_package_tool(model)
         answer = json.loads(tool.handler({"name": "bacteria.app.graph"}))
@@ -105,7 +109,11 @@ class TestWhatTheToolsAnswer:
         assert answer["package"] == "bacteria.app.graph"
         assert answer["modules"]["count"] > 5
         assert "graph_assertion" in answer["tables"]
-        assert any(d.startswith("bacteria.app.core") for d in answer["depends_on"]["names"])
+        # Nothing. The substrate imports no other package in this repository,
+        # which is what makes it one, and is checked here rather than asserted
+        # in prose somewhere.
+        assert answer["depends_on"]["names"] == []
+        assert any(d.startswith("bacteria.app.personal") for d in answer["depended_on_by"]["names"])
 
     def test_an_unknown_name_is_said_rather_than_returned_empty(self, model: Model) -> None:
         """A model handed ``{}`` assumes failure and retries a variation.

@@ -41,7 +41,6 @@ from pydantic import BaseModel
 
 from bacteria.app.auth.dependencies import CurrentPrincipal
 from bacteria.app.core.dependencies import DbSession
-from bacteria.app.graph.catalogue import functional, is_canonical
 from bacteria.app.graph.conclusions import Conclusion
 from bacteria.app.graph.constraints import conflicts_for
 from bacteria.app.graph.log import Assertion
@@ -62,6 +61,7 @@ from bacteria.app.graph.service import (
     retract,
 )
 from bacteria.app.graph.temporal import OPEN_ENDED
+from bacteria.app.personal.catalogue import VOCABULARY
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
@@ -172,7 +172,7 @@ async def read_graph(principal: CurrentPrincipal, db: DbSession) -> GraphOut:
     that goes stale the moment either changes — and the thing it would be
     caching is a comparison over a set small enough to walk.
     """
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     believed = _one_row_per_claim(await repository.current(principal.id))
     conclusions = await repository.depending_on(principal.id, [a.assertion_id for a in believed])
 
@@ -184,7 +184,7 @@ async def read_graph(principal: CurrentPrincipal, db: DbSession) -> GraphOut:
             right=conflict.right,
             state=conflict.state,
         )
-        for relation in functional()
+        for relation in VOCABULARY.functional()
         for conflict in conflicts_for(relation, believed, conclusions=conclusions)
     ]
 
@@ -209,7 +209,7 @@ async def read_graph(principal: CurrentPrincipal, db: DbSession) -> GraphOut:
                 starts=a.valid.start,
                 trust=a.trust,
                 origin=a.origin,
-                canonical=is_canonical(a.rel),
+                canonical=VOCABULARY.is_canonical(a.rel),
                 recorded_at=a.recorded_at,
                 reason=(a.attrs or {}).get("reason"),
             )
@@ -228,7 +228,7 @@ async def read_conclusions(principal: CurrentPrincipal, db: DbSession) -> list[C
     tell a person, and hiding it would leave them looking at a shorter list with
     no indication anything had been withdrawn.
     """
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     believed = await repository.current(principal.id)
     conclusions = await repository.depending_on(principal.id, [a.assertion_id for a in believed])
     return [_conclusion_out(c) for c in conclusions]
@@ -326,7 +326,7 @@ async def retract_assertion(
     reconstructs what was believed before. `DELETE` would name the wrong act, and
     a route's shape is the first thing anyone reads about what it does.
     """
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     try:
         claim = await repository.assertion(principal.id, assertion_id)
     except UnknownAssertionError:
@@ -351,7 +351,7 @@ async def confirm_assertion(
     ``origin``, so the log records the endorsement as its own event — and
     confirming twice writes nothing, because saying yes twice is one yes.
     """
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     try:
         claim = await repository.assertion(principal.id, assertion_id)
     except UnknownAssertionError:
@@ -377,7 +377,7 @@ async def reject_conclusion(
     state it held before anyone assumed anything — and it will not be explained
     the same way again.
     """
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     try:
         outcome = await reject(
             repository, principal.id, conclusion_id, now=datetime.now(timezone.utc)
@@ -399,7 +399,7 @@ async def rename_node(
     should share a name are two nodes to link, so the refusal is an invitation
     rather than a wall.
     """
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     try:
         node = await rename(
             repository, principal.id, node_id, body.label, now=datetime.now(timezone.utc)
@@ -430,7 +430,7 @@ async def link_nodes(body: LinkIn, principal: CurrentPrincipal, db: DbSession) -
     and can be retracted through the route above, which is the whole argument for
     linking rather than merging.
     """
-    repository = SqlGraphRepository(db)
+    repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
     try:
         outcome = await link(
             repository,

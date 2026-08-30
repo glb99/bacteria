@@ -44,6 +44,7 @@ from bacteria.app.graph.catalogue import PROMOTION_THRESHOLD, promotable
 from bacteria.app.graph.repository import SqlGraphRepository, tally_relations
 from bacteria.app.graph.service import expire_tail
 from bacteria.app.personal import review
+from bacteria.app.personal.catalogue import VOCABULARY
 from bacteria.app.personal.comparison import compare
 from bacteria.app.personal.models import ChatSession
 from bacteria.app.personal.repository import SqlSessionRepository
@@ -611,7 +612,7 @@ async def _expire_tail(principal_id: str, days: int, apply: bool) -> int:
     before = now - timedelta(days=days)
 
     async with AsyncSession(get_engine()) as db:
-        repository = SqlGraphRepository(db)
+        repository = SqlGraphRepository(db, vocabulary=VOCABULARY)
         labels = {node.node_id: node.label for node in await repository.nodes(principal_id)}
         if apply:
             doomed = await expire_tail(repository, principal_id, before=before, now=now)
@@ -653,7 +654,7 @@ async def _relations(threshold: int) -> int:
     forever, which is worse than having none.
     """
     async with AsyncSession(get_engine()) as db:
-        candidates = promotable(await tally_relations(db), threshold=threshold)
+        candidates = promotable(await tally_relations(db), VOCABULARY, threshold=threshold)
 
     if not candidates:
         print(f"No relation outside the catalogue has been seen {threshold} times.")

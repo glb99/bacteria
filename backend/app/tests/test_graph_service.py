@@ -36,6 +36,7 @@ from bacteria.app.graph.service import (
     revise,
 )
 from bacteria.app.graph.temporal import OPEN_ENDED, Interval
+from bacteria.app.personal.catalogue import VOCABULARY
 
 W1 = datetime(2026, 5, 4, tzinfo=timezone.utc)
 W3 = datetime(2026, 5, 18, tzinfo=timezone.utc)
@@ -59,7 +60,7 @@ def _cto(assertion_id: str, holder: str, valid: Interval, recorded_at: datetime)
 @pytest.fixture(name="repo")
 async def _repo(engine):
     async with AsyncSession(engine) as session:
-        yield SqlGraphRepository(session)
+        yield SqlGraphRepository(session, vocabulary=VOCABULARY)
         await session.commit()
 
 

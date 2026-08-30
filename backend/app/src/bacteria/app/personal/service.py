@@ -109,9 +109,9 @@ def _accepted_keys() -> tuple[str, ...]:
     """
     if not get_settings().graph_backed_memory:
         return ()
-    from bacteria.app.graph.catalogue import preferences as preference_relations
+    from bacteria.app.personal.catalogue import VOCABULARY
 
-    return tuple(relation.name for relation in preference_relations())
+    return tuple(relation.name for relation in VOCABULARY.preferences())
 
 
 def _approver(turn: observability.Turn):

@@ -275,7 +275,23 @@ class SqlGraphRepository:
         different question — *this is wrong* rather than *this is what is right* —
         and a signature that made the replacement optional would let the two be
         confused at the call site.
+
+        **The caller stamps the time; this refuses an unstamped row.** The
+        argument is the assertion *as it will be once closed*, not the one to
+        close — ``log_retract``, ``log_expire`` and ``supersede`` all return it
+        that way. Handed a row straight out of :meth:`current`, this would copy
+        its ``recorded_until`` of ``None`` back over itself and report success
+        having changed nothing, which is precisely what
+        ``architecture/decisions.py`` did: every reversal appended while the
+        judgment it replaced stayed standing. Silence was the whole cost, so it
+        raises.
         """
+        if closed.recorded_until is None:
+            raise ValueError(
+                f"{closed.assertion_id} was passed to close() unstamped: set "
+                "recorded_until (and closed_by) on the assertion first, or use "
+                "log_retract / log_expire / supersede, which do"
+            )
         row = await self._db.get(GraphAssertion, closed.assertion_id)
         if row is None or row.user_id != closed.user_id:
             raise UnknownAssertionError(closed.assertion_id)

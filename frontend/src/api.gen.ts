@@ -29,6 +29,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/architecture/projects/{project_id}/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask About
+         * @description Ask a model about this codebase, with the codebase in front of it.
+         *
+         *     The model is given three read-only tools and a gate that refuses everything
+         *     else. It can recommend an action — agreeing with a proposal, accepting a
+         *     crossing, running the suite — and cannot take one: over HTTP the approval
+         *     gate has nobody to ask, since the request that would answer arrives after
+         *     the one that asked.
+         *
+         *     Stateless. Each ask re-derives the tree and discards the session, so an
+         *     answer describes the working copy as it is rather than as it was when
+         *     somebody last asked about it.
+         */
+        post: operations["ask_about_architecture_projects__project_id__ask_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/architecture/projects/{project_id}/classifications": {
         parameters: {
             query?: never;
@@ -718,6 +748,23 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AnswerOut
+         * @description What the model said, and what it looked at to say it.
+         *
+         *     ``tools_used`` is sent because an answer grounded in the parse and one
+         *     invented from a plausible package name read identically to a person. An
+         *     empty list is the signal to distrust the reply, and hiding it would remove
+         *     the only way to tell.
+         */
+        AnswerOut: {
+            /** Refused */
+            refused: string[];
+            /** Reply */
+            reply: string;
+            /** Tools Used */
+            tools_used: string[];
+        };
+        /**
          * AssertionOut
          * @description One claim, with its two time axes flattened for a reader.
          *
@@ -1152,6 +1199,11 @@ export interface components {
             /** Value */
             value: unknown;
         };
+        /** Question */
+        Question: {
+            /** Text */
+            text: string;
+        };
         /**
          * ReadingOut
          * @description What the world said when we asked, and when.
@@ -1377,6 +1429,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_about_architecture_projects__project_id__ask_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Question"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnswerOut"];
                 };
             };
             /** @description Validation Error */

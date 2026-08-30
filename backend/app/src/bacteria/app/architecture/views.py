@@ -17,16 +17,44 @@ from pydantic import BaseModel, Field
 
 from bacteria.app.architecture.checks import Boundary, Crossing
 from bacteria.app.architecture.classify import sentence
+from bacteria.app.architecture.conversation import ask
 from bacteria.app.architecture.decisions import Verdict, decide, decisions, ontology_of
 from bacteria.app.architecture.models import Project
 from bacteria.app.architecture.probes import Reading, run_tests
 from bacteria.app.architecture.repository import SqlProjectRepository
 from bacteria.app.architecture.service import UnusableLocation, add_project, model_of
 from bacteria.app.auth.dependencies import CurrentPrincipal
+from bacteria.app.chat.service import build_model_client
 from bacteria.app.core.dependencies import DbSession
+from bacteria.app.core.settings import get_settings
 from bacteria.app.graph.repository import SqlGraphRepository
 
 router = APIRouter(prefix="/architecture", tags=["architecture"])
+
+
+class Question(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class AnswerOut(BaseModel):
+    """What the model said, and what it looked at to say it.
+
+    ``tools_used`` is sent because an answer grounded in the parse and one
+    invented from a plausible package name read identically to a person. An
+    empty list is the signal to distrust the reply, and hiding it would remove
+    the only way to tell.
+    """
+
+    reply: str
+    tools_used: list[str]
+    refused: list[str]
+    """Capabilities the model asked for and the gate would not allow.
+
+    Normally empty. Non-empty means a model reached for something this surface
+    does not offer, which is worth seeing rather than swallowing — it is the
+    gate doing its job out loud, the way ``chat/service.py`` argues an
+    auto-approver should.
+    """
 
 
 class NewProject(BaseModel):
@@ -408,3 +436,45 @@ async def probe_tests(project_id: str, principal: CurrentPrincipal, db: DbSessio
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such project")
 
     return _reading_out(await run_tests(project))
+
+
+@router.post("/projects/{project_id}/ask", response_model=AnswerOut)
+async def ask_about(
+    project_id: str, body: Question, principal: CurrentPrincipal, db: DbSession
+) -> AnswerOut:
+    """Ask a model about this codebase, with the codebase in front of it.
+
+    The model is given three read-only tools and a gate that refuses everything
+    else. It can recommend an action — agreeing with a proposal, accepting a
+    crossing, running the suite — and cannot take one: over HTTP the approval
+    gate has nobody to ask, since the request that would answer arrives after
+    the one that asked.
+
+    Stateless. Each ask re-derives the tree and discards the session, so an
+    answer describes the working copy as it is rather than as it was when
+    somebody last asked about it.
+    """
+    repository = SqlProjectRepository(db)
+    project = await repository.owned(principal.id, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such project")
+
+    model = model_of(project)
+    # The verdicts are the reader's, and the model must be told which proposals
+    # they have ruled on -- otherwise it repeats an open guess back to them as
+    # something they already agreed to.
+    verdicts = {
+        (d.subject, d.claim): d.verdict
+        for d in await decisions(
+            SqlGraphRepository(db, ontology=ontology_of(project)), project=project
+        )
+    }
+
+    settings = get_settings()
+    client = build_model_client(settings.model_provider)
+    answer = await ask(client, model, body.text, verdicts)
+    return AnswerOut(
+        reply=answer.reply,
+        tools_used=list(answer.tools_used),
+        refused=list(answer.refused),
+    )

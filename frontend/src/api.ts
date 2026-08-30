@@ -37,6 +37,7 @@ export type ArchBoundary = components["schemas"]["BoundaryOut"];
 export type ArchCrossing = components["schemas"]["CrossingOut"];
 export type ArchProposal = components["schemas"]["ClassificationOut"];
 export type ArchReading = components["schemas"]["ReadingOut"];
+export type ArchAnswer = components["schemas"]["AnswerOut"];
 
 /** Raised when the API refuses the session, so callers can send the user back to sign-in. */
 export class Unauthenticated extends Error {}
@@ -260,5 +261,20 @@ export const runTests = (projectId: string) =>
   unwrap(
     api.POST("/architecture/projects/{project_id}/probes/tests", {
       params: { path: { project_id: projectId } },
+    }),
+  );
+
+/**
+ * Ask a model about this codebase, with the codebase in front of it.
+ *
+ * Stateless: the server re-derives the tree and discards the session, so the
+ * answer describes the working copy as it is rather than as it was when
+ * somebody last asked. The thread on screen is the browser's, not the server's.
+ */
+export const askAbout = (projectId: string, text: string) =>
+  unwrap(
+    api.POST("/architecture/projects/{project_id}/ask", {
+      params: { path: { project_id: projectId } },
+      body: { text },
     }),
   );

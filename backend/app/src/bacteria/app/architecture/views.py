@@ -15,17 +15,21 @@ from typing import Optional, Sequence
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from bacteria.app.architecture.catalogue import SAME_AS
+from bacteria.app.architecture.catalogue import ABOVE, SAME_AS
 from bacteria.app.architecture.checks import Boundary, Crossing
 from bacteria.app.architecture.classify import sentence
 from bacteria.app.architecture.conversation import ask
 from bacteria.app.architecture.decisions import (
+    NotALayer,
     NothingToRename,
     Verdict,
     decide,
     decisions,
     ontology_of,
+    order,
     rename,
+    sits_above,
+    stranded,
 )
 from bacteria.app.architecture.models import Project
 from bacteria.app.architecture.probes import Reading, run_tests
@@ -206,6 +210,13 @@ class Rename(BaseModel):
     now_called: str
 
 
+class Order(BaseModel):
+    """A statement that one layer sits above another."""
+
+    upper: str
+    lower: str
+
+
 class OrphanOut(BaseModel):
     """A judgment about something the parse no longer produces.
 
@@ -223,6 +234,14 @@ class OrphanOut(BaseModel):
     claim: str
     verdict: str
     stated_by: Optional[str] = None
+    relation: str = "is_a"
+    """Which relation was stranded, because two now can be.
+
+    Defaulted so the field is additive on the wire. A judgment strands when its
+    subject leaves the tree; an ordering strands when one of its ends stops
+    being agreed a layer, and a client that cannot tell them apart would offer
+    the wrong repair for one of the two.
+    """
 
 
 class ModelOut(BaseModel):
@@ -234,6 +253,13 @@ class ModelOut(BaseModel):
     boundaries: list[BoundaryOut]
     crossings: list[CrossingOut]
     proposals: list[ClassificationOut]
+    order: list[str]
+    """The stated layer order, floor first.
+
+    Empty until somebody says one, and that emptiness is the honest state rather
+    than a gap: the console falls back to ranking by imports, which is free and
+    wrong in a way only a person can correct.
+    """
     orphans: list[OrphanOut]
     """Judgments about subjects this codebase no longer has.
 
@@ -310,9 +336,8 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
     # A proposal already judged still appears, carrying its verdict. Hiding
     # what somebody rejected would make the surface unable to show that anything
     # was ever rejected, which is the one number it exists to produce.
-    standing = await decisions(
-        SqlGraphRepository(db, ontology=ontology_of(project)), project=project
-    )
+    graph = SqlGraphRepository(db, ontology=ontology_of(project))
+    standing = await decisions(graph, project=project)
     judged = {(d.subject, d.claim): (d.verdict, d.stated_by) for d in standing}
 
     # A judgment lands nowhere when the parse stopped producing its subject.
@@ -324,6 +349,19 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
         OrphanOut(subject=d.subject, claim=d.claim, verdict=d.verdict, stated_by=d.stated_by)
         for d in standing
         if (d.subject, d.claim) not in proposed
+    ]
+    # An ordering strands on a different condition -- one end stopped being
+    # agreed a layer, rather than a subject leaving the tree -- so it is asked
+    # for separately and joins the same list, which is what a person reads.
+    orphans += [
+        OrphanOut(
+            subject=d.subject,
+            claim=d.claim,
+            verdict=d.verdict,
+            stated_by=d.stated_by,
+            relation=ABOVE,
+        )
+        for d in await stranded(graph, project=project)
     ]
 
     # Crossed first: the list is read top-down and the thing to act on belongs
@@ -356,6 +394,7 @@ async def read_model(project_id: str, principal: CurrentPrincipal, db: DbSession
             )
             for c in model.verdict.crossings
         ],
+        order=list(await order(graph, project=project)),
         orphans=orphans,
         proposals=[
             ClassificationOut(
@@ -585,6 +624,52 @@ async def rename_package(
         relation=SAME_AS,
         claim=stated.claim,
         sentence=f"{stated.subject} is {stated.claim} under a new name",
+        because="stated by a person",
+        verdict=stated.verdict,
+        stated_by=stated.stated_by,
+    )
+
+
+@router.post("/projects/{project_id}/order", response_model=ClassificationOut)
+async def state_order(
+    project_id: str, body: Order, principal: CurrentPrincipal, db: DbSession
+) -> ClassificationOut:
+    """Say that one layer sits above another.
+
+    **The only axis this model has, and nothing derives it.** Ranking packages
+    by longest path through their imports is free and repeatable, and on a
+    codebase with two import cycles it puts most of the tree in three adjacent
+    bands -- so a person states the order and the imports are then read
+    *against* it.
+
+    Both ends must already be agreed layers. That is checked against the log
+    rather than the tree, which makes this the first route whose validity rests
+    on another judgment; classify the packages first and the refusal says so.
+    """
+    repository = SqlProjectRepository(db)
+    project = await repository.owned(principal.id, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no such project")
+
+    graph = SqlGraphRepository(db, ontology=ontology_of(project))
+    try:
+        stated = await sits_above(
+            graph,
+            project=project,
+            upper=body.upper,
+            lower=body.lower,
+            stated_by=principal.id,
+            now=datetime.now(timezone.utc),
+        )
+    except NotALayer as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await db.commit()
+
+    return ClassificationOut(
+        subject=stated.subject,
+        relation=ABOVE,
+        claim=stated.claim,
+        sentence=f"{stated.subject} sits above {stated.claim}",
         because="stated by a person",
         verdict=stated.verdict,
         stated_by=stated.stated_by,

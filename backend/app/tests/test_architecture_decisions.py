@@ -467,3 +467,179 @@ class TestARenamedPackage:
             standing = await architecture_log(session, project).current("tester")
 
         assert len([c for c in standing if c.rel == "same_as"]) == 1
+
+
+def state_order(client, token, project, upper, lower):
+    return client.post(
+        f"/architecture/projects/{project}/order",
+        headers=auth(token),
+        json={"upper": upper, "lower": lower},
+    )
+
+
+def a_layer(client, token, project, package):
+    """Agree a package is a layer, which the order requires first."""
+    return judge(client, token, project, package, "layer", "agreed")
+
+
+class TestTheStatedOrder:
+    """The vertical axis, which nothing derives.
+
+    Ranking by longest path through imports is free and repeatable, and on this
+    repository it puts fifteen of nineteen packages in three adjacent bands --
+    two cycles pump everything downstream of them to the relaxation bound. So
+    the order is testimony, and the imports are then read against it.
+    """
+
+    async def test_an_unstated_order_is_empty_rather_than_guessed(
+        self, client, token, project
+    ) -> None:
+        """Empty is the honest answer, and it is not the same as a flat order.
+
+        Falling back to the derived ranking here would put a number on the wire
+        that nobody said and that the measurement shows is wrong, and a client
+        could not tell it from an order somebody stated.
+        """
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+
+        assert body["order"] == []
+
+    async def test_a_stated_order_is_reported_floor_first(self, client, token, project) -> None:
+        a_layer(client, token, project, "bacteria.app.core")
+        a_layer(client, token, project, "bacteria.agent.model")
+
+        stated = state_order(client, token, project, "bacteria.agent.model", "bacteria.app.core")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+        assert stated.status_code == 200
+        assert body["order"] == ["bacteria.app.core", "bacteria.agent.model"]
+
+    async def test_the_chain_is_followed(self, client, token, project) -> None:
+        """Two statements order three layers.
+
+        The reason the relation is worth having at four layers rather than being
+        a field on each package: the third rank is derived from the pair, so a
+        person states adjacency and never a number they would have to renumber.
+        """
+        for package in ("bacteria.app.core", "bacteria.agent.model", "bacteria.agent.session"):
+            a_layer(client, token, project, package)
+        state_order(client, token, project, "bacteria.agent.model", "bacteria.app.core")
+        state_order(client, token, project, "bacteria.agent.session", "bacteria.agent.model")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+
+        assert body["order"] == [
+            "bacteria.app.core",
+            "bacteria.agent.model",
+            "bacteria.agent.session",
+        ]
+
+    async def test_a_layer_nobody_ordered_sits_at_the_floor(self, client, token, project) -> None:
+        """*No order stated* is not *nothing said at all*.
+
+        Dropping it would make an unordered layer indistinguishable from an
+        unclassified package, and those are different states: one has a
+        classification nobody has placed, the other has neither.
+        """
+        a_layer(client, token, project, "bacteria.app.core")
+        a_layer(client, token, project, "bacteria.agent.tools")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+
+        assert sorted(body["order"]) == ["bacteria.agent.tools", "bacteria.app.core"]
+
+    async def test_ordering_something_nobody_called_a_layer_is_refused(
+        self, client, token, project
+    ) -> None:
+        """The first rule in this codebase checked against another judgment.
+
+        A feature has no place in the order -- it rests on every layer it
+        imports, so its height is derived -- and an unclassified package would
+        get a height while nothing at all has been said about it.
+        """
+        a_layer(client, token, project, "bacteria.app.core")
+
+        refused = state_order(client, token, project, "bacteria.app.personal", "bacteria.app.core")
+
+        assert refused.status_code == 409
+        assert "not agreed to be a layer" in refused.json()["detail"]
+
+    async def test_saying_the_same_order_twice_keeps_the_first_one(
+        self, client, token, project, engine
+    ) -> None:
+        """Restating is not a second statement.
+
+        The date is the only fact the row holds that cannot be recovered, which
+        is the rule `decide` and `rename` both apply, in this file, for this
+        reason.
+        """
+        a_layer(client, token, project, "bacteria.app.core")
+        a_layer(client, token, project, "bacteria.agent.model")
+        state_order(client, token, project, "bacteria.agent.model", "bacteria.app.core")
+        state_order(client, token, project, "bacteria.agent.model", "bacteria.app.core")
+
+        async with AsyncSession(engine) as session:
+            standing = await architecture_log(session, project).current("tester")
+
+        assert len([c for c in standing if c.rel == "above"]) == 1
+
+    async def test_a_cycle_is_broken_rather_than_raised_on(self, client, token, project) -> None:
+        """Two layers each said to be over the other.
+
+        A contradiction somebody has to settle -- and refusing to render the
+        model until they do would take the whole surface down over one bad row,
+        which is the ruling `renames` already made for a rename cycle.
+        """
+        a_layer(client, token, project, "bacteria.app.core")
+        a_layer(client, token, project, "bacteria.agent.model")
+        state_order(client, token, project, "bacteria.agent.model", "bacteria.app.core")
+        state_order(client, token, project, "bacteria.app.core", "bacteria.agent.model")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+
+        assert sorted(body["order"]) == ["bacteria.agent.model", "bacteria.app.core"]
+
+
+class TestARetractedLayer:
+    """What happens to an order when one of its ends stops being a layer."""
+
+    async def test_the_ordering_is_reported_rather_than_cascaded(
+        self, client, token, project, engine
+    ) -> None:
+        """Closing it would shut a row nobody closed.
+
+        The statement is not wrong once the classification goes -- it is
+        unattached, which is a different thing and the one the log can
+        represent. So it stands, and the model says so.
+        """
+        a_layer(client, token, project, "bacteria.app.core")
+        a_layer(client, token, project, "bacteria.agent.model")
+        state_order(client, token, project, "bacteria.agent.model", "bacteria.app.core")
+
+        judge(client, token, project, "bacteria.agent.model", "layer", "disagreed")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+        above = [o for o in body["orphans"] if o["relation"] == "above"]
+
+        assert [(o["subject"], o["claim"]) for o in above] == [
+            ("bacteria.agent.model", "bacteria.app.core")
+        ]
+        async with AsyncSession(engine) as session:
+            standing = await architecture_log(session, project).current("tester")
+        assert len([c for c in standing if c.rel == "above"]) == 1
+
+    async def test_it_leaves_the_order_while_it_is_stranded(self, client, token, project) -> None:
+        """Reported and not applied are the same state, said twice.
+
+        A stranded ordering that still ranked things would put a package above
+        another on the strength of a classification that has been withdrawn.
+        """
+        a_layer(client, token, project, "bacteria.app.core")
+        a_layer(client, token, project, "bacteria.agent.model")
+        state_order(client, token, project, "bacteria.agent.model", "bacteria.app.core")
+
+        judge(client, token, project, "bacteria.agent.model", "layer", "disagreed")
+
+        body = client.get(f"/architecture/projects/{project}/model", headers=auth(token)).json()
+
+        assert body["order"] == ["bacteria.app.core"]

@@ -66,6 +66,27 @@ one [dialogue 11 Q2] made for refusing the relation tail's treatment to kinds,
 and it applies here with the extra comfort that the set is genuinely finite.
 """
 
+ABOVE = "above"
+"""The relation a stated layer order records.
+
+**Nothing derives this, and the measurement is why.** `layerOf` in the console
+ranks packages by longest path through `imports`, which is free, repeatable and
+correct about the ordinary case. Run against this repository it puts fifteen of
+nineteen packages in three adjacent bands at the ceiling: two cycles pump every
+package downstream of them to the relaxation bound, and a cycle degrades not the
+pair inside it but everything reachable from it. Derivation therefore fails
+hardest exactly where a layered picture would help most.
+
+So the order is testimony. Four layers here, and at most six statements -- fewer
+if they chain -- against a count that cannot produce an axis at all.
+
+**What it buys is a disagreement.** Height stated against imports derived means
+an import can run *against* the order, and that is a boundary violation drawn
+rather than tabulated: the edge leaves the floor and arrives at the roof.
+`bacteria.app.core` imports two features today, which is the wart dialogue 14
+recorded and left standing.
+"""
+
 SAME_AS = "same_as"
 """The relation a rename records.
 
@@ -150,6 +171,28 @@ CATALOGUE: tuple[Relation, ...] = (
         # A name can be superseded more than once -- `chat` to `personal` to
         # whatever comes next -- and every hop is worth keeping, because a
         # decision recorded under the first name has to find its way to the last.
+        functional=False,
+    ),
+    Relation(
+        name="above",
+        # Not an invariant, because the thing that would be checked here is not
+        # a property of one assertion. A cycle -- two layers each said to be over
+        # the other -- involves several rows and is broken at read time, the way
+        # `same_as` chains are, rather than refused at write time on a row that
+        # is individually fine.
+        invariant=None,
+        sentence="<src> sits above <dst>",
+        # Packages at both ends, which the meta-model can say. What it cannot
+        # say is the rule that matters: both ends must be packages somebody has
+        # agreed are *layers*. `Relation` constrains kinds, and a classification
+        # is a judgment rather than a kind -- so that check lives in the writer,
+        # and this is the first relation in either domain whose validity depends
+        # on another assertion rather than on the meta-model alone.
+        src_kind=PACKAGE,
+        dst_kind=PACKAGE,
+        # A layer may sit above several. The order is a partial one and saying
+        # otherwise would refuse the second statement about a floor that holds
+        # up two things.
         functional=False,
     ),
 )

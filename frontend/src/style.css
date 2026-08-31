@@ -1013,6 +1013,13 @@ button.act.danger[data-armed="yes"] {
 .arch-edge { fill: none; stroke: var(--holo); opacity: 0.28; }
 .arch-edge.deferred { stroke-dasharray: 5 5; opacity: 0.22; }
 .arch-edge.crossed { stroke: var(--alarm); stroke-dasharray: 7 4; opacity: 0.95; }
+
+/* An import that runs against the stated layer order -- a layer reaching up
+   into what rests on it. Alarm, like a declared boundary being crossed, because
+   both are violations and a reader scanning for red should find both. Solid
+   rather than dashed so the two stay tellable apart at a glance: a boundary is
+   a rule somebody wrote, this is an order somebody stated. */
+.arch-edge.against { stroke: var(--alarm); opacity: 0.85; }
 .arch-edge.dim { opacity: 0.05; }
 
 .arch-glyph { cursor: pointer; }
@@ -1051,6 +1058,16 @@ button.act.danger[data-armed="yes"] {
 }
 
 .arch-glyph.unclassified text { fill: var(--dim); }
+
+/* Nobody has said where this belongs, so nothing is drawn holding it up. The
+   dashes are the whole statement: an order exists and this package is not in
+   it, which is a different thing from there being no order. */
+.arch-glyph.ungrounded ellipse,
+.arch-glyph.ungrounded rect,
+.arch-glyph.ungrounded path {
+  stroke-dasharray: 2 4;
+  opacity: 0.75;
+}
 .arch-glyph text {
   fill: var(--ink);
   font: 400 11px var(--mono);
@@ -1079,6 +1096,7 @@ button.act.danger[data-armed="yes"] {
 .arch-legend .swatch.beam { background: var(--holo); }
 .arch-legend .swatch.deferred { border-top: 3px dashed var(--holo); height: 0; }
 .arch-legend .swatch.crossed { border-top: 3px dashed var(--alarm); height: 0; }
+.arch-legend .swatch.against { border-top: 3px solid var(--alarm); height: 0; }
 .arch-legend .swatch.glyph-drum { height: 9px; border: 1px solid var(--holo); border-radius: 50%; }
 .arch-legend .swatch.glyph-slab { height: 7px; width: 16px; border: 1px solid var(--holo); }
 .arch-legend .swatch.glyph-proposed { height: 9px; border: 1px dashed var(--holo); }

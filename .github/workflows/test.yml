@@ -32,7 +32,7 @@ jobs:
         with:
           python-version-file: .python-version
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # Pinned so a uv release cannot change what the gate means. Before
           # bumping, check astral-sh/setup-uv knows the new version's checksum.
@@ -53,7 +53,7 @@ jobs:
         with:
           python-version-file: .python-version
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # Pinned so a uv release cannot change what the gate means. Before
           # bumping, check astral-sh/setup-uv knows the new version's checksum.
@@ -83,7 +83,7 @@ jobs:
         with:
           python-version-file: .python-version
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # Pinned so a uv release cannot change what the gate means. Before
           # bumping, check astral-sh/setup-uv knows the new version's checksum.
@@ -104,7 +104,7 @@ jobs:
         with:
           python-version-file: .python-version
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # Pinned so a uv release cannot change what the gate means. Before
           # bumping, check astral-sh/setup-uv knows the new version's checksum.
@@ -171,14 +171,14 @@ jobs:
         with:
           python-version-file: .python-version
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # Pinned so a uv release cannot change what the gate means. Before
           # bumping, check astral-sh/setup-uv knows the new version's checksum.
           version: "0.11.18"
           enable-cache: true
       - name: Set up Node
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -203,6 +203,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}

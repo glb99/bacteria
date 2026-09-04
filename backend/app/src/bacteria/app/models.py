@@ -1,7 +1,7 @@
 """Persistent entities.
 
 Temporarily at the top level. These belong to whichever feature owns accounts,
-and move there when one exists — see docs/MIGRATION.md.
+and move there when one exists — see docs/guides/migration.md.
 """
 
 from typing import Optional

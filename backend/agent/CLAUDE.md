@@ -49,6 +49,11 @@ marker at all.
 
 ## Documentation conventions
 
+These are stated here in full on purpose: this package is vendorable, and a
+reader inside it must not need the host repository. The workspace keeps the
+same rules at `docs/guides/documentation.md`, generalised. If you change one,
+change both.
+
 **Docstrings are the reference.** Detail lives next to the code, not in a doc
 that drifts from it. Reading a module should tell you what it owns, what it
 refuses to do, and what is missing — without a second file open.

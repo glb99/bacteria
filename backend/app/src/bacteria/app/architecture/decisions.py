@@ -33,7 +33,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal, Optional
 
-from bacteria.app.architecture.catalogue import KIND, PACKAGE, SAME_AS, WORD
+from bacteria.app.architecture.catalogue import ABOVE, KIND, PACKAGE, SAME_AS, WORD
 from bacteria.app.architecture.models import Project
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -67,14 +67,20 @@ class Decision:
     at: datetime
 
 
-def _decision_id(ontology: str, subject: str, claim: str, now: datetime) -> str:
+def _decision_id(ontology: str, rel: str, subject: str, claim: str, now: datetime) -> str:
     """Deterministic, so the same judgment made twice in one instant is one row.
 
     The same reasoning the extractor's ids use: a retried request must land
     where it did rather than raise, and a random id would defeat the unique
     constraint by never colliding.
+
+    **The relation is part of the material**, because three writers now share
+    this recipe and two of them take a pair of package names. Without it,
+    ``a same_as b`` and ``a above b`` stated in the same instant hash alike and
+    the second raises on a unique constraint -- absurd as a pair of statements,
+    and a five hundred rather than a refusal if anybody managed it.
     """
-    material = f"{ontology}\x00{subject}\x00{claim}\x00{now.isoformat()}"
+    material = f"{ontology}\x00{rel}\x00{subject}\x00{claim}\x00{now.isoformat()}"
     return hashlib.sha256(material.encode()).hexdigest()[:32]
 
 
@@ -117,7 +123,7 @@ async def decide(
         await repository.close(replace(existing, recorded_until=now, closed_by="superseded"))
 
     claim_row = Assertion(
-        assertion_id=_decision_id(ontology, subject, claim, now),
+        assertion_id=_decision_id(ontology, relation, subject, claim, now),
         user_id=owner,
         src=subject_node.node_id,
         rel=relation,
@@ -192,7 +198,7 @@ async def rename(
             )
 
     claim = Assertion(
-        assertion_id=_decision_id(ontology, was, now_called, now),
+        assertion_id=_decision_id(ontology, SAME_AS, was, now_called, now),
         user_id=owner,
         src=old.node_id,
         rel=SAME_AS,
@@ -288,6 +294,195 @@ async def decisions(repository: SqlGraphRepository, *, project: Project) -> tupl
         if decision.subject not in now_called:
             under[(decision.subject, decision.claim)] = decision
     return tuple(under.values())
+
+
+LAYER = "layer"
+"""The classification both ends of an ``above`` must carry.
+
+Not a kind. A kind is what the parse minted -- package, module, table -- and is
+not contestable; this is a judgment somebody made and can withdraw, which is the
+whole reason the check below lives here rather than in the meta-model.
+"""
+
+
+class NotALayer(ValueError):
+    """An order stated between two things nobody has agreed are layers.
+
+    Named for the same reason :class:`NothingToRename` is: a person ordering a
+    package they have not classified yet is the ordinary mistake here, and the
+    answer is a sentence telling them what to do first, not a five hundred.
+    """
+
+
+async def _is_layer(repository: SqlGraphRepository, owner: str, node_id: str) -> bool:
+    """Whether a standing judgment says this package is a layer.
+
+    Read from the log rather than passed in, so retracting the classification
+    later is visible to everything that asks -- including :func:`stranded`,
+    which is the same query asked about rows that already exist.
+    """
+    kinds = {node.node_id: node.label for node in await repository.nodes(owner)}
+    for claim in await repository.current(owner):
+        if claim.src == node_id and claim.rel == AGREE and kinds.get(claim.dst) == LAYER:
+            return True
+    return False
+
+
+async def sits_above(
+    repository: SqlGraphRepository,
+    *,
+    project: Project,
+    upper: str,
+    lower: str,
+    stated_by: str,
+    now: datetime,
+) -> Decision:
+    """Record that one layer sits above another.
+
+    **The vertical axis is stated because counting cannot produce one.** See
+    :data:`~bacteria.app.architecture.catalogue.ABOVE` for the measurement that
+    settled it; the short version is that two import cycles put fifteen of this
+    repository's nineteen packages into three adjacent bands.
+
+    **Both ends must be packages somebody agreed are layers**, and this is the
+    first rule in either domain that checks one assertion against another. A
+    feature has no place in the order -- it rests on every layer it imports, so
+    its height is derived and needs no statement -- and ordering an unclassified
+    package would put a height on something nobody has said anything about.
+
+    Restating is not a second statement: the row keeps the date it was made,
+    which is the one fact about it that cannot be recovered from the tree. Same
+    rule as :func:`decide` and :func:`rename`, same reason.
+    """
+    ontology = ontology_of(project)
+    owner = project.principal_id
+
+    high = await refer_to(repository, owner, PACKAGE, upper, now=now)
+    low = await refer_to(repository, owner, PACKAGE, lower, now=now)
+    if high.node_id == low.node_id:
+        raise NotALayer(f"{upper} cannot sit above itself")
+
+    for package, node in ((upper, high), (lower, low)):
+        if not await _is_layer(repository, owner, node.node_id):
+            raise NotALayer(
+                f"{package} is not agreed to be a layer, so it has no place in the order"
+            )
+
+    for existing in await repository.current(owner):
+        if existing.rel == ABOVE and existing.src == high.node_id and existing.dst == low.node_id:
+            return Decision(
+                subject=upper,
+                claim=lower,
+                verdict="agreed",
+                stated_by=existing.stated_by,
+                at=existing.recorded_at,
+            )
+
+    claim = Assertion(
+        assertion_id=_decision_id(ontology, ABOVE, upper, lower, now),
+        user_id=owner,
+        src=high.node_id,
+        rel=ABOVE,
+        dst=low.node_id,
+        # Open-ended for `link`'s reason: one layer did not *become* higher than
+        # another on a Tuesday. An unknown start would make the order undecidable
+        # against every import recorded before it was stated.
+        valid=Interval(start=None, end=OPEN_ENDED),
+        recorded_at=now,
+        origin="stated",
+        trust="user",
+        stated_by=stated_by,
+        attrs={"subject": upper, "claim": lower},
+    )
+    await repository.record([claim])
+    return Decision(subject=upper, claim=lower, verdict="agreed", stated_by=stated_by, at=now)
+
+
+async def order(repository: SqlGraphRepository, *, project: Project) -> tuple[str, ...]:
+    """The stated layer order, floor first.
+
+    A rank rather than the raw pairs, because a renderer needs a height and a
+    reader needs to know which of two packages is lower without walking edges.
+    Chains are followed: stating ``tools above session`` and ``session above
+    model`` orders all three without anybody saying ``tools above model``.
+
+    **A cycle is broken rather than raised on**, exactly as :func:`renames`
+    breaks one and for the same reason: two layers each said to be over the
+    other is a contradiction a person has to settle, and refusing to render the
+    model until they do would take the whole surface down over one bad row. The
+    edge that closes the cycle is dropped and the rest of the order stands.
+
+    Layers nobody ordered are included at the floor. They are layers -- somebody
+    said so -- and leaving them out would make them indistinguishable from the
+    unclassified packages, which are a different state entirely: *no order
+    stated* is not *nothing said at all*.
+    """
+    owner = project.principal_id
+    labels = {node.node_id: node.label for node in await repository.nodes(owner)}
+    standing = await repository.current(owner)
+
+    kinds = {
+        claim.src for claim in standing if claim.rel == AGREE and labels.get(claim.dst) == LAYER
+    }
+    edges = [
+        (claim.src, claim.dst)
+        for claim in standing
+        if claim.rel == ABOVE and claim.src in kinds and claim.dst in kinds
+    ]
+
+    # Longest path from the floor, relaxed with a bound. The bound is what stops
+    # a cycle spinning, and a node caught in one keeps whatever rank it reached
+    # -- which puts mutually-ordered layers side by side rather than refusing to
+    # answer, the honest picture in the one case nobody can draw correctly.
+    rank = {node: 0 for node in kinds}
+    for _ in range(len(kinds)):
+        moved = False
+        for high, low in edges:
+            if rank[high] <= rank[low]:
+                rank[high] = rank[low] + 1
+                moved = True
+        if not moved:
+            break
+
+    return tuple(
+        labels.get(node, node) for node in sorted(kinds, key=lambda n: (rank[n], labels.get(n, n)))
+    )
+
+
+async def stranded(repository: SqlGraphRepository, *, project: Project) -> tuple[Decision, ...]:
+    """Orderings whose ends are no longer agreed to be layers.
+
+    **Retracting a classification does not cascade**, and this is what happens
+    instead. Closing every ``above`` that named the retracted layer would shut
+    rows nobody closed, which is the manufactured history the log exists to
+    refuse -- and the statement is not thereby *wrong*, it is unattached.
+
+    So the row stands and the model reports it, the same treatment a judgment
+    about a vanished package gets. What a person does with it is theirs: agree
+    the package is a layer again, or retract the ordering they no longer mean.
+    """
+    owner = project.principal_id
+    labels = {node.node_id: node.label for node in await repository.nodes(owner)}
+    standing = await repository.current(owner)
+    layers = {
+        claim.src for claim in standing if claim.rel == AGREE and labels.get(claim.dst) == LAYER
+    }
+
+    return tuple(
+        Decision(
+            subject=claim.attrs.get("subject", labels.get(claim.src, claim.src))
+            if claim.attrs
+            else labels.get(claim.src, claim.src),
+            claim=claim.attrs.get("claim", labels.get(claim.dst, claim.dst))
+            if claim.attrs
+            else labels.get(claim.dst, claim.dst),
+            verdict="agreed",
+            stated_by=claim.stated_by,
+            at=claim.recorded_at,
+        )
+        for claim in standing
+        if claim.rel == ABOVE and (claim.src not in layers or claim.dst not in layers)
+    )
 
 
 def _decision(claim: Assertion, subject: str, name: str) -> Decision:

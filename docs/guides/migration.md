@@ -3,7 +3,7 @@
 **A historical record.** Every step below is done, and this file is kept for the
 reasoning attached to each — what was tried, what was rejected, and what a
 decision cost. It is not a description of the current tree; the
-[README](../README.md) is.
+[README](../../README.md) is.
 
 Package names were updated in place when `bacteria-app` became `bacteria.app` and
 `bacteria` became `bacteria.agent`, so that a reader is not made to hold a
@@ -115,7 +115,7 @@ omit = ["**/entrypoints/*"]
 Two things in there are deliberate and worth not undoing.
 
 `source = ["bacteria.app"]` excludes `bacteria`. The agent's test suite is
-[architectural fitness functions by design](../backend/agent/docs/adr/0013-test-load-bearing-invariants-only.md) —
+[architectural fitness functions by design](../../backend/agent/docs/adr/0013-test-load-bearing-invariants-only.md) —
 uneven coverage is the stated intent, and pointing a coverage report at it will
 produce a number that invites someone to "fix" it by writing the tests that ADR
 exists to decline. The application gets measured; the agent does not.
@@ -128,7 +128,7 @@ belongs elsewhere.
 ### `backend/agent/pyproject.toml`
 
 Unchanged from the agent's current file, except that `pytest-asyncio` joins the
-dev extra once [ADR 0014](../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md)
+dev extra once [ADR 0014](../../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md)
 lands.
 
 ```toml
@@ -236,7 +236,7 @@ skipped step should leave a record of *why* it was skipped, which
 Three things, in dependency order.
 
 **1. Async at the I/O boundaries.** Already decided and recorded as
-[ADR 0014](../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md).
+[ADR 0014](../../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md).
 This has to land first — every item below is written against the async shape.
 
 **2. Persistence arrives by dependency inversion.** `session/store.py` names its
@@ -252,7 +252,7 @@ into a project that uses something else entirely.
 That protocol is **not** `CRUDRepository`. `SessionStore` exposes
 `create_session` / `get_state` / `commit` / `remember` / `forget` — deliberately
 no `update`, because an update method is a second write path and
-[ADR 0004](../backend/agent/docs/adr/0004-single-commit-path.md) exists to
+[ADR 0004](../../backend/agent/docs/adr/0004-single-commit-path.md) exists to
 guarantee there is exactly one. The generic CRUD protocols serve the
 application's own entities, where CRUD genuinely is the shape.
 
@@ -287,7 +287,7 @@ an entry point is for.
 1. ~~`git init` and commit the current state.~~ **Done.**
 2. ~~Async refactor in bacteria.~~ **Done** — 60 tests, one live Gemini
    tool-calling turn verified end to end.
-   ([ADR 0014](../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md).)
+   ([ADR 0014](../../backend/agent/docs/adr/0014-async-at-the-io-boundaries.md).)
 3. ~~Create the workspace skeleton; move bacteria in.~~ **Done** — brought in
    with `git subtree`, so its history came along rather than arriving as an
    anonymous copy. `just test` runs both suites; `just agent` runs the CLI.

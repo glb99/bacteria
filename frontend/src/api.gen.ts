@@ -111,6 +111,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/architecture/projects/{project_id}/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * State Order
+         * @description Say that one layer sits above another.
+         *
+         *     **The only axis this model has, and nothing derives it.** Ranking packages
+         *     by longest path through their imports is free and repeatable, and on a
+         *     codebase with two import cycles it puts most of the tree in three adjacent
+         *     bands -- so a person states the order and the imports are then read
+         *     *against* it.
+         *
+         *     Both ends must already be agreed layers. That is checked against the log
+         *     rather than the tree, which makes this the first route whose validity rests
+         *     on another judgment; classify the packages first and the refusal says so.
+         */
+        post: operations["state_order_architecture_projects__project_id__order_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/architecture/projects/{project_id}/probes/tests": {
         parameters: {
             query?: never;
@@ -1101,6 +1131,8 @@ export interface components {
             imports: components["schemas"]["ImportOut"][];
             /** Modules */
             modules: components["schemas"]["ModuleOut"][];
+            /** Order */
+            order: string[];
             /** Orphans */
             orphans: components["schemas"]["OrphanOut"][];
             project: components["schemas"]["ProjectOut"];
@@ -1160,6 +1192,16 @@ export interface components {
             node_id: string;
         };
         /**
+         * Order
+         * @description A statement that one layer sits above another.
+         */
+        Order: {
+            /** Lower */
+            lower: string;
+            /** Upper */
+            upper: string;
+        };
+        /**
          * OrphanOut
          * @description A judgment about something the parse no longer produces.
          *
@@ -1175,6 +1217,11 @@ export interface components {
         OrphanOut: {
             /** Claim */
             claim: string;
+            /**
+             * Relation
+             * @default is_a
+             */
+            relation: string;
             /** Stated By */
             stated_by?: string | null;
             /** Subject */
@@ -1602,6 +1649,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    state_order_architecture_projects__project_id__order_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                bacteria_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Order"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassificationOut"];
                 };
             };
             /** @description Validation Error */

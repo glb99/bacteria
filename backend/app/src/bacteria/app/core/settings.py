@@ -45,7 +45,7 @@ UNPREFIXED_AND_NOT_OURS = frozenset({"DATABASE_URL"})
 """Unprefixed names that belong to someone else and must not be complained about.
 
 ``DATABASE_URL`` is set by the Neon and Supabase integrations on every deployment
-that uses one, and `docs/DEPLOYMENT.md` already tells the operator this
+that uses one, and `docs/guides/deployment.md` already tells the operator this
 application ignores it in favour of the prefixed copy. Warning about it would
 fire on every correctly configured production boot — the failure the ASGI
 lifespan describes at length, where a warning that fires when nothing is wrong

@@ -75,6 +75,16 @@ interface Pkg {
    */
   claim: string | null;
   verdict: string | null;
+
+  /**
+   * Whether the order says where this belongs.
+   *
+   * False for a package nobody has classified: it has no place in a stated
+   * order, and drawing it in a band anyway would claim the model knows one.
+   * *No order stated* and *nothing said at all* are different states, and the
+   * second is the one this marks.
+   */
+  grounded: boolean;
 }
 
 interface Edge {
@@ -83,6 +93,19 @@ interface Edge {
   weight: number;
   deferred: boolean;
   crossed: boolean;
+
+  /**
+   * An import that runs against the stated order.
+   *
+   * The whole return on stating the order rather than counting one. Height is
+   * testimony and the import is derived, so the two can disagree -- and where
+   * they do, the edge reaches from a layer up into what rests on it. Nothing is
+   * spent to show it: the geometry already says so, and the colour only names
+   * what a reader can see.
+   *
+   * Always false while `order` is empty. Nothing to run against.
+   */
+  againstOrder: boolean;
 }
 
 const packageOf = (moduleName: string, packages: Set<string>): string => {
@@ -115,6 +138,49 @@ function chooseGroups(names: string[]): Set<string> {
     if (groups.size > 2 && groups.size <= 18) return groups;
   }
   return new Set(names.map((n) => n.split(".").slice(0, 3).join(".")));
+}
+
+/**
+ * What a package is *said* to be, or null while nobody has said.
+ *
+ * Agreed wins; an unjudged proposal is drawn as itself; a rejection returns the
+ * package to unclassified rather than to some third state, because disagreeing
+ * that it is a feature says nothing about what it is instead. Lifted out of the
+ * draw loop because the bands now need the same answer, and two copies of this
+ * rule would drift.
+ */
+function shapeOf(claim: string | null, verdict: string | null): string | null {
+  if (verdict === "agreed") return claim;
+  return verdict === null && claim ? claim : null;
+}
+
+/**
+ * Heights from the order somebody stated, rather than from counting imports.
+ *
+ * `order` arrives floor-first and only names layers. Everything else is placed
+ * against it and never by hand:
+ *
+ * - a **layer** sits at its own rank;
+ * - a **feature** sits one band above every layer, because it rests on the ones
+ *   it imports and its height is therefore derived -- nobody states it;
+ * - anything **unclassified** is ungrounded, given a band of its own above the
+ *   rest so it is visibly not part of the order.
+ *
+ * The console keeps drawing a larger band number higher up, which is what makes
+ * `above` mean on screen what it means in the log.
+ */
+function bandsFromOrder(order: string[], packages: Pkg[]): void {
+  const rank = new Map(order.map((name, index) => [name, index]));
+  for (const pkg of packages) {
+    const stated = rank.get(pkg.name);
+    if (stated !== undefined) {
+      pkg.layer = stated;
+      pkg.grounded = true;
+      continue;
+    }
+    pkg.grounded = shapeOf(pkg.claim, pkg.verdict) !== null;
+    pkg.layer = pkg.grounded ? order.length : order.length + 1;
+  }
 }
 
 function build(current: ArchitectureModel): { packages: Pkg[]; edges: Edge[] } {
@@ -160,6 +226,7 @@ function build(current: ArchitectureModel): { packages: Pkg[]; edges: Edge[] } {
         weight: 1,
         deferred: edge.deferred,
         crossed: isCrossed,
+        againstOrder: false,
       });
     }
   }
@@ -176,7 +243,27 @@ function build(current: ArchitectureModel): { packages: Pkg[]; edges: Edge[] } {
     y: 0,
     claim: said.get(name)?.claim ?? null,
     verdict: said.get(name)?.verdict ?? null,
+    grounded: true,
   }));
+
+  // Stated when there is one, counted when there is not, and never a blend of
+  // the two -- an axis half read off a person and half off a relaxation pass
+  // would be legible as neither.
+  const stated = current.order ?? [];
+  if (stated.length > 0) {
+    bandsFromOrder(stated, packages);
+    const band = new Map(packages.map((pkg) => [pkg.name, pkg]));
+    for (const edge of edges) {
+      const from = band.get(edge.from);
+      const to = band.get(edge.to);
+      edge.againstOrder =
+        from !== undefined &&
+        to !== undefined &&
+        from.grounded &&
+        to.grounded &&
+        to.layer > from.layer;
+    }
+  }
 
   place(packages, edges);
   return { packages, edges };
@@ -294,7 +381,13 @@ function draw(packages: Pkg[], edges: Edge[]): void {
     const to = at.get(edge.to);
     if (!from || !to) continue;
     const on = lit(edge.from) || lit(edge.to);
-    const cls = edge.crossed ? "crossed" : edge.deferred ? "deferred" : "beam";
+    const cls = edge.crossed
+      ? "crossed"
+      : edge.againstOrder
+        ? "against"
+        : edge.deferred
+          ? "deferred"
+          : "beam";
     svg.appendChild(
       node("path", {
         d: `M${from.x} ${from.y + 18} C${from.x} ${from.y + 70} ${to.x} ${to.y - 70} ${to.x} ${to.y - 18}`,
@@ -310,10 +403,11 @@ function draw(packages: Pkg[], edges: Edge[]): void {
     // that way is the whole point: the picture stops describing the parser and
     // starts describing the model people are building.
     const agreed = pkg.verdict === "agreed";
-    const shape = agreed ? pkg.claim : pkg.verdict === null && pkg.claim ? pkg.claim : null;
+    const shape = shapeOf(pkg.claim, pkg.verdict);
     const group = node("g", {
       class:
         `arch-glyph ${shape ?? "unclassified"}` +
+        `${pkg.grounded ? "" : " ungrounded"}` +
         `${agreed ? " agreed" : shape ? " proposed" : ""}` +
         `${lit(pkg.name) ? "" : " dim"}`,
       // The full dotted name, which the visible label does not carry -- it

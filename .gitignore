@@ -43,3 +43,4 @@ node_modules/
 # Playwright browser binaries and its run output.
 frontend/test-results/
 frontend/playwright-report/
+.claude/

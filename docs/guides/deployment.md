@@ -1,10 +1,10 @@
 # Deployment — FastAPI Cloud
 
 The target is [FastAPI Cloud](https://fastapicloud.com), deployed by
-[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) on every push
+[`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) on every push
 to `main`.
 
-**Read [ADR 0001](adr/0001-run-the-worker-in-the-api-process.md) first if you are
+**Read [ADR 0001](../adr/0001-run-the-worker-in-the-api-process.md) first if you are
 changing anything here.** This platform runs one process and this service is two,
 and the way that is resolved gives up a property the code otherwise protects.
 
@@ -32,7 +32,7 @@ at the **repository root**.
 
 **Two settings choose the build root, and the workflow is the one that wins.**
 `fastapi deploy` packages *its own working directory* and uploads that, so the
-`Deploy` step in [`deploy.yml`](../.github/workflows/deploy.yml) decides what the
+`Deploy` step in [`deploy.yml`](../../.github/workflows/deploy.yml) decides what the
 platform ever sees. It must run from the repository root — with no
 `working-directory:` — and the dashboard setting has to agree with it. Changing
 only the dashboard changes nothing, because the root is never uploaded for it to
@@ -58,7 +58,7 @@ Using CPython 3.14.6          # no .python-version in that directory
 /tmp/install_dependencies.sh: cd: can't cd to backend/app
 ```
 
-The [`Dockerfile`](../Dockerfile) has always had the right shape and is the thing
+The [`Dockerfile`](../../Dockerfile) has always had the right shape and is the thing
 to compare against: it copies `backend/`, `pyproject.toml` and `uv.lock`, then
 runs `uv sync --package bacteria-app`.
 
@@ -102,7 +102,7 @@ dashboard offers both under one heading and the difference is not cosmetic:
 - **Transaction pooler** (port `6543`) hands out a connection per transaction, so
   it does not carry `LISTEN`/`NOTIFY` and breaks the prepared statements psycopg
   makes on its own after a query repeats. The queue is
-  [`PsycopgConnector`](../backend/app/src/bacteria/app/core/jobs.py), which uses
+  [`PsycopgConnector`](../../backend/app/src/bacteria/app/core/jobs.py), which uses
   that notification to pick a job up promptly. It also polls, so the honest
   symptom is latency and intermittent statement errors rather than silence —
   which means **"jobs do eventually run" does not clear the pooler**. Session
@@ -211,7 +211,7 @@ and it says which branch the lifespan took:
 
 | Line | Level | Means |
 |---|---|---|
-| `running the job worker inside the API process` | WARNING | the worker started — expected here, and [ADR 0001](adr/0001-run-the-worker-in-the-api-process.md)'s tradeoff said out loud |
+| `running the job worker inside the API process` | WARNING | the worker started — expected here, and [ADR 0001](../adr/0001-run-the-worker-in-the-api-process.md)'s tradeoff said out loud |
 | `memory extraction is enabled and no worker runs in this process` | INFO | it did not |
 
 Then take a turn containing a fact worth remembering and look at what the
@@ -309,7 +309,7 @@ jaegertracing/all-in-one` — receives the same spans, including the model call,
 is the way to look at a trace with nothing leaving the machine. It takes traces but
 not metrics, and its all-in-one storage is in memory, so it is a debugging tool
 rather than a second deployment. See
-[ADR 0003](adr/0003-observability-is-opentelemetry-exported-to-logfire.md).
+[ADR 0003](../adr/0003-observability-is-opentelemetry-exported-to-logfire.md).
 
 ## Still missing
 
@@ -327,8 +327,8 @@ Not oversights; each is recorded where it would be filled.
 
 ## Running it somewhere else
 
-The [`Dockerfile`](../Dockerfile) builds one image that runs all three processes,
-and [`compose.app.yml`](../compose.app.yml) runs them as three services with
+The [`Dockerfile`](../../Dockerfile) builds one image that runs all three processes,
+and [`compose.app.yml`](../../compose.app.yml) runs them as three services with
 migrations gated ahead of both. That path keeps the process separation this one
 gives up, and is what to reach for if the worker ever needs its own failure
 domain.

@@ -65,7 +65,7 @@ a turn cost is a poor place from which to judge whether the second call earns it
 keep, which is a question this project has explicitly deferred to evidence.
 
 **The third is that a deployment is opaque in a way local runs are not.**
-`docs/DEPLOYMENT.md` lists "no smoke check against the deployed app" among what is
+`docs/guides/deployment.md` lists "no smoke check against the deployed app" among what is
 missing: a deploy that boots into a broken state looks exactly like one that
 worked.
 
@@ -216,7 +216,7 @@ exporter setup is found by looking at a dashboard rather than by a failing test.
 The mitigation is that it cannot break a request; the cost is that it can be
 silently absent.
 
-**Deployment gains a required secret and a place data goes.** `DEPLOYMENT.md`
+**Deployment gains a required secret and a place data goes.** `docs/guides/deployment.md`
 grows a row, and the answer to "where does this service send data" grows an
 entry.
 

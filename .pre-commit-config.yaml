@@ -31,8 +31,14 @@ repos:
       - id: check-toml
       - id: check-yaml
       - id: check-merge-conflict
+      # Both of these EDIT the files they run on, which is exactly wrong for
+      # `docs/research/`: those raw sources are ingested verbatim and their
+      # being unedited is the whole reason the tree can be cited. One of them
+      # is not even UTF-8. The large-file check still covers it.
       - id: end-of-file-fixer
+        exclude: ^docs/research/
       - id: trailing-whitespace
+        exclude: ^docs/research/
 
   - repo: local
     hooks:

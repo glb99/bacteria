@@ -108,14 +108,17 @@ class TestVocabulary:
         assert emitted <= CLASSIFICATIONS
 
 
-STATED = frozenset({"is_a", "is_not_a", "same_as"})
+STATED = frozenset({"is_a", "is_not_a", "same_as", "above"})
 """Relations a person writes, which no parse can produce.
 
 Excluded from the adapter's guard rather than listed inside it, because the
 distinction is the whole feature: a parse is repeatable and a judgment is not.
 ``same_as`` joined them when renames arrived -- whether a package vanished or
 changed its name is exactly what a parse cannot tell, which is why a person has
-to say.
+to say. ``above`` joined for a stronger reason: a parse *can* rank packages by
+their imports, and on this repository the ranking collapses -- fifteen of
+nineteen in three adjacent bands, because two cycles pump everything downstream
+of them to the bound. Derivable and useless is why that axis is testimony.
 """
 
 
@@ -159,7 +162,7 @@ class TestTheAdapterUsesIt:
         assert found.invariant == "A subject is one kind of thing at a time."
 
 
-CARRIED_BY: dict[str, tuple[Optional[str], type, tuple[str, ...]]] = {
+CARRIED_BY: dict[str, tuple[Optional[str], Optional[type], tuple[str, ...]]] = {
     # relation -> (field on ModelOut, item model, fields that carry the edge)
     "imports": ("imports", ImportOut, ("src", "dst")),
     # Flattened rather than listed: a module carries the tables it declares,
@@ -176,6 +179,12 @@ CARRIED_BY: dict[str, tuple[Optional[str], type, tuple[str, ...]]] = {
     # judgment having moved, plus `orphans` shrinking by one. The response to
     # the rename route carries the edge itself.
     "same_as": (None, ClassificationOut, ("subject", "claim")),
+    # A field, but no item model and no edge on it. What a client reads is a
+    # *rank* -- `order`, floor first -- rather than the pairs somebody stated,
+    # because a renderer needs a height and a reader needs to know which of two
+    # packages is lower without walking edges. Sending the pairs as well would
+    # be sending the same fact twice, in a form nothing consumes.
+    "above": ("order", None, ()),
 }
 """How each declared relation reaches a client, if it does.
 
@@ -221,8 +230,9 @@ class TestTheWireFormatCarriesIt:
         for name, (on_model, item, fields) in CARRIED_BY.items():
             if on_model is not None:
                 assert on_model in ModelOut.model_fields, f"{name}: ModelOut.{on_model}"
-            for field in fields:
-                assert field in item.model_fields, f"{name}: {item.__name__}.{field}"
+            if item is not None:
+                for field in fields:
+                    assert field in item.model_fields, f"{name}: {item.__name__}.{field}"
 
     def test_a_judgment_that_lands_nowhere_is_still_reported(self) -> None:
         """The counterpart to ``same_as`` having no field of its own.
@@ -236,3 +246,16 @@ class TestTheWireFormatCarriesIt:
         assert "orphans" in ModelOut.model_fields
         for field in ("subject", "claim", "verdict"):
             assert field in OrphanOut.model_fields
+
+    def test_the_order_is_carried_as_a_rank_and_not_as_pairs(self) -> None:
+        """``above`` is the one relation whose field holds no edges.
+
+        Every other entry above names the fields that carry a src and a dst.
+        This one carries neither: `order` is the layers ranked floor-first, and
+        the pairs that produced it stay in the log. A client that needed the
+        pairs would be re-deriving the rank the server already computed, chain
+        following and cycle breaking included.
+        """
+        assert "order" in ModelOut.model_fields
+        _on_model, item, fields = CARRIED_BY["above"]
+        assert (item, fields) == (None, ())

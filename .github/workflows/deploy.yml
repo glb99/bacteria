@@ -90,7 +90,7 @@ jobs:
             echo
             for name in "${missing[@]}"; do echo "- \`$name\`"; done
             echo
-            echo "See [docs/DEPLOYMENT.md](../blob/main/docs/DEPLOYMENT.md)."
+            echo "See [docs/guides/deployment.md](../blob/main/docs/guides/deployment.md)."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - run: uv sync --all-packages

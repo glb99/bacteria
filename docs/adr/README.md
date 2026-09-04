@@ -10,6 +10,13 @@ vendorable — its records travel with it into a host that has never heard of th
 application, and a record about FastAPI Cloud would be noise there. When one of
 these cites one of those, it says so in full: "the agent's ADR 0017".
 
+**Reading older records.** The package now called `personal/` was called
+`chat/` when records 0002, 0004, 0006 and 0010 were written. The records are
+immutable in substance and were not rewritten; read `chat/` as `personal/`.
+
+The format rules — what earns a record, what may be edited, what must go in
+Consequences — are in [`../guides/documentation.md`](../guides/documentation.md).
+
 The rule for what earns a record is the agent's: a decision that constrains
 future work, that a reasonable engineer would make differently, or that is a
 deliberate omission which will look like a bug. Library choices and formatting

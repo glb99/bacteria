@@ -1,5 +1,11 @@
 # Architecture
 
+Alongside this file: [`memory-graph.md`](memory-graph.md) for the assertion
+log's conceptual model, and
+[`../../backend/agent/docs/ARCHITECTURE.md`](../../backend/agent/docs/ARCHITECTURE.md)
+for the agent's own layer stack, which stays with the package because the
+package is vendorable.
+
 Two packages. `bacteria.agent` is the agent — layered by ownership boundary, knowing
 nothing about databases, HTTP, or this application. `bacteria.app` is the
 application that hosts it. The dependency runs one way, and what connects them
@@ -22,11 +28,11 @@ sequenceDiagram
     participant Route as chat/views
     participant Auth as auth/dependencies
     participant Access as chat/access
-    participant Service as chat/service
+    participant Service as personal/service
     participant Runtime as agent/runtime
     participant Context as agent/context
     participant Model as agent/model
-    participant Repo as chat/repository
+    participant Repo as personal/repository
     participant DB as PostgreSQL
     participant Provider as Anthropic / Gemini
 
@@ -92,7 +98,7 @@ sequenceDiagram
 
 *Authentication and authorization are separate boxes, and that is the point.*
 The first establishes identity, the second decides access, and they live in
-different packages — `auth/` has no idea what a session is, and `chat/access.py`
+different packages — `auth/` has no idea what a session is, and `personal/access.py`
 never inspects a credential. This is the agent's own session ≠ authorization
 boundary, applied to the layer above it.
 
@@ -197,7 +203,7 @@ database, which is the right bar.
 | Boundary | Enforced by | What breaks if it erodes |
 |---|---|---|
 | The agent knows nothing of this app | `bacteria.agent` imports no ORM, no web framework | The agent stops being vendorable elsewhere |
-| Authentication ≠ authorization | separate packages, `auth/` vs `chat/access.py` | "You know the id" becomes "you may read it" |
+| Authentication ≠ authorization | separate packages, `auth/` vs `personal/access.py` | "You know the id" becomes "you may read it" |
 | The runtime implements nothing | every step delegates | Ownership questions stop having answers |
 | Only the store writes turn state | one `commit` path, detached reads | State edited from outside, with no trace |
 | Capability ≠ execution | `tools/registry` vs `tools/execution` | The model gains the ability to act, not just ask |

@@ -78,7 +78,7 @@ what eliminate the candidates, and they do it before any benchmark is consulted.
 one backup, a real query language. It is eliminated by hosting rather than by
 design. It is not offered by Neon and not offered by Supabase, whose Nix-built
 images cannot compile extensions at runtime — and those two are exactly what
-`docs/DEPLOYMENT.md` tells someone to attach. Choosing AGE means choosing to
+`docs/guides/deployment.md` tells someone to attach. Choosing AGE means choosing to
 run Postgres ourselves, which is a larger decision than this one.
 
 **Neo4j, Memgraph, FalkorDB, Amazon Neptune** — separate servers, and all four

@@ -180,16 +180,22 @@ backend/
       auth/           API keys and principals — who is calling
       core/           protocols, handlers, adapters, settings, db — cross-cutting
       chat/           conversations with the agent, durably stored
+      graph/          the memory graph — an assertion log, ADR 0006
+      architecture/   parses a codebase and proposes claims about it
+      personal/       the owner's own ontology, over the same table
+      evaluation/     recorded runs, replayed deterministically
       ingestion/      validate → normalize → persist, built from core.handlers
+      console/        the served UI
       entrypoints/    asgi · cli · worker — configuration only, no logic
     migrations/       alembic; the schema lives here, not in the app
     tests/
 frontend/             not built yet; frontend/README.md says what it needs first
-docs/
-  ARCHITECTURE.md     sequence diagrams of each path through the system
-  DEPLOYMENT.md       FastAPI Cloud, and what that platform costs
-  MIGRATION.md        the plan this structure came from, and what is left of it
+docs/                 one tree; docs/README.md routes by question
+  README.md           the index
+  architecture/       the shape of the whole, and the memory model
   adr/                decisions about the application, not the agent
+  guides/             traps, verification, testing, docs, deploy, migrate
+  research/           where the memory design came from; background, not law
 scripts/
   smoke.py            drives a real server and worker; the check tests cannot make
 .github/workflows/    test · smoke · pre-commit · zizmor
@@ -198,7 +204,7 @@ compose.yml           Postgres, for development and tests
 compose.app.yml       the application in containers, combined explicitly
 ```
 
-Start with [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). A chat turn drawn end
+Start with [`docs/architecture/README.md`](docs/architecture/README.md). A chat turn drawn end
 to end touches nearly every layer, and the conventions below are visible in it
 as structure rather than as claims.
 
@@ -208,7 +214,7 @@ as structure rather than as claims.
 
 **Authentication and authorization are separate, and stay separate.** `auth/`
 answers *who is calling* and nothing else. Whether that caller may have a
-particular resource is decided next to the resource — `chat/access.py` — because
+particular resource is decided next to the resource — `personal/access.py` — because
 only the owning feature knows what owning one means. Collapsing them is how a
 service ends up treating "you know the id" as "you may read it".
 
@@ -314,7 +320,7 @@ just serve           # migrate, then run the web service
 
 ## Status
 
-Two features working end to end, behind API-key authentication. `chat/` runs
+Two features working end to end, behind API-key authentication. `personal/` runs
 agent turns against durably stored sessions, each owned by the principal that
 created it. `ingestion/` takes batches of records through a handler chain and
 records what happened to every one of them.
@@ -349,7 +355,7 @@ rather than only here:
 | Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
 
 What is planned, in what order, and why, is in
-[`docs/MIGRATION.md`](docs/MIGRATION.md).
+[`docs/guides/migration.md`](docs/guides/migration.md).
 
 ## Deployment
 
@@ -362,7 +368,7 @@ That platform runs one process and this service is two, so the job worker runs
 default and should stay off anywhere two processes are possible, because it
 gives up the isolation the separate worker exists for. The reasoning, and what
 it costs, is [ADR 0001](docs/adr/0001-run-the-worker-in-the-api-process.md);
-the setup is [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+the setup is [`docs/guides/deployment.md`](docs/guides/deployment.md).
 
 Deploying somewhere that can run two processes is the better shape and already
 works: [`Dockerfile`](Dockerfile) plus

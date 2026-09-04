@@ -48,4 +48,3 @@ See `core/jobs.py`.
 default `ProactorEventLoop`, and uvicorn hardcodes it — so `bacteria-serve`
 drives the server itself rather than calling `uvicorn.run()`. All of that is in
 `core/platform.py`; nothing else needs to know.
-

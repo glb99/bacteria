@@ -83,6 +83,12 @@ dev = [
 # resolve — so the gate's meaning changed when the tool released rather than
 # when the code did, and `just check-all` was red without anyone having written
 # anything wrong. A gate nobody can turn green is a gate nobody consults.
+# `docs/research/` is imported material, not code this project maintains: raw
+# ingested sources kept verbatim, and prototypes the research README calls
+# throwaway aids. Linting it offers two bad options -- edit a verbatim source to
+# please a formatter, which destroys the only property that makes it worth
+# keeping, or carry a permanently red gate. Excluding it is the third.
+exclude = ["docs/research"]
 line-length = 100
 # The workspace floor, not the application's. `bacteria` supports 3.11 and is
 # meant to be vendorable into projects that do too; linting it as 3.13 would let

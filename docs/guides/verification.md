@@ -45,4 +45,3 @@ seam into production code. The turn is still verified by hand.
 **Prove a new guard can fail.** The migration drift test was checked by adding
 a field without a migration and watching it break. A guard nobody has seen fail
 is a guard nobody has tested.
-

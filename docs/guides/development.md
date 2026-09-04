@@ -57,4 +57,3 @@ just db-version                     # what the database is at
 just agent           # run the agent standalone in a terminal
 just serve           # migrate, then run the web service
 ```
-

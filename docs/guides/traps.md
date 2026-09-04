@@ -115,4 +115,3 @@ recipe people are told to run before pushing reported success having executed no
 database test at all. Iterating on one file from an editor should still skip;
 the aggregate gate has no business claiming success. Never name that variable
 with the `BACTERIA_` prefix — an unrecognized one is a refusal to boot.
-

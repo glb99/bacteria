@@ -99,4 +99,3 @@ every record becomes either a row or a stored rejection carrying its position in
 the submission, the reason, and the payload as it was sent. The index is what
 makes two identical bad records distinguishable — the same reason Elasticsearch's
 bulk API and SQS's partial batch response report position or id.
-

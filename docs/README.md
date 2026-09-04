@@ -8,6 +8,8 @@ one hop from here.
 | Question | Go to |
 |---|---|
 | What does this do, and how do I run it? | [`README.md`](../README.md) |
+| What routes are there? | [`api.md`](api.md) |
+| What works today, and what is missing? | [`status.md`](status.md) |
 | How does a request move through it? | [`architecture/README.md`](architecture/README.md) |
 | How does the memory graph work, conceptually? | [`architecture/memory-graph.md`](architecture/memory-graph.md) |
 | How is the agent layered? | [`../backend/agent/docs/ARCHITECTURE.md`](../backend/agent/docs/ARCHITECTURE.md) |
@@ -15,6 +17,8 @@ one hop from here.
 | Why is the *agent* that way? | [`../backend/agent/docs/adr/`](../backend/agent/docs/adr/README.md) |
 | What has broken before? | [`guides/traps.md`](guides/traps.md) |
 | How do I know it actually works? | [`guides/verification.md`](guides/verification.md) |
+| Why is the code shaped this way? | [`guides/conventions.md`](guides/conventions.md) |
+| What are the commands? | [`guides/development.md`](guides/development.md) |
 | How do I write a test here? | [`guides/testing.md`](guides/testing.md) |
 | How do I write a docstring here? | [`guides/documentation.md`](guides/documentation.md) |
 | How do I deploy it? | [`guides/deployment.md`](guides/deployment.md) |

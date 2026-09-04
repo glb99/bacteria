@@ -16,6 +16,47 @@ whole, in the order a request moves through it.
 
 ---
 
+## Layout
+
+```
+backend/
+  agent/              bacteria-agent — see its own README and docs/adr/
+    src/bacteria/agent/
+  app/                bacteria-app
+    src/bacteria/app/
+      auth/           API keys and principals — who is calling
+      core/           protocols, handlers, adapters, settings, db — cross-cutting
+      chat/           conversations with the agent, durably stored
+      graph/          the memory graph — an assertion log, ADR 0006
+      architecture/   parses a codebase and proposes claims about it
+      personal/       the owner's own ontology, over the same table
+      evaluation/     recorded runs, replayed deterministically
+      ingestion/      validate → normalize → persist, built from core.handlers
+      console/        the served UI
+      entrypoints/    asgi · cli · worker — configuration only, no logic
+    migrations/       alembic; the schema lives here, not in the app
+    tests/
+frontend/             Console v0 — Vite + TypeScript, built into app/console/
+docs/                 one tree; docs/README.md routes by question
+  README.md           the index
+  architecture/       the shape of the whole, and the memory model
+  adr/                decisions about the application, not the agent
+  guides/             traps, verification, testing, docs, deploy, migrate
+  research/           where the memory design came from; background, not law
+scripts/
+  smoke.py            drives a real server and worker; the check tests cannot make
+.github/workflows/    test · smoke · pre-commit · zizmor
+Dockerfile            one image; compose picks which of the three processes it is
+compose.yml           Postgres, for development and tests
+compose.app.yml       the application in containers, combined explicitly
+```
+
+Start with [`docs/architecture/README.md`](README.md). A chat turn drawn end
+to end touches nearly every layer, and the conventions below are visible in it
+as structure rather than as claims.
+
+---
+
 ## A chat turn
 
 The deepest path in the system: it touches authentication, authorization, the

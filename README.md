@@ -1,379 +1,200 @@
-# bacteria
+<h1 align="center">bacteria</h1>
 
-[![Test](https://github.com/glb99/bacteria/actions/workflows/test.yml/badge.svg)](https://github.com/glb99/bacteria/actions/workflows/test.yml)
-[![Smoke](https://github.com/glb99/bacteria/actions/workflows/smoke.yml/badge.svg)](https://github.com/glb99/bacteria/actions/workflows/smoke.yml)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](.python-version)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+<p align="center">
+  <em>A neurosymbolic agent that builds a model of your system, and shows it to you.</em>
+</p>
 
-An HTTP service built around a small AI agent — conversations that survive a
-restart, and a bulk import pipeline — as a uv workspace of two packages.
+<p align="center">
+  <a href="https://github.com/glb99/bacteria/actions/workflows/test.yml"><img alt="Test" src="https://github.com/glb99/bacteria/actions/workflows/test.yml/badge.svg"></a>
+  <a href="https://github.com/glb99/bacteria/actions/workflows/smoke.yml"><img alt="Smoke" src="https://github.com/glb99/bacteria/actions/workflows/smoke.yml/badge.svg"></a>
+  <a href=".python-version"><img alt="Python 3.13+" src="https://img.shields.io/badge/python-3.13+-blue.svg"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"></a>
+  <a href="docs/README.md"><img alt="Docs" src="https://img.shields.io/badge/docs-read-blue.svg"></a>
+</p>
 
-| Package | Imported as | What it is |
-|---|---|---|
-| [`backend/agent`](backend/agent) | `bacteria.agent` | The agent. Layered by ownership boundary, self-contained, independently runnable and testable. |
-| [`backend/app`](backend/app) | `bacteria.app` | The application that hosts it — HTTP API, persistence, credentials, features. |
-
-Both live under the `bacteria` namespace, which is a
-[PEP 420 namespace package](https://peps.python.org/pep-0420/) and therefore has
-no `__init__.py` — an `__init__.py` in either distribution would claim the
-directory outright and hide the other. They are released separately:
-`bacteria-agent` carries real semver because things implement its protocols;
-`bacteria-app` stays at `0` because nothing consumes it.
-
-The split is enforced by packaging rather than by discipline: the application
-depends on the agent, and the agent knows nothing about the application. It has
-no database, no web framework, and no configuration of its own. What connects
-them is a protocol the agent declares and the application implements.
+<!-- TODO(#93): add a screenshot of Console v0 — the chat tab beside the graph tab —
+     at docs/assets/console.png, and a GIF of accepting a proposal. Left out rather
+     than committed broken; this is the first thing a visitor should see. -->
 
 ---
 
+## The idea
+
+An agent that remembers things about you is common. An agent whose memory you
+can **open, read, disagree with, and correct** is not.
+
+bacteria is an experiment in the second. A language model does the reasoning —
+probabilistic, fluent, occasionally wrong. Underneath it sits an **ontology**: an
+explicit model of the entities in some domain and the relations between them,
+stored as an append-only log of claims, each carrying who said it, when it was
+believed, and what contradicts it. The model proposes; the log records; a person
+arbitrates. That pairing — a probabilistic reasoner inside symbolic constraints
+— is what makes it *neurosymbolic*, and the constraints are the half that is
+usually missing.
+
+Writing the model down is the point, because then both parties can look at the
+same picture. A shared mental model rather than two private ones that quietly
+diverge — which is where the real cost of working with an agent comes from: not
+from its answers, but from carrying in your head what it does and does not know.
+
+**Two surfaces over one model:**
+
+- **A chat** — a full agent turn. It clarifies, reasons, and proposes actions.
+- **A graph** — the ontology itself. What bacteria believes about your system,
+  which of those beliefs contradict each other, what it concluded and from what,
+  and where the boundaries it was told about are being violated.
+
+Everything the graph shows is a *claim*, never a fact. Claims can be retracted,
+renamed, linked and rejected, and none of that edits history — a correction
+records a new belief and closes the old one, so you can always ask what the
+system believed last Tuesday and get an honest answer.
+[How that works](docs/architecture/memory-graph.md).
+
+## Where it stands
+
+**A working service, an early model.** Conversations survive restarts, the agent
+runs real turns, the extractor proposes claims, and the console draws them.
+
+The first domain being modelled is **software architecture** — parsing a
+codebase into modules, imports, tables and boundary violations, deterministically
+and with no model involved, then asking a person to accept or reject each
+proposal. That domain is first because its truth is checkable: you can read the
+source and know whether a claim is right.
+
+Two more are intended once the substrate holds: **organisations** — departments,
+ownership, risks, actions taken through Slack — and **research** — concepts,
+what is poorly understood, actions taken through deep search.
+
+What is missing is recorded at the place it would be filled rather than only in
+a list. The list is [`docs/status.md`](docs/status.md).
+
 ## Quickstart
 
-Needs Python 3.13+, [uv](https://docs.astral.sh/uv/), [just](https://just.systems/),
+Needs Python 3.13+, [uv](https://docs.astral.sh/uv/), [just](https://just.systems/)
 and Docker. An `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` in `.env` is required for
 anything that calls a model.
 
 ```bash
 cp .env.example .env
+just db-up && just install && just migrate
 ```
 
-```bash
-just db-up && just install && just migrate && just test
-```
+`just db-up` starts Postgres and waits until it accepts queries. It is required:
+the tests skip without it, `just cov` fails rather than skipping, and there is no
+SQLite fallback anywhere — SQLite was the default for a while and hid three
+separate bugs.
 
-Contributing? `just hooks` installs the pre-commit hook as well, and
-[CONTRIBUTING.md](CONTRIBUTING.md) has the conventions.
-
-`just db-up` starts Postgres in Docker and waits until it accepts queries. It is
-required — the tests skip without it (and `just cov` fails rather than skipping,
-so the gate cannot go green on a machine with no database), and there is no
-SQLite fallback anywhere.
-SQLite was the default for a while and hid three things: it has no `SKIP LOCKED`,
-which the job queue needs; its DDL differs enough that a migration could pass
-here and fail in production; and it ignores `DateTime(timezone=True)`, so every
-timestamp came back naive under test and aware in production.
-
-Issue yourself a credential — an operator command, not an endpoint:
+Issue yourself a credential. It is an operator command rather than an endpoint,
+and the key is printed once, because only a hash is stored:
 
 ```bash
 uv run bacteria-admin issue-key acme-corp --label "local dev"
 ```
 
-It prints the key once. Only a hash is stored, so it cannot be shown again — the
-key **id** is printed beside it, which is what `revoke-key` takes.
-
-`bacteria-admin list-keys` says who holds credentials, revoked ones included and
-marked. Take `--principal` to cut through the `smoke-*` rows a repository that
-has run `just smoke` accumulates.
+Then run it. The worker is a second process, and deferred work only happens if
+it is running:
 
 ```bash
-just serve
+just serve      # the API on :8000 — migrates first
+just worker     # in another terminal
 ```
 
-Run a worker alongside it, in another terminal, if you want deferred work to
-actually happen:
+The console is served at `/`, and interactive API docs at `/docs`. To talk to it
+without a browser:
 
 ```bash
-just worker
+curl -sX POST localhost:8000/chat/sessions \
+     -H "Authorization: Bearer $BACTERIA_KEY"
+
+curl -sX POST localhost:8000/chat/sessions/$SESSION/turns \
+     -H "Authorization: Bearer $BACTERIA_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"text": "hello"}'
 ```
 
-Then have a conversation:
+Or hold the same conversation with no server at all, against the same database
+and the same code path: `uv run bacteria-admin chat acme-corp`.
 
-```bash
-curl -sX POST localhost:8000/chat/sessions -H "Authorization: Bearer $BACTERIA_KEY"
-```
+`just --list` is the full set of commands.
 
-```bash
-curl -sX POST localhost:8000/chat/sessions/$SESSION/turns -H "Authorization: Bearer $BACTERIA_KEY" -H 'Content-Type: application/json' -d '{"text":"hello"}'
-```
+## How it is built
 
-Or hold the same conversation without a server, against the same database and
-the same code path:
+A uv workspace of two packages, and the split is enforced by packaging rather
+than by discipline.
 
-```bash
-uv run bacteria-admin chat acme-corp
-```
-
-It prints the session id and how many suggested memories are waiting. Inside it,
-`/proposals` lists them, `/accept <source> <key> [user]` makes one active, and
-`/reject <source> <key>` discards one — the same operations the routes below
-expose, and the same ones `bacteria-admin list-proposals` offers outside a
-conversation. Not to be confused with `just agent`, which runs the agent
-standalone against an in-memory store and persists nothing.
-
-`just --list` shows the rest. Interactive API docs are at `/docs` while the
-server runs.
-
----
-
-## API
-
-Every route except `/health` and `/auth/session` requires a credential. Anything
-wrong with it — missing, malformed, unknown, wrong secret, revoked, expired —
-returns the same `401`, because telling them apart tells an attacker which half
-of a guess was right.
-
-Two credentials are accepted. `Authorization: Bearer <key>` is the operator's,
-issued by CLI and never expiring. A browser instead trades that key once for an
-`HttpOnly` cookie that lasts twelve hours and can be revoked on its own, because
-a page cannot hold a key safely —
-[ADR 0005](docs/adr/0005-a-browser-holds-a-session-not-a-key.md).
-
-| | | |
+| Package | Imported as | What it is |
 |---|---|---|
-| `GET` | `/health` | Liveness. Does not touch the database, so a database outage cannot cause a restart loop. |
-| `POST` | `/auth/session` | `{"key": "..."}` → a session cookie. The only other route that answers without a credential, because it is the one that establishes one. |
-| `DELETE` | `/auth/session` | Ends the session server-side and clears the cookie. `204` whether or not there was one. |
-| `GET` | `/chat/sessions` | The caller's conversations, most recently active first. The only session route whose ownership is a filter rather than a check, so it takes no `user_id` and never will. |
-| `POST` | `/chat/sessions` | Open a conversation. Takes no body — the owner is the authenticated caller and cannot be named by the client. |
-| `POST` | `/chat/sessions/{id}/turns` | `{"text": "..."}` → `{"run_id", "reply"}`. Runs one agent turn. |
-| `GET` | `/chat/sessions/{id}/transcript` | Everything that happened in the conversation, in order. |
-| `GET` | `/chat/sessions/{id}/memory` | What this session is told to remember, with the reason each was kept. |
-| `GET` | `/chat/sessions/{id}/extraction` | How far memory extraction has read this conversation, and how far behind it is. A watermark that stops while the transcript grows is a worker that is not running. |
-| `PUT` | `/chat/sessions/{id}/memory/{key}` | `{"value", "reason"}`. Preserved into the system prompt of every later turn. Overwrites by key. |
-| `DELETE` | `/chat/sessions/{id}/memory/{key}` | `204`, whether or not it was there. |
-| `GET` | `/chat/sessions/{id}/memory-proposals` | Suggested memories awaiting a decision. These reach no model. |
-| `POST` | `/chat/sessions/{id}/memory-proposals/{source}/{key}` | Accept a suggestion, making it active. `404` if there is no such proposal. |
-| `DELETE` | `/chat/sessions/{id}/memory-proposals/{source}/{key}` | Discard a suggestion. `204`. |
-| `POST` | `/ingestion/batches` | `{"source", "records": [...]}` → what happened to every record. Runs inline; capped at 500 records. |
-| `POST` | `/ingestion/batches:defer` | Same body → `202 {"job_id"}`. Hands it to a worker and answers immediately. |
+| [`backend/agent`](backend/agent) | `bacteria.agent` | The agent. Layered by ownership boundary, self-contained, independently runnable and testable. No database, no web framework, no configuration of its own. |
+| [`backend/app`](backend/app) | `bacteria.app` | The service that hosts it — HTTP API, persistence, credentials, and the ontology features. |
 
-A session that does not exist and one belonging to someone else both return
-`404`. A `403` would confirm the session exists, which turns a session id into
-an oracle for enumeration.
+The application depends on the agent; the agent does not know the application
+exists. What connects them is a protocol the agent declares and the application
+implements, which is what lets the agent be lifted into a different host.
 
-### Ingestion in one example
+Both live under the `bacteria`
+[PEP 420 namespace package](https://peps.python.org/pep-0420/) and are released
+separately: `bacteria-agent` carries real semver because things implement its
+protocols, `bacteria-app` stays at `0` because nothing consumes it.
 
-```json
-POST /ingestion/batches
-{"source": "salesforce-nightly",
- "records": [{"external_id": "c-1", "name": "Ada Lovelace", "seats": 12},
-             {"name": "no id"}]}
-```
+## Documentation
 
-```json
-201
-{"batch_id": 1, "accepted": 1,
- "rejected": [{"index": 1,
-               "payload": {"name": "no id"},
-               "reason": "missing required field(s): external_id"}]}
-```
+**[`docs/README.md`](docs/README.md) routes every question.** The short version:
 
-A record needs an `external_id` and a `name`; every other key is stored exactly
-as it arrived and never inspected, so this fits contacts, products, devices, or
-documents equally and knows about none of them. Nothing is dropped silently —
-every record becomes either a row or a stored rejection carrying its position in
-the submission, the reason, and the payload as it was sent. The index is what
-makes two identical bad records distinguishable — the same reason Elasticsearch's
-bulk API and SQS's partial batch response report position or id.
-
----
-
-## Layout
-
-```
-backend/
-  agent/              bacteria-agent — see its own README and docs/adr/
-    src/bacteria/agent/
-  app/                bacteria-app
-    src/bacteria/app/
-      auth/           API keys and principals — who is calling
-      core/           protocols, handlers, adapters, settings, db — cross-cutting
-      chat/           conversations with the agent, durably stored
-      graph/          the memory graph — an assertion log, ADR 0006
-      architecture/   parses a codebase and proposes claims about it
-      personal/       the owner's own ontology, over the same table
-      evaluation/     recorded runs, replayed deterministically
-      ingestion/      validate → normalize → persist, built from core.handlers
-      console/        the served UI
-      entrypoints/    asgi · cli · worker — configuration only, no logic
-    migrations/       alembic; the schema lives here, not in the app
-    tests/
-frontend/             not built yet; frontend/README.md says what it needs first
-docs/                 one tree; docs/README.md routes by question
-  README.md           the index
-  architecture/       the shape of the whole, and the memory model
-  adr/                decisions about the application, not the agent
-  guides/             traps, verification, testing, docs, deploy, migrate
-  research/           where the memory design came from; background, not law
-scripts/
-  smoke.py            drives a real server and worker; the check tests cannot make
-.github/workflows/    test · smoke · pre-commit · zizmor
-Dockerfile            one image; compose picks which of the three processes it is
-compose.yml           Postgres, for development and tests
-compose.app.yml       the application in containers, combined explicitly
-```
-
-Start with [`docs/architecture/README.md`](docs/architecture/README.md). A chat turn drawn end
-to end touches nearly every layer, and the conventions below are visible in it
-as structure rather than as claims.
-
----
-
-## Conventions worth knowing before changing things
-
-**Authentication and authorization are separate, and stay separate.** `auth/`
-answers *who is calling* and nothing else. Whether that caller may have a
-particular resource is decided next to the resource — `personal/access.py` — because
-only the owning feature knows what owning one means. Collapsing them is how a
-service ends up treating "you know the id" as "you may read it".
-
-**The schema belongs to Alembic.** Nothing creates tables at startup — not the
-server, not the admin CLI. A process that builds its own schema starts happily
-against a database missing a column and fails later at the query, which is worse
-than refusing to start. A test replays every migration and asserts no diff
-against the models, so a model changed without a migration fails where it is
-cheap to fix.
-
-**Entrypoints hold configuration and nothing else.** They are omitted from
-coverage for that reason. If an entrypoint ever looks like it deserves a test,
-that is the signal it holds logic belonging to a feature.
-
-**The application never imports `bacteria.agent.interfaces`.** That package is the
-agent's own composition root, for running it standalone. The application
-composes what it needs in `entrypoints/`. Two composition roots is correct —
-they compose different processes — and this rule is what stops them becoming one
-tangle.
-
-**The agent is excluded from coverage.** Its suite is architectural fitness
-functions rather than line coverage, and the unevenness is deliberate — see
-[ADR 0013](backend/agent/docs/adr/0013-test-load-bearing-invariants-only.md).
-Measuring it produces a number whose only use is tempting someone to write the
-tests that record exists to decline.
-
-**I/O is awaited; computation is not.** In the agent, `async def` means "this
-reaches outside the process". In the application the same rule holds down to the
-database driver — one driver, `psycopg` 3, serving both SQLAlchemy and the job
-queue.
-
-**Background work goes through Postgres, not a broker.** A job is enqueued
-inside the transaction that justifies it, so work cannot be silently lost in the
-window between committing a row and reaching a queue. That gap is the one this
-codebase is otherwise organized against, and it is why the queue is not Redis.
-See `core/jobs.py`.
-
-**Entrypoints choose the event loop.** On Windows psycopg cannot run on the
-default `ProactorEventLoop`, and uvicorn hardcodes it — so `bacteria-serve`
-drives the server itself rather than calling `uvicorn.run()`. All of that is in
-`core/platform.py`; nothing else needs to know.
-
----
-
-## Development
-
-```bash
-just test            # both suites; test-agent and test-app run them separately
-just cov             # application coverage, entrypoints omitted
-just lint            # ruff check + format
-just typing          # ty
-just audit-ci        # zizmor over the workflows
-just console-check   # console types, and that the generated client has not drifted
-just console-build   # and that the bundle actually builds, which typing alone misses
-just check-all       # all of the above
-```
-
-`just check-all` is what CI runs, apart from a handful of recorded exceptions —
-things needing a Docker daemon, a migrated database, or minutes rather than
-seconds. A check that exists only in CI is one people meet by being rejected by
-it, so the exceptions are not left to be noticed: `backend/app/tests/test_ci_gates.py`
-compares the two lists and fails on any difference that has not been written
-down with its reason.
-
-```bash
-just smoke           # start a server and a worker, issue a key, make real requests
-```
-
-The one check the suite structurally cannot make. It proves a deferred job is
-picked up by a worker in another process — there is no worker in a test run, and
-this project has already shipped a queue whose tests passed before the
-application could enqueue anything at all.
-
-```bash
-just stack           # the whole thing in containers: migrate, then API + worker
-just stack-smoke     # ... and run the smoke checks against it. What CI gates.
-just stack-stop      # stop the app containers, keep the database
-just stack-down      # also removes the Postgres volume `just db-up` shares
-```
-
-One image, three processes. Not a deployment — no TLS, no restart policy,
-development credentials — but proof the image runs all of them against a real
-database, and the console is built inside it rather than copied from whatever
-the working tree happened to hold.
-
-`just stack-smoke` is the gate on that, and it exists because nothing built this
-image before. `fastapi deploy` never reads the `Dockerfile`; the platform builds
-with its own `uv sync`. So this is a second packaging path, and an unbuilt one
-is not the exit route it is meant to be.
-
-```bash
-just makemigration "add whatever"   # generate from model changes — read it before committing
-just migrate                        # apply
-just db-version                     # what the database is at
-```
-
-```bash
-just agent           # run the agent standalone in a terminal
-just serve           # migrate, then run the web service
-```
-
----
-
-## Status
-
-Two features working end to end, behind API-key authentication. `personal/` runs
-agent turns against durably stored sessions, each owned by the principal that
-created it. `ingestion/` takes batches of records through a handler chain and
-records what happened to every one of them.
-
-Memory has two proposers and one reviewer. A `remember` tool lets the model
-suggest a fact mid-turn; a deferred job reads the transcript afterwards and
-suggests more, reading forward from a watermark so its cost tracks new turns
-rather than conversation length. Neither writes memory — both write proposals,
-which reach no model until a person activates one, at a scope that person
-chooses. Extraction is off by default (`BACTERIA_MEMORY_EXTRACTION_ENABLED`); it
-is a second model call on every turn. See
-[ADR 0002](docs/adr/0002-the-memory-graph-is-postgres-tables.md), whose first
-phase this is.
-
-Deliberately absent, each recorded in the code at the place it would be filled
-rather than only here:
-
-| Missing | Why it is missing |
+| | |
 |---|---|
-| Tools over HTTP | Approval has nobody to ask until a run can pause and resume. Passing no tool registry is the only option that neither silently approves everything nor pretends to gate. |
-| A way to ask how a deferred job went | The job id is real and queryable by hand, but no route reports it, so `:defer` is fire-and-forget today. |
-| Which memories a turn actually carried | `run_meta` records *how many* reached the prompt, not which. Recording the keys is a change inside `bacteria.agent`, against a decision `_run_meta` states on purpose, so it needs a record of its own rather than a route. |
-| Retries on ingestion jobs | Ingestion is not idempotent — duplicates are only caught within a batch — so a retried job would store everything twice. Needs the cross-batch decision first. |
-| Key scopes | Every key grants identity and therefore everything; there is no read-only key to hand a script. Browser sessions expire, keys still do not — [ADR 0005](docs/adr/0005-a-browser-holds-a-session-not-a-key.md) explains why the asymmetry is deliberate. |
-| Ending every session for a principal | Revoking a key does not close the sessions it opened, which outlive it by up to twelve hours. `revoke-sessions <principal>` is the missing verb. |
-| Tenancy for ingested records | Submitting requires authentication, but a batch is not owned by its submitter. Urgent the moment a read route exists. |
-| Cross-batch duplicates | A repeated `external_id` in a later batch is stored twice. Needs someone to choose between "update" and "reject". |
-| A ceiling on pending proposals | Each extraction run is capped, and the total is not. A long conversation accumulates suggestions until a person drains them, which costs nothing in the prompt and everything in the review surface. |
-| Review across sessions | Proposals are listed one conversation at a time, so answering "what is waiting anywhere" means already knowing every session id. The nudge tells you a count for the session you are in and nothing about the rest. |
-| Retrieval over the graph | Nodes, edges, contradictions and conclusions exist and are visible ([ADR 0006](docs/adr/0006-the-memory-graph-is-an-assertion-log.md)); nothing yet *retrieves* over them, so the graph does not affect what a model is told. That needs anchor resolution, vectors and the agent-side seam in [its ADR 0024](backend/agent/docs/adr/0024-memory-candidates-are-supplied-not-read-whole.md), and it is where ADR 0006's kill criterion gets settled. |
-| Writing to the graph | The console can show a wrong claim and offers no way to retract it. Read routes shipped first deliberately: a destructive route should not exist before there is a way to see what it would destroy. |
-| Audio | Planned as speech-to-text → the existing turn → text-to-speech, which needs no change to the agent. |
+| [Architecture](docs/architecture/README.md) | The shape of the whole, drawn as sequence diagrams |
+| [The memory graph](docs/architecture/memory-graph.md) | The ontology's conceptual model |
+| [API reference](docs/api.md) | Every route, annotated |
+| [Decisions](docs/adr/README.md) | Why each thing is the way it is |
+| [Status](docs/status.md) | What works, and what is deliberately absent |
+| [Research](docs/research/README.md) | Where the design came from — sources, analyses, dialogues |
+| [Glossary](docs/research/glossary.md) | *Valid time*, *recorded time*, *canonical core* — terms that mean something specific here |
 
-What is planned, in what order, and why, is in
-[`docs/guides/migration.md`](docs/guides/migration.md).
+Working on this with an AI agent? [`CLAUDE.md`](CLAUDE.md) is the door for that,
+and is deliberately a different document from this one.
+
+## Prior art
+
+bacteria is an implementation of other people's ideas, and it is worth saying
+whose.
+
+- **Neurosymbolic agents** — Frank Coyle,
+  [*Why Agentic Systems Need Ontologies*](https://www.youtube.com/watch?v=Sir59K8ZDPU).
+  A reasoning engine operating over an ontology, placed inside the agentic loop.
+- **The ontology** — Palantir's
+  [Foundry Ontology](https://www.palantir.com/docs/foundry/ontology/overview):
+  objects, links and actions as a model of a business rather than of its
+  databases.
+- **The agent's layering** — Vinoth Govindarajan's
+  [The Agent Stack](https://theagentstack.substack.com/p/the-agent-stack-part-5-context-retrieval)
+  series, which `backend/agent` follows.
+- **Domain-driven design** — for the claim that the shared language *is* the
+  deliverable, which is this project's thesis restated.
+
+Every source is ingested verbatim, analysed, and argued with in
+[`docs/research/`](docs/research/README.md). Nothing in the design arrived
+without a citation.
 
 ## Deployment
 
-[FastAPI Cloud](https://fastapicloud.com), on every push to `main`, via
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Migrations run
-from the workflow before the deploy, never at startup.
+[FastAPI Cloud](https://fastapicloud.com), on every push to `main`. That platform
+runs one process and this service is two, so the worker runs inside the API
+there — [ADR 0001](docs/adr/0001-run-the-worker-in-the-api-process.md) says what
+that costs. Two processes is the better shape and already works:
+[`Dockerfile`](Dockerfile) plus [`compose.app.yml`](compose.app.yml), or
+`just stack`. Setup is in
+[`docs/guides/deployment.md`](docs/guides/deployment.md).
 
-That platform runs one process and this service is two, so the job worker runs
-**inside the API** there — `BACTERIA_RUN_WORKER_IN_API=true`. It is off by
-default and should stay off anywhere two processes are possible, because it
-gives up the isolation the separate worker exists for. The reasoning, and what
-it costs, is [ADR 0001](docs/adr/0001-run-the-worker-in-the-api-process.md);
-the setup is [`docs/guides/deployment.md`](docs/guides/deployment.md).
+## Contributing
 
-Deploying somewhere that can run two processes is the better shape and already
-works: [`Dockerfile`](Dockerfile) plus
-[`compose.app.yml`](compose.app.yml), or `just stack`.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the conventions and
+[`docs/guides/development.md`](docs/guides/development.md) has the commands.
+`just hooks` installs the pre-commit hook.
+
+This is an experimental project and its design is still being argued with. The
+arguments live in [`docs/research/dialogues/`](docs/research/dialogues/), and
+disagreement is welcome there.
 
 ## License
 
-See [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).

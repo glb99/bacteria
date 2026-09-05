@@ -144,10 +144,18 @@ class TestTheAdapterUsesIt:
             assert is_known(name), name
 
     def test_the_parser_mints_only_declared_kinds(self) -> None:
-        """A drifting kind splits one package into two nodes.
+        """The adapter's manifest of kinds stays inside the declared set.
 
-        Kind participates in node identity, so this is the failure that cannot
-        be repaired by renaming afterwards.
+        Kind participates in node identity -- ``node_named(user_id, kind,
+        label)`` -- so a drifting kind would split one package into two nodes
+        and could not be repaired by renaming afterwards. That is the failure
+        this guards *against*, and it is worth being exact about how far the
+        guard reaches: nothing in this feature mints a node today. The model is
+        reparsed per request and only judgments are written, so ``derive.KINDS``
+        is a manifest rather than something the parser consults, and this
+        compares two declarations. It becomes a check on behaviour the moment
+        anything here writes a node, which is why it is written now rather than
+        then.
         """
         assert set(derive.KINDS) <= KINDS
 

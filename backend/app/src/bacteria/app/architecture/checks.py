@@ -29,7 +29,8 @@ Not built:
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
-from bacteria.app.architecture.derive import IMPORTS, OWNS_TABLE, Derived, Import
+from bacteria.app.architecture.catalogue import IMPORTS, OWNS_TABLE
+from bacteria.app.architecture.derive import Derived, Import
 
 AGENT = "bacteria.agent"
 APP = "bacteria.app"

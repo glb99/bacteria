@@ -7,6 +7,7 @@ testing something other than what the feature does.
 
 from pathlib import Path
 
+from bacteria.app.architecture.catalogue import IMPORTS
 from bacteria.app.architecture.checks import (
     BOUNDARIES,
     Boundary,
@@ -17,7 +18,7 @@ from bacteria.app.architecture.checks import (
     _core_names_a_domain_concept,
     evaluate,
 )
-from bacteria.app.architecture.derive import IMPORTS, Derived, Import, Module, derive
+from bacteria.app.architecture.derive import Derived, Import, Module, derive
 from bacteria.app.architecture.layout import python_files
 
 REPO = Path(__file__).resolve().parents[3]

@@ -1,6 +1,7 @@
 # Architecture
 
-Alongside this file: [`memory-graph.md`](memory-graph.md) for the assertion
+Alongside this file: [`modules.md`](modules.md) for which module is which
+layer, [`memory-graph.md`](memory-graph.md) for the assertion
 log's conceptual model, and
 [`../../backend/agent/docs/ARCHITECTURE.md`](../../backend/agent/docs/ARCHITECTURE.md)
 for the agent's own layer stack, which stays with the package because the

@@ -11,6 +11,7 @@ one hop from here.
 | What routes are there? | [`api.md`](api.md) |
 | What works today, and what is missing? | [`status.md`](status.md) |
 | How does a request move through it? | [`architecture/README.md`](architecture/README.md) |
+| Which module is which, and which layer is it? | [`architecture/modules.md`](architecture/modules.md) |
 | How does the memory graph work, conceptually? | [`architecture/memory-graph.md`](architecture/memory-graph.md) |
 | How is the agent layered? | [`../backend/agent/docs/ARCHITECTURE.md`](../backend/agent/docs/ARCHITECTURE.md) |
 | Why is it this way? | [`adr/`](adr/README.md) — the application's records |

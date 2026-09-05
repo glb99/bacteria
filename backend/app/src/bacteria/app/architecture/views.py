@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from bacteria.app.architecture.catalogue import ABOVE, SAME_AS
+from bacteria.app.architecture.catalogue import ABOVE, IS_A, SAME_AS
 from bacteria.app.architecture.checks import Boundary, Crossing
 from bacteria.app.architecture.classify import sentence
 from bacteria.app.architecture.conversation import ask
@@ -234,7 +234,7 @@ class OrphanOut(BaseModel):
     claim: str
     verdict: str
     stated_by: Optional[str] = None
-    relation: str = "is_a"
+    relation: str = IS_A
     """Which relation was stranded, because two now can be.
 
     Defaulted so the field is additive on the wire. A judgment strands when its

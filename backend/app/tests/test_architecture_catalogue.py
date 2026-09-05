@@ -10,7 +10,9 @@ from bacteria.app.architecture import decisions, derive
 from bacteria.app.architecture.catalogue import (
     CATALOGUE,
     CLASSIFICATIONS,
+    DERIVED,
     KINDS,
+    STATED,
     functional,
     is_known,
     reads,
@@ -108,7 +110,6 @@ class TestVocabulary:
         assert emitted <= CLASSIFICATIONS
 
 
-STATED = frozenset({"is_a", "is_not_a", "same_as", "above"})
 """Relations a person writes, which no parse can produce.
 
 Excluded from the adapter's guard rather than listed inside it, because the
@@ -136,6 +137,7 @@ class TestTheAdapterUsesIt:
         derived_relations = {entry.name for entry in CATALOGUE} - STATED
 
         assert emitted == derived_relations
+        assert derived_relations == DERIVED
 
     def test_the_parser_writes_only_declared_relations(self) -> None:
         for name in derive.RELATIONS:

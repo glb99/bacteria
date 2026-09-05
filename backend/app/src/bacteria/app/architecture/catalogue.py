@@ -66,6 +66,12 @@ one [dialogue 11 Q2] made for refusing the relation tail's treatment to kinds,
 and it applies here with the extra comfort that the set is genuinely finite.
 """
 
+IMPORTS = "imports"
+"""The relation a parsed import statement records."""
+
+OWNS_TABLE = "owns_table"
+"""The relation a table declared in a module records."""
+
 ABOVE = "above"
 """The relation a stated layer order records.
 
@@ -103,6 +109,16 @@ stays attached to it rather than being rewritten to pretend it was always
 the new one.
 """
 
+IS_A = "is_a"
+"""The relation an accepted classification records."""
+
+IS_NOT_A = "is_not_a"
+"""The relation a rejected classification records.
+
+A rejection is a claim of its own rather than the absence of one, which is what
+lets ``functional`` on :data:`IS_A` close the judgment it contradicts.
+"""
+
 CLASSIFICATIONS: frozenset[str] = frozenset({"feature", "layer", "role"})
 """What a subject may be said to be.
 
@@ -120,7 +136,7 @@ thinks of a word.
 # which it briefly was, along with `owns_table`, until the two were checked.
 CATALOGUE: tuple[Relation, ...] = (
     Relation(
-        name="imports",
+        name=IMPORTS,
         invariant=None,
         sentence="<src> imports <dst>",
         src_kind=MODULE,
@@ -129,7 +145,7 @@ CATALOGUE: tuple[Relation, ...] = (
         functional=False,
     ),
     Relation(
-        name="owns_table",
+        name=OWNS_TABLE,
         invariant=None,
         sentence="<src> declares <dst>",
         src_kind=MODULE,
@@ -137,7 +153,7 @@ CATALOGUE: tuple[Relation, ...] = (
         functional=False,
     ),
     Relation(
-        name="is_a",
+        name=IS_A,
         invariant="A subject is one kind of thing at a time.",
         sentence="<src> is a <dst>",
         # No source kind: a package is said to be a feature, and a word is said
@@ -149,7 +165,7 @@ CATALOGUE: tuple[Relation, ...] = (
         functional=True,
     ),
     Relation(
-        name="is_not_a",
+        name=IS_NOT_A,
         invariant=None,
         sentence="<src> is not a <dst>",
         src_kind=None,
@@ -160,7 +176,7 @@ CATALOGUE: tuple[Relation, ...] = (
         functional=False,
     ),
     Relation(
-        name="same_as",
+        name=SAME_AS,
         invariant=None,
         sentence="<src> is <dst> under a new name",
         # No kinds, because a rename relates two of whatever the pair both are.
@@ -174,7 +190,7 @@ CATALOGUE: tuple[Relation, ...] = (
         functional=False,
     ),
     Relation(
-        name="above",
+        name=ABOVE,
         # Not an invariant, because the thing that would be checked here is not
         # a property of one assertion. A cycle -- two layers each said to be over
         # the other -- involves several rows and is broken at read time, the way
@@ -196,6 +212,17 @@ CATALOGUE: tuple[Relation, ...] = (
         functional=False,
     ),
 )
+
+DERIVED: frozenset[str] = frozenset({IMPORTS, OWNS_TABLE})
+"""What a parse produces. Every one of these is emitted by an adapter."""
+
+STATED: frozenset[str] = frozenset({IS_A, IS_NOT_A, ABOVE, SAME_AS})
+"""What a person says. No parse produces these, and none ever should.
+
+The partition lives here rather than in the test that needed it first: which
+relations are testimony is a fact about the ontology, and a test re-typing the
+list was the same smearing this module's opening paragraph is about.
+"""
 
 _BY_NAME: dict[str, Relation] = {relation.name: relation for relation in CATALOGUE}
 

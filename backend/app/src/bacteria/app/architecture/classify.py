@@ -35,6 +35,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from bacteria.app.architecture.catalogue import IS_A
 from bacteria.app.architecture.derive import Derived
 
 RULE_OF_THREE = 3
@@ -139,7 +140,7 @@ def propose(derived: Derived, *, threshold: int = RULE_OF_THREE) -> tuple[Propos
     proposals: list[Proposal] = [
         Proposal(
             subject=role.name,
-            relation="is_a",
+            relation=IS_A,
             claim="role",
             because=(
                 f"{role.packages} packages have a {role.name} module — "
@@ -173,7 +174,7 @@ def propose(derived: Derived, *, threshold: int = RULE_OF_THREE) -> tuple[Propos
             proposals.append(
                 Proposal(
                     subject=package,
-                    relation="is_a",
+                    relation=IS_A,
                     claim="feature",
                     because=(
                         f"carries {', '.join(sorted(held))} — "
@@ -185,7 +186,7 @@ def propose(derived: Derived, *, threshold: int = RULE_OF_THREE) -> tuple[Propos
             proposals.append(
                 Proposal(
                     subject=package,
-                    relation="is_a",
+                    relation=IS_A,
                     claim="layer",
                     because=(
                         f"carries none of the roles and {fan_in[package]} packages "
@@ -231,7 +232,7 @@ def _fan_in(derived: Derived) -> dict[str, int]:
 
 def sentence(proposal: Proposal) -> str:
     """A proposal as a reader sees it, so agreeing with one means something."""
-    verb = "is a" if proposal.relation == "is_a" else "has the role"
+    verb = "is a" if proposal.relation == IS_A else "has the role"
     return f"{proposal.subject} {verb} {proposal.claim}"
 
 

@@ -33,7 +33,15 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal, Optional
 
-from bacteria.app.architecture.catalogue import ABOVE, KIND, PACKAGE, SAME_AS, WORD
+from bacteria.app.architecture.catalogue import (
+    ABOVE,
+    IS_A,
+    IS_NOT_A,
+    KIND,
+    PACKAGE,
+    SAME_AS,
+    WORD,
+)
 from bacteria.app.architecture.models import Project
 from bacteria.app.graph.log import Assertion
 from bacteria.app.graph.repository import SqlGraphRepository
@@ -42,8 +50,8 @@ from bacteria.app.graph.temporal import OPEN_ENDED, Interval
 
 Verdict = Literal["agreed", "disagreed"]
 
-AGREE = "is_a"
-DISAGREE = "is_not_a"
+AGREE = IS_A
+DISAGREE = IS_NOT_A
 
 
 def ontology_of(project: Project) -> str:

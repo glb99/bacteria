@@ -40,6 +40,30 @@ class TestVocabulary:
             for kind in (entry.src_kind, entry.dst_kind):
                 assert kind is None or kind in KINDS, entry.name
 
+    def test_every_functional_relation_can_state_its_rule(self) -> None:
+        """A rule a person cannot read is a rule they cannot disagree with.
+
+        The personal catalogue has had this guard since ADR 0007; this one did
+        not, and the second domain inheriting the first's vocabulary without its
+        discipline is the shape of nearly every defect found here. ``sentence``
+        says which way round to read a claim, ``invariant`` says what cannot be
+        true twice, and only the second is any use to somebody being shown a
+        contradiction.
+        """
+        for entry in CATALOGUE:
+            if entry.functional:
+                assert entry.invariant, f"{entry.name} is functional and states no rule"
+
+    def test_a_relation_states_a_rule_only_when_it_has_one(self) -> None:
+        """An invariant on a relation nothing constrains is a rule with no check.
+
+        It reads as governed and is not, which is worse than a blank field: a
+        reader trusts the sentence and no code ever tests it.
+        """
+        for entry in CATALOGUE:
+            if not entry.functional:
+                assert entry.invariant is None, entry.name
+
     def test_a_claim_reads_as_a_sentence(self) -> None:
         """Direction is invisible in three columns and obvious in a sentence.
 

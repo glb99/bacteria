@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from backend.agent.src.bacteria.agent.model.protocol import ToolCall
+from bacteria.agent.model.protocol import ToolCall
 
 
 def describe_tool_call(tool_call: ToolCall) -> str:
@@ -78,5 +78,6 @@ def cli_approve(tool_call: ToolCall, input_fn: Callable[[str], str] = input) -> 
         Denial is the safe failure: a wrongly refused call is retried by asking
         again, while a wrongly approved one has already happened.
     """
-    answer = input_fn(f"Approve tool call {describe_tool_call(tool_call)}? [y/N] ")
+    answer = input_fn(
+        f"Approve tool call {describe_tool_call(tool_call)}? [y/N] ")
     return answer.strip().lower() in ("y", "yes")

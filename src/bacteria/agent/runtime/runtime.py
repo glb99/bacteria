@@ -69,14 +69,14 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from bacteria.agent.context.retrieval import SuppliesMemoryCandidates
-from bacteria.agent.model.protocol import ModelResponse, SendsMessages
-from bacteria.agent.runtime.model import RunResult
+from bacteria.agent.context.assembly import DEFAULT_MEMORY_LIMIT, AssembledContext, assemble_context
+from bacteria.agent.model.protocol import ModelResponse, SendsMessages, ToolCall
+from bacteria.agent.runtime.run_result import RunResult
+from bacteria.agent.runtime.steptracker.steptracker import StepTracker
 from bacteria.agent.session.model import TranscriptItem
 from bacteria.agent.session.protocol import SessionRepository
-from bacteria.agent.tools.execution import Approve
+from bacteria.agent.tools.execution import Approve, ToolExecutionError, ToolResult, execute_tool_call
 from bacteria.agent.tools.registry import ToolRegistry
-
 
 
 def _run_meta(
@@ -100,12 +100,6 @@ def _run_meta(
     quadratically with the conversation, and it would put the system prompt's
     contents in a second place with its own retention question. What a reader
     needs to reconstruct a run is how much it was shown, not another copy.
-
-    **Memory keys are the exception, and they are not a copy.** A key names an
-    entry in the store it came from; the text stays there. The count alone
-    cannot answer *whether those were the right ones*, which is the question
-    every comparison between two retrieval strategies has to ask — so a run
-    recorded without them is a turn nobody can ever grade.
     """
     return TranscriptItem(
         kind="run_meta",
@@ -113,15 +107,6 @@ def _run_meta(
             "model": model,
             "tools_exposed": tools_exposed,
             "messages_in_context": len(context.messages),
-            "memories_in_context": context.memories_included,
-            # What the turn did *not* see. A memory the owner kept can stop
-            # reaching the model because newer ones displaced it, and until this
-            # was recorded that happened with nothing anywhere saying so — the
-            # same unreportable loss ADR 0010 refused for messages, present all
-            # along for memory.
-            "memories_considered": context.memories_considered,
-            "retrieval_strategy": context.retrieval_strategy,
-            "memory_keys": context.memory_keys,
             "tool_calls_proposed": tool_calls_proposed,
             "tool_calls_dropped": tool_calls_dropped,
             "outcome": outcome,
@@ -149,15 +134,9 @@ class Runtime:
         self,
         model_client: SendsMessages,
         session_store: SessionRepository,
-        candidate_supplier: SuppliesMemoryCandidates | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_store = session_store
-        # Optional, and absent by default. Without one every memory in state is a
-        # candidate and assembly behaves exactly as it always has -- so a host
-        # that never heard of narrowing owes nothing, which is the property that
-        # makes this a seam rather than a requirement.
-        self._candidate_supplier = candidate_supplier
 
     async def run_turn(
         self,
@@ -200,14 +179,7 @@ class Runtime:
         # one function that answers "what was the model shown" also a function
         # that talks to a database, and that function's value is that it can be
         # read in a sitting.
-        candidates = (
-            None
-            if self._candidate_supplier is None
-            else await self._candidate_supplier.candidates(
-                session_id=session_id, user_text=user_text, limit=DEFAULT_MEMORY_LIMIT
-            )
-        )
-        context = assemble_context(state, user_text, candidates=candidates)
+        context = assemble_context(state, user_text)
         tools = tool_registry.schemas_for_run() if tool_registry else None
         # Names only. The schemas are the model's business; what a run needs
         # recorded is which capabilities were on the table, since a tool that
@@ -251,13 +223,15 @@ class Runtime:
                     step_tracker=step_tracker,
                     tool_calls=response.tool_calls,
                     tool_registry=tool_registry,
-                    approve=approve if approve is not None else (lambda _tool_call: True),
+                    approve=approve if approve is not None else (
+                        lambda _tool_call: True),
                     evidence=evidence,
                 )
                 response = await step_tracker.run_once(
                     f"{run_id}:model_call_after_tools",
                     lambda: self._model_client.send(
-                        messages=self._follow_up_messages(context.messages, response, results),
+                        messages=self._follow_up_messages(
+                            context.messages, response, results),
                         system=context.system,
                         tools=tools,
                     ),
@@ -289,7 +263,8 @@ class Runtime:
             )
         except Exception as exc:
             evidence.append(
-                TranscriptItem(kind="run_error", payload={"error": str(exc)}, run_id=run_id)
+                TranscriptItem(kind="run_error", payload={
+                               "error": str(exc)}, run_id=run_id)
             )
             evidence.append(
                 _run_meta(
@@ -351,7 +326,8 @@ class Runtime:
                     f"{run_id}:tool_call:{call['id']}",
                     # Bound as a default argument: a bare closure over `call`
                     # would capture the loop variable and read its final value.
-                    lambda call=call: execute_tool_call(call, tool_registry, approve=approve),
+                    lambda call=call: execute_tool_call(
+                        call, tool_registry, approve=approve),
                 )
             except ToolExecutionError as exc:
                 evidence.append(
@@ -402,7 +378,8 @@ class Runtime:
         """
         return [
             *messages,
-            {"role": "assistant", "content": cls._assistant_content_blocks(response)},
+            {"role": "assistant",
+                "content": cls._assistant_content_blocks(response)},
             {
                 "role": "user",
                 "content": [

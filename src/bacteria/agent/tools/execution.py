@@ -51,8 +51,8 @@ from typing import Any, Awaitable, Callable, Literal, TypeVar
 
 import anyio.to_thread
 
-from backend.agent.src.bacteria.agent.model.protocol import ToolCall
-from backend.agent.src.bacteria.agent.tools.registry import ToolRegistry, UnknownToolError
+from bacteria.agent.model.protocol import ToolCall
+from bacteria.agent.tools.registry import ToolRegistry, UnknownToolError
 
 _T = TypeVar("_T")
 

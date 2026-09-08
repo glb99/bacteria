@@ -83,8 +83,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from backend.agent.src.bacteria.agent.context.retrieval import Candidates, RecentMemory, RetrievesMemory
-from backend.agent.src.bacteria.agent.session.store import MemoryEntry, SessionState
+from bacteria.agent.session.model import SessionState
 
 DEFAULT_WINDOW = 20
 """Messages kept from history. Small enough to stay cheap, large enough that a
@@ -113,44 +112,16 @@ class AssembledContext:
             internal (Anthropic-shaped) format.
         system: System prompt, or ``None`` when there is nothing to say. Carries
             memory, kept out of ``messages`` deliberately.
-        memories_included: How many memory entries reached ``system``. Reported
-            rather than left for a caller to recompute, because the bound is
-            applied here — counting ``state.memory`` instead would report what
-            exists rather than what the model was shown, and those differ by
-            exactly the amount the limit is doing.
-        memories_considered: How many were eligible before the bound. The
-            difference between this and ``memories_included`` is the number of
-            memories the owner kept and the model was not shown, which until now
-            nothing recorded anywhere.
-        retrieval_strategy: Which rule chose them.
-        memory_keys: The keys of the entries that reached ``system``, sorted.
-
-            Identities rather than a count, and the difference is what makes a
-            past turn gradable. "Four memories, strategy recency" cannot answer
-            whether those were the *right* four, so every run recorded before
-            this existed is evidence nobody can ever score — which is why it is
-            here rather than waiting for the thing that will read it.
-
-            Keys, not values: a key selects the entry from the store it came
-            from, and copying the text would put a second copy of the memory in
-            the transcript with its own retention question.
     """
 
     messages: list[dict[str, Any]] = field(default_factory=list)
     system: str | None = None
-    memories_included: int = 0
-    memories_considered: int = 0
-    retrieval_strategy: str = ""
-    memory_keys: list[str] = field(default_factory=list)
 
 
 def assemble_context(
     state: SessionState,
     user_text: str,
     window_size: int = DEFAULT_WINDOW,
-    memory_limit: int = DEFAULT_MEMORY_LIMIT,
-    retriever: RetrievesMemory | None = None,
-    candidates: Candidates | None = None,
 ) -> AssembledContext:
     """Build the working set for one turn.
 
@@ -166,15 +137,6 @@ def assemble_context(
         user_text: The new message, always included regardless of ``window_size``
             — dropping the thing being responded to would be incoherent.
         window_size: How many prior messages to keep.
-        memory_limit: How many memory entries to surface.
-        retriever: Which rule picks them. Defaults to
-            :class:`~bacteria.agent.context.retrieval.RecentMemory`, which is what
-            this function did inline before the rule had a name.
-
-            Scopes are collapsed *before* it is called, so a strategy is handed
-            one candidate set and never sees where an entry came from.
-            Precedence is a policy (ADR 0021) and re-implementing it in every
-            strategy is how two of them come to disagree about it.
 
     Returns:
         The assembled context. Total message count is at most
@@ -189,71 +151,6 @@ def assemble_context(
     messages = [{"role": item.payload["role"],
                  "content": item.payload["text"]} for item in recent]
     messages.append({"role": "user", "content": user_text})
-
-    # Narrowed by the host if a supplier ran, otherwise everything in state.
-    # **This function never awaits**, which is why the supplier is called in the
-    # runtime and its result passed in: the one function that answers "what was
-    # the model shown" must stay readable in a sitting, and a database call in
-    # the middle of it would not be.
-    narrowed = _merge_scopes(
-        state) if candidates is None else _merge(candidates)
-    selection = (retriever or RecentMemory()).select(
-        query=user_text, limit=memory_limit, candidates=narrowed
-    )
-    if candidates is not None:
-        # The supplier's own count wins. It queried a population this function
-        # cannot see, and reporting the size of what it handed back would erase
-        # exactly the omission ADR 0022 exists to have made visible.
-        selection = replace(selection, considered=candidates.considered)
-    # `or None` so that an empty selection yields no system prompt rather than
-    # an empty one, which some providers reject outright.
     return AssembledContext(
         messages=messages,
-        system=_format_memory(selection.chosen) or None,
-        memories_included=len(selection.chosen),
-        memories_considered=selection.considered,
-        retrieval_strategy=selection.strategy,
-        # Sorted so that two runs shown the same memories produce the same
-        # record. Retrieval order is a property of the strategy and is reported
-        # by `retrieval_strategy`; preserving it here would make a diff between
-        # two runs depend on it without saying so.
-        memory_keys=sorted(selection.chosen),
     )
-
-
-def _merge(candidates: Candidates) -> dict[str, MemoryEntry]:
-    """Collapse a supplier's two scopes, by the rule below and no other."""
-    return {**candidates.user, **candidates.session}
-
-
-def _merge_scopes(state: SessionState) -> dict[str, MemoryEntry]:
-    """Combine the owner's standing memory with this conversation's.
-
-    Session wins on a shared key. The narrower scope is the more current claim —
-    a preference stated in this conversation supersedes a standing one — and the
-    alternative is handing the model both and no rule for choosing, which is a
-    contradiction dressed as context.
-
-    The loser is dropped rather than shown as superseded. The model is not the
-    right audience for a resolution it cannot act on, and both entries remain
-    separately readable through the store for anyone who is.
-    """
-    return {**state.user_memory, **state.memory}
-
-
-def _format_memory(chosen: dict[str, MemoryEntry]) -> str:
-    """Render already-chosen entries as a system prompt.
-
-    Rendering only. Which entries these are, in what order, and how many, is
-    :mod:`bacteria.agent.context.retrieval`'s question — this function used to answer
-    both and the two are unrelated: changing how memories are selected should
-    not require touching how they are written down.
-
-    Each line carries its ``reason`` alongside its value. That is provenance for
-    the model as much as for us: a fact plus why it was kept is something the
-    model can weigh, where a bare assertion can only be obeyed.
-    """
-    if not chosen:
-        return ""
-    lines = [f"- {e.value} (reason: {e.reason})" for e in chosen.values()]
-    return "Known context about this user/session:\n" + "\n".join(lines)

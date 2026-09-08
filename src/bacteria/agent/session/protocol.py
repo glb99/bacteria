@@ -66,7 +66,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from backend.agent.src.bacteria.agent.session.store import (
+from bacteria.agent.session.model import (
     MemoryEntry,
     MemoryScope,
     Session,

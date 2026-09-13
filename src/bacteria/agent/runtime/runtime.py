@@ -115,6 +115,234 @@ def _run_meta(
     )
 
 
+async def run_turn(
+    model_client: SendsMessages,
+    session_store: SessionRepository,
+    session_id: str,
+    user_text: str,
+    tool_registry: ToolRegistry | None = None,
+    approve: Approve | None = None,
+) -> RunResult:
+    """Run one turn: assemble, call, optionally use tools, call again, commit.
+
+    Args:
+        session_id: Must already exist. The runtime does not create sessions.
+        user_text: The incoming message.
+        tool_registry: Omit to run without tools — the model is then told of
+            none and cannot propose any.
+        approve: Gate for each proposed call. Omitting it allows everything,
+            which is only appropriate when no registered tool has a side
+            effect worth stopping. Interactive callers pass
+            :func:`bacteria.agent.tools.approval.cli_approve`.
+
+    Returns:
+        The completed run.
+
+    Raises:
+        ToolExecutionError: A proposed call was rejected or failed. The turn
+            stops; it is not reported back to the model as a soft failure.
+            Loud beats graceful here — a model told "that was refused" tends
+            to try a variation, which is the opposite of what a refusal
+            meant. Evidence of the attempt is committed first.
+        UnknownSessionError: No such session.
+        ModelLayerError: The model call failed. Evidence is committed first.
+    """
+    run_id = str(uuid.uuid4())
+    step_tracker = StepTracker()
+
+    state = await self._session_store.get_state(session_id)
+    # **The await is here and not inside assembly**, which is the whole shape
+    # of ADR 0024. Narrowing does I/O and belongs to the host; ranking is a
+    # pure rule. Putting the call inside `assemble_context` would make the
+    # one function that answers "what was the model shown" also a function
+    # that talks to a database, and that function's value is that it can be
+    # read in a sitting.
+    context = assemble_context(state, user_text)
+    tools = tool_registry.schemas_for_run() if tool_registry else None
+    # Names only. The schemas are the model's business; what a run needs
+    # recorded is which capabilities were on the table, since a tool that
+    # was never offered cannot explain a call that was never made.
+    tools_exposed = [schema["name"] for schema in tools or []]
+
+    # Accumulated as the turn progresses rather than assembled at the end,
+    # so that a failure part-way still has something to commit. Everything
+    # appended here is a proposal until the store applies it.
+    #
+    # Every item carries `run_id`. That is what separates an abandoned
+    # attempt from the retry that followed it: both land in the same
+    # session, in order, and without it the two read as one conversation
+    # that stuttered.
+    evidence = [
+        TranscriptItem(
+            kind="message", payload={"role": "user", "text": user_text}, run_id=run_id
+        )
+    ]
+
+    # Accumulated for the `run_meta` record, which both exit paths write.
+    # Initialized before the try so that a run failing at the first model
+    # call still describes itself — with honest nulls rather than absence.
+    answered_by: str | None = None
+    tool_calls_proposed = 0
+    tool_calls_dropped = 0
+
+    try:
+        response: ModelResponse = await step_tracker.run_once(
+            f"{run_id}:model_call",
+            lambda: model_client.send(
+                messages=context.messages, system=context.system, tools=tools
+            ),
+        )
+        answered_by = response.model
+        tool_calls_proposed = len(response.tool_calls)
+
+        if response.tool_calls and tool_registry is not None:
+            results = await execute_tool_calls(
+                run_id=run_id,
+                step_tracker=step_tracker,
+                tool_calls=response.tool_calls,
+                tool_registry=tool_registry,
+                approve=approve if approve is not None else (
+                    lambda _tool_call: True),
+                evidence=evidence,
+            )
+            response = await step_tracker.run_once(
+                f"{run_id}:model_call_after_tools",
+                lambda: model_client.send(
+                    messages=follow_up_messages(
+                        context.messages, response, results),
+                    system=context.system,
+                    tools=tools,
+                ),
+            )
+            answered_by = response.model
+            # Anything this second response asks for is discarded: one round
+            # per turn, by ADR 0011. Counted so that the discarding is
+            # visible in the record — otherwise the model asking to continue
+            # and the model being finished produce identical evidence.
+            tool_calls_dropped = len(response.tool_calls)
+
+        evidence.append(
+            TranscriptItem(
+                kind="message",
+                payload={"role": "assistant", "text": response.text},
+                run_id=run_id,
+            )
+        )
+        evidence.append(
+            _run_meta(
+                run_id,
+                model=answered_by,
+                tools_exposed=tools_exposed,
+                context=context,
+                tool_calls_proposed=tool_calls_proposed,
+                tool_calls_dropped=tool_calls_dropped,
+                outcome="completed",
+            )
+        )
+    except Exception as exc:
+        evidence.append(
+            TranscriptItem(kind="run_error", payload={
+                "error": str(exc)}, run_id=run_id)
+        )
+        evidence.append(
+            _run_meta(
+                run_id,
+                model=answered_by,
+                tools_exposed=tools_exposed,
+                context=context,
+                tool_calls_proposed=tool_calls_proposed,
+                tool_calls_dropped=tool_calls_dropped,
+                outcome="failed",
+            )
+        )
+        # Deliberately not shielded from cancellation. If the surrounding
+        # task is being cancelled this commit may not complete, and that is
+        # the honest outcome: a shielded write would let a cancelled turn
+        # keep writing to a session whose owner has already gone away.
+        await session_store.commit(session_id, new_transcript_items=evidence)
+        raise
+
+    await session_store.commit(session_id, new_transcript_items=evidence)
+    return RunResult(run_id=run_id, response=response)
+
+
+async def _execute_tool_calls(
+    self,
+    run_id: str,
+    step_tracker: StepTracker,
+    tool_calls: list[ToolCall],
+    tool_registry: ToolRegistry,
+    approve: Approve,
+    evidence: list[TranscriptItem],
+) -> list[ToolResult]:
+    """Run every proposed call in order, recording each outcome.
+
+    Args:
+        evidence: Appended to as each call resolves, **including on the
+            failure path** — the record of a rejected or failed call is
+            written before the exception leaves this method, which is what
+            lets the caller commit it. Passing the list in, rather than
+            returning items, is what makes that possible.
+
+    Returns:
+        One result per call, in proposal order.
+
+    Raises:
+        ToolExecutionError: The first call that failed. Remaining calls are
+            abandoned; a turn that lost part of its work should not press on
+            with the rest of a plan built on it.
+    """
+    # Sequential, not gathered. Concurrency here would overlap side effects
+    # whose ordering the model chose deliberately, and would ask the user to
+    # approve several actions at once — both of which trade a guarantee for
+    # latency that a turn dominated by model calls will not notice.
+    results: list[ToolResult] = []
+    for call in tool_calls:
+        try:
+            result = await step_tracker.run_once(
+                # Keyed by call id so two proposals of the same tool in one
+                # turn are distinct steps rather than a false duplicate.
+                f"{run_id}:tool_call:{call['id']}",
+                # Bound as a default argument: a bare closure over `call`
+                # would capture the loop variable and read its final value.
+                lambda call=call: execute_tool_call(
+                    call, tool_registry, approve=approve),
+            )
+        except ToolExecutionError as exc:
+            evidence.append(
+                TranscriptItem(
+                    kind="tool_call",
+                    payload={
+                        "name": call["name"],
+                        "input": call["input"],
+                        "status": "failed",
+                        # Structural, not parsed back out of `error`.
+                        # "refused" and "broke" are the same control flow
+                        # and different events: one says a boundary held.
+                        "reason": exc.reason,
+                        "error": str(exc),
+                    },
+                    run_id=run_id,
+                )
+            )
+            raise
+
+        results.append(result)
+        evidence.append(
+            TranscriptItem(
+                kind="tool_call",
+                payload={
+                    "name": result.name,
+                    "input": call["input"],
+                    "status": "executed",
+                    "output": result.output,
+                },
+                run_id=run_id,
+            )
+        )
+    return results
+
+
 class Runtime:
     """Sequences one turn across the model, tool, and state layers.
 
@@ -137,231 +365,6 @@ class Runtime:
     ) -> None:
         self._model_client = model_client
         self._session_store = session_store
-
-    async def run_turn(
-        self,
-        session_id: str,
-        user_text: str,
-        tool_registry: ToolRegistry | None = None,
-        approve: Approve | None = None,
-    ) -> RunResult:
-        """Run one turn: assemble, call, optionally use tools, call again, commit.
-
-        Args:
-            session_id: Must already exist. The runtime does not create sessions.
-            user_text: The incoming message.
-            tool_registry: Omit to run without tools — the model is then told of
-                none and cannot propose any.
-            approve: Gate for each proposed call. Omitting it allows everything,
-                which is only appropriate when no registered tool has a side
-                effect worth stopping. Interactive callers pass
-                :func:`bacteria.agent.tools.approval.cli_approve`.
-
-        Returns:
-            The completed run.
-
-        Raises:
-            ToolExecutionError: A proposed call was rejected or failed. The turn
-                stops; it is not reported back to the model as a soft failure.
-                Loud beats graceful here — a model told "that was refused" tends
-                to try a variation, which is the opposite of what a refusal
-                meant. Evidence of the attempt is committed first.
-            UnknownSessionError: No such session.
-            ModelLayerError: The model call failed. Evidence is committed first.
-        """
-        run_id = str(uuid.uuid4())
-        step_tracker = StepTracker()
-
-        state = await self._session_store.get_state(session_id)
-        # **The await is here and not inside assembly**, which is the whole shape
-        # of ADR 0024. Narrowing does I/O and belongs to the host; ranking is a
-        # pure rule. Putting the call inside `assemble_context` would make the
-        # one function that answers "what was the model shown" also a function
-        # that talks to a database, and that function's value is that it can be
-        # read in a sitting.
-        context = assemble_context(state, user_text)
-        tools = tool_registry.schemas_for_run() if tool_registry else None
-        # Names only. The schemas are the model's business; what a run needs
-        # recorded is which capabilities were on the table, since a tool that
-        # was never offered cannot explain a call that was never made.
-        tools_exposed = [schema["name"] for schema in tools or []]
-
-        # Accumulated as the turn progresses rather than assembled at the end,
-        # so that a failure part-way still has something to commit. Everything
-        # appended here is a proposal until the store applies it.
-        #
-        # Every item carries `run_id`. That is what separates an abandoned
-        # attempt from the retry that followed it: both land in the same
-        # session, in order, and without it the two read as one conversation
-        # that stuttered.
-        evidence = [
-            TranscriptItem(
-                kind="message", payload={"role": "user", "text": user_text}, run_id=run_id
-            )
-        ]
-
-        # Accumulated for the `run_meta` record, which both exit paths write.
-        # Initialized before the try so that a run failing at the first model
-        # call still describes itself — with honest nulls rather than absence.
-        answered_by: str | None = None
-        tool_calls_proposed = 0
-        tool_calls_dropped = 0
-
-        try:
-            response: ModelResponse = await step_tracker.run_once(
-                f"{run_id}:model_call",
-                lambda: self._model_client.send(
-                    messages=context.messages, system=context.system, tools=tools
-                ),
-            )
-            answered_by = response.model
-            tool_calls_proposed = len(response.tool_calls)
-
-            if response.tool_calls and tool_registry is not None:
-                results = await self._execute_tool_calls(
-                    run_id=run_id,
-                    step_tracker=step_tracker,
-                    tool_calls=response.tool_calls,
-                    tool_registry=tool_registry,
-                    approve=approve if approve is not None else (
-                        lambda _tool_call: True),
-                    evidence=evidence,
-                )
-                response = await step_tracker.run_once(
-                    f"{run_id}:model_call_after_tools",
-                    lambda: self._model_client.send(
-                        messages=self._follow_up_messages(
-                            context.messages, response, results),
-                        system=context.system,
-                        tools=tools,
-                    ),
-                )
-                answered_by = response.model
-                # Anything this second response asks for is discarded: one round
-                # per turn, by ADR 0011. Counted so that the discarding is
-                # visible in the record — otherwise the model asking to continue
-                # and the model being finished produce identical evidence.
-                tool_calls_dropped = len(response.tool_calls)
-
-            evidence.append(
-                TranscriptItem(
-                    kind="message",
-                    payload={"role": "assistant", "text": response.text},
-                    run_id=run_id,
-                )
-            )
-            evidence.append(
-                _run_meta(
-                    run_id,
-                    model=answered_by,
-                    tools_exposed=tools_exposed,
-                    context=context,
-                    tool_calls_proposed=tool_calls_proposed,
-                    tool_calls_dropped=tool_calls_dropped,
-                    outcome="completed",
-                )
-            )
-        except Exception as exc:
-            evidence.append(
-                TranscriptItem(kind="run_error", payload={
-                               "error": str(exc)}, run_id=run_id)
-            )
-            evidence.append(
-                _run_meta(
-                    run_id,
-                    model=answered_by,
-                    tools_exposed=tools_exposed,
-                    context=context,
-                    tool_calls_proposed=tool_calls_proposed,
-                    tool_calls_dropped=tool_calls_dropped,
-                    outcome="failed",
-                )
-            )
-            # Deliberately not shielded from cancellation. If the surrounding
-            # task is being cancelled this commit may not complete, and that is
-            # the honest outcome: a shielded write would let a cancelled turn
-            # keep writing to a session whose owner has already gone away.
-            await self._session_store.commit(session_id, new_transcript_items=evidence)
-            raise
-
-        await self._session_store.commit(session_id, new_transcript_items=evidence)
-        return RunResult(run_id=run_id, response=response)
-
-    async def _execute_tool_calls(
-        self,
-        run_id: str,
-        step_tracker: StepTracker,
-        tool_calls: list[ToolCall],
-        tool_registry: ToolRegistry,
-        approve: Approve,
-        evidence: list[TranscriptItem],
-    ) -> list[ToolResult]:
-        """Run every proposed call in order, recording each outcome.
-
-        Args:
-            evidence: Appended to as each call resolves, **including on the
-                failure path** — the record of a rejected or failed call is
-                written before the exception leaves this method, which is what
-                lets the caller commit it. Passing the list in, rather than
-                returning items, is what makes that possible.
-
-        Returns:
-            One result per call, in proposal order.
-
-        Raises:
-            ToolExecutionError: The first call that failed. Remaining calls are
-                abandoned; a turn that lost part of its work should not press on
-                with the rest of a plan built on it.
-        """
-        # Sequential, not gathered. Concurrency here would overlap side effects
-        # whose ordering the model chose deliberately, and would ask the user to
-        # approve several actions at once — both of which trade a guarantee for
-        # latency that a turn dominated by model calls will not notice.
-        results: list[ToolResult] = []
-        for call in tool_calls:
-            try:
-                result = await step_tracker.run_once(
-                    # Keyed by call id so two proposals of the same tool in one
-                    # turn are distinct steps rather than a false duplicate.
-                    f"{run_id}:tool_call:{call['id']}",
-                    # Bound as a default argument: a bare closure over `call`
-                    # would capture the loop variable and read its final value.
-                    lambda call=call: execute_tool_call(
-                        call, tool_registry, approve=approve),
-                )
-            except ToolExecutionError as exc:
-                evidence.append(
-                    TranscriptItem(
-                        kind="tool_call",
-                        payload={
-                            "name": call["name"],
-                            "input": call["input"],
-                            "status": "failed",
-                            # Structural, not parsed back out of `error`.
-                            # "refused" and "broke" are the same control flow
-                            # and different events: one says a boundary held.
-                            "reason": exc.reason,
-                            "error": str(exc),
-                        },
-                        run_id=run_id,
-                    )
-                )
-                raise
-
-            results.append(result)
-            evidence.append(
-                TranscriptItem(
-                    kind="tool_call",
-                    payload={
-                        "name": result.name,
-                        "input": call["input"],
-                        "status": "executed",
-                        "output": result.output,
-                    },
-                    run_id=run_id,
-                )
-            )
-        return results
 
     @classmethod
     def _follow_up_messages(

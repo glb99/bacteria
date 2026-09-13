@@ -40,7 +40,7 @@ import anyio
 from dotenv import load_dotenv
 
 from bacteria.agent.model.protocol import SendsMessages
-from bacteria.agent.runtime.runtime import Runtime
+from bacteria.agent.runtime.runtime import run_turn
 from bacteria.agent.session.protocol import SessionRepository
 from bacteria.agent.tools.approval import cli_approve
 from bacteria.agent.tools.registry import ToolRegistry
@@ -141,8 +141,6 @@ async def _run() -> None:
     load_dotenv()
 
     session_store = in_memory_session_repository()
-    runtime = Runtime(model_client=build_model_client(),
-                      session_store=session_store)
 
     # The session is created before the registry, not after: `remember` is bound
     # to a conversation, so there has to be one first.
@@ -162,9 +160,11 @@ async def _run() -> None:
         if not user_text:
             break
 
-        result = await runtime.run_turn(
-            session.session_id,
-            user_text,
+        result = await run_turn(
+            model_client=build_model_client(),
+            session_store=session_store,
+            session_id=session.session_id,
+            user_text=user_text,
             tool_registry=tool_registry,
             # The real gate. Omitting it would leave the permissive default in
             # place, which is wrong the moment a human is watching.

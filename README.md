@@ -4,3 +4,4 @@
 
 # Bacteria
 
+A highly modular fullstack AI agent, built from the right fundaments, no slop.

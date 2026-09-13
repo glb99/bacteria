@@ -24,3 +24,7 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
 ]
+docs = [
+    "mkdocstrings-python>=2.0.8",
+    "zensical>=0.0.61",
+]

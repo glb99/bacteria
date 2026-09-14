@@ -13,7 +13,7 @@ edit_uri = "edit/main/docs/"
 
 nav = [
   { "Get started" = "index.md" },
-  { "Markdown in 5min" = "markdown.md" },
+  { "Architecture decisions" = "adr/index.md" },
 ]
 
 # extra_css = ["stylesheets/extra.css"]
@@ -53,7 +53,7 @@ features = [
   # "toc.integrate",
 ]
 
-# logo = "assets/logo.png"
+logo = "assets/logo.png"
 
 # [project.theme.icon]
 # logo = "lucide/smile"

@@ -107,8 +107,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.agent.src.agent.app.store.in_memory.error import UnknownSessionError
-from backend.agent.src.agent.agent.session.model import OWNER, SESSION_SCOPE, USER_SCOPE, MemoryEntry, MemoryScope, Session, SessionState, TranscriptItem
+from backend.agent.src.agent.store.in_memory.error import UnknownSessionError
+from backend.agent.src.agent.session.model import OWNER, SESSION_SCOPE, USER_SCOPE, MemoryEntry, MemoryScope, Session, SessionState, TranscriptItem
 
 
 class in_memory_session_repository:

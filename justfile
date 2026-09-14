@@ -3,3 +3,4 @@ docs-build:
 
 docs-serve:
     uv run --group docs zensical serve
+

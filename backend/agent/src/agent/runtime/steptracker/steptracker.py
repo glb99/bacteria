@@ -1,6 +1,6 @@
 from typing import Any, Awaitable, Callable
 
-from backend.agent.src.agent.agent.runtime.steptracker.error import StepAlreadyExecutedError
+from backend.agent.src.agent.runtime.steptracker.error import StepAlreadyExecutedError
 
 
 class StepTracker:

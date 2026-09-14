@@ -83,7 +83,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from backend.agent.src.agent.agent.session.model import SessionState
+from backend.agent.src.agent.session.model import SessionState
 
 DEFAULT_WINDOW = 20
 """Messages kept from history. Small enough to stay cheap, large enough that a

@@ -31,8 +31,8 @@ from typing import Any
 
 import anyio
 from google import genai
-from backend.agent.src.agent.agent.model.errors import CredentialsError
-from backend.agent.src.agent.agent.model.protocol import ModelResponse
+from backend.agent.src.agent.model.errors import CredentialsError
+from backend.agent.src.agent.model.protocol import ModelResponse
 from google.genai import errors as genai_errors
 from google.genai import types
 

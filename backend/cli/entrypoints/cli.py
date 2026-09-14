@@ -39,13 +39,13 @@ from typing import Callable
 import anyio
 from dotenv import load_dotenv
 
-from backend.agent.src.agent.agent.model.protocol import SendsMessages
-from backend.agent.src.agent.agent.runtime.runtime import Runtime
-from backend.agent.src.agent.agent.session.protocol import SessionRepository
-from backend.agent.src.agent.agent.tools.approval import cli_approve
-from backend.agent.src.agent.agent.tools.registry import ToolRegistry
-from backend.agent.src.agent.app.provider.gemini_client import GeminiClient
-from backend.agent.src.agent.app.store.in_memory.in_memory_session_repository import (
+from backend.agent.src.agent.model.protocol import SendsMessages
+from backend.agent.src.agent.runtime.runtime import Runtime
+from backend.agent.src.agent.session.protocol import SessionRepository
+from backend.agent.src.agent.tools.approval import cli_approve
+from backend.agent.src.agent.tools.registry import ToolRegistry
+from backend.agent.src.agent.provider.gemini_client import GeminiClient
+from backend.agent.src.agent.store.in_memory.in_memory_session_repository import (
     in_memory_session_repository,
 )
 

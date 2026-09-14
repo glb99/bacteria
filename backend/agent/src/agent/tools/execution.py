@@ -51,8 +51,8 @@ from typing import Any, Awaitable, Callable, Literal, TypeVar
 
 import anyio.to_thread
 
-from backend.agent.src.agent.agent.model.protocol import ToolCall
-from backend.agent.src.agent.agent.tools.registry import ToolRegistry, UnknownToolError
+from backend.agent.src.agent.model.protocol import ToolCall
+from backend.agent.src.agent.tools.registry import ToolRegistry, UnknownToolError
 
 _T = TypeVar("_T")
 

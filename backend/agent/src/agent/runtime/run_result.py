@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from backend.agent.src.agent.agent.model.protocol import ModelResponse
+from backend.agent.src.agent.model.protocol import ModelResponse
 
 
 @dataclass

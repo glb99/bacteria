@@ -69,14 +69,14 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from backend.agent.src.agent.agent.context.assembly import DEFAULT_MEMORY_LIMIT, AssembledContext, assemble_context
-from backend.agent.src.agent.agent.model.protocol import ModelResponse, SendsMessages, ToolCall
-from backend.agent.src.agent.agent.runtime.run_result import RunResult
-from backend.agent.src.agent.agent.runtime.steptracker.steptracker import StepTracker
-from backend.agent.src.agent.agent.session.model import TranscriptItem
-from backend.agent.src.agent.agent.session.protocol import SessionRepository
-from backend.agent.src.agent.agent.tools.execution import Approve, ToolExecutionError, ToolResult, execute_tool_call
-from backend.agent.src.agent.agent.tools.registry import ToolRegistry
+from backend.agent.src.agent.context.assembly import DEFAULT_MEMORY_LIMIT, AssembledContext, assemble_context
+from backend.agent.src.agent.model.protocol import ModelResponse, SendsMessages, ToolCall
+from backend.agent.src.agent.runtime.run_result import RunResult
+from backend.agent.src.agent.runtime.steptracker.steptracker import StepTracker
+from backend.agent.src.agent.session.model import TranscriptItem
+from backend.agent.src.agent.session.protocol import SessionRepository
+from backend.agent.src.agent.tools.execution import Approve, ToolExecutionError, ToolResult, execute_tool_call
+from backend.agent.src.agent.tools.registry import ToolRegistry
 
 
 def _run_meta(

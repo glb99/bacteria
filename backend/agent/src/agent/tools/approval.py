@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from backend.agent.src.agent.agent.model.protocol import ToolCall
+from backend.agent.src.agent.model.protocol import ToolCall
 
 
 def describe_tool_call(tool_call: ToolCall) -> str:

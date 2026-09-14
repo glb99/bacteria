@@ -66,7 +66,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from backend.agent.src.agent.agent.session.model import (
+from backend.agent.src.agent.session.model import (
     MemoryEntry,
     MemoryScope,
     Session,

@@ -1,7 +1,7 @@
 import pytest
 
-from backend.agent.src.agent.agent.context.assembly import assemble_context
-from backend.agent.src.agent.agent.session.model import SessionState, TranscriptItem
+from backend.agent.src.agent.context.assembly import assemble_context
+from backend.agent.src.agent.session.model import SessionState, TranscriptItem
 
 
 def test_context_assembly_returns_expected_messages():

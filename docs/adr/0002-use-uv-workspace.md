@@ -49,4 +49,21 @@ After building the complete local workflow, commands, actions and Docker packagi
 
 ## More Information
 
-Nothing (for now).
+[Updated 2026-09-14]: There are two ways of defining an uv workspace: being the root a "virtual" workspace or not only as a workspace but being also a root project that is, in fact, a workspace member.
+
+The difference is in the root pyproject definition.
+
+* Virtual workspace pyproject only needs to indicate the workspace members, as defined in https://github.com/fastapi/full-stack-fastapi-template:
+'''
+  [tool.uv.workspace]
+  members = ["backend/*"]
+'''
+
+* While if we want to define is a a project, we need to define the project and the workspace members as dependencies of the root workspace project, as defined in https://docs.astral.sh/uv/concepts/projects/workspaces/:
+'''
+  [project]
+  name = "albatross"
+  dependencies = ["bird-feeder", "tqdm>=4,<5"]
+'''
+
+For the moment, the top-level project (bacteria) is not a distribution by itself, and none of the subpackages are clear candidates to be, so we go with **virtual workspace** option.

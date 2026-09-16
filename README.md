@@ -7,4 +7,4 @@
 Bacteria is an experimental project about platform engineering & AI. The goal is creating an AI infrastructure, testing how modular could it be, the value is in the architecture/platform, developed modules and how boundariers are defined.
 
 Most of the project value lives in the ADR and codebase itself, each decission in this project is sourced and in no case is AI-generated/sloped.
-
+This in is fact a **no-sloped** version of my previous MVP: https://github.com/glb99/aristotle.

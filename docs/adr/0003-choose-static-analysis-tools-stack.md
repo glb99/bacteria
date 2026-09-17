@@ -47,4 +47,5 @@ Not to consider.
 
 ## More Information
 
-To be discussed: the way of implementing it as part of local dev workflow, github workflow, both...
+* Implementation approach: [ADR 0005 — Enforce pre-commit checks in GitHub Actions](0005-
+enforce-pre-commit-in-github-actions.md).

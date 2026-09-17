@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: YYYY-MM-DD
+date: 2026-09-15
 decision-makers: []
 ---
 

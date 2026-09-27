@@ -1,0 +1,6 @@
+# The person writes architecture decision records. Assistant notes live under ai/.
+[permission]
+deny = [
+  "Edit(docs/adr/*)",
+  "Edit(docs/adr/**)",
+]

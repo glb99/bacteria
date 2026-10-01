@@ -10,7 +10,7 @@ from sqlmodel import Session
 
 from app.core import security
 from app.core.config import settings
-from app.core.db import engine
+from app.core.db import engine, scope_to_user
 from app.models import TokenPayload, User
 
 reusable_oauth2 = OAuth2PasswordBearer(
@@ -47,6 +47,15 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_scoped_session(session: SessionDep, current_user: CurrentUser) -> Session:
+    if not current_user.is_superuser:
+        scope_to_user(session, str(current_user.id))
+    return session
+
+
+ScopedSessionDep = Annotated[Session, Depends(get_scoped_session)]
 
 
 def get_current_active_superuser(current_user: CurrentUser) -> User:

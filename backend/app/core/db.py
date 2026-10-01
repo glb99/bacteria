@@ -12,6 +12,13 @@ engine = create_engine(str(settings.DATABASE_URL), pool_pre_ping=True)
 # for more details: https://github.com/fastapi/full-stack-fastapi-template/issues/28
 
 
+def scope_to_user(session: Session, user_id: str) -> None:
+    session.execute(
+        text("SELECT set_config('app.current_user_id', :user_id, true)"),
+        {"user_id": user_id},
+    )
+
+
 def init_db(session: Session) -> None:
     # Tables should be created with Alembic migrations
     # But if you don't want to use migrations, create

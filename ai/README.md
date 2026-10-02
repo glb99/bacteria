@@ -17,7 +17,7 @@ Copy `session-template.md` to `sessions/YYYY-MM-DD-short-slug.md`.
 
 `sessions/index.md` lists every session, newest first. The ADR column stays empty until a person has written the record and named its id.
 
-The handoff in each session is the revisit guide for an ADR the person has not written yet. Keep it current in the same turn the material appears. The research-session skill says what the guide contains.
+The handoff in each session is the revisit guide for an ADR the person has not written yet. Keep it current in the same turn the material appears. The procedure is `.agents/skills/research-session/SKILL.md`.
 
 ## Status
 

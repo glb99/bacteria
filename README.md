@@ -8,4 +8,6 @@ Bacteria is an experimental project about platform engineering & AI. The goal is
 
 Most of the project value lives in the ADR and codebase itself, each decission in this project is sourced, and because the "evolutive" approach of the development, this will be the only source of project's provided documentation for now, that in no case will be AI-generated/sloped.
 
+Assistant working notes live in [`ai/`](ai/README.md). They are not project documentation. Architecture decisions stay in `docs/adr/`, written by a person.
+
 This in is fact a **no-slopped** version of my previous MVP: https://github.com/glb99/aristotle.

@@ -49,4 +49,4 @@ adr: ""
 
 ## Handoff for a human ADR
 
-{Constraints, evidence, and open questions to carry into `docs/adr/` if the person writes a record. This section does not choose an option.}
+{One part per record. For a record the person has written, name the file and what it decided. For a record they have not written, keep a revisit guide: context, drivers, considered options, the option they chose and a because-clause from those drivers, consequences, confirmation, More Information in their words, and open questions. If they have not chosen, leave the outcome open. Update this section in the same turn the material appears. The procedure is `.grok/skills/research-session/SKILL.md`.}

@@ -54,6 +54,8 @@ Code, tests, config, and docs change only when the current message explicitly as
 - `ai/` is not gitignored, so session notes will be committed if the person commits them. Unchecked whether these notes should stay out of git.
 - `README.md` gained one sentence pointing at `ai/`. Unchecked whether that sentence belongs in the human-written project readme.
 - "Always record the session" is implemented for research sessions. An explicit request to change code does not by itself open a new session file.
+- On 2026-10-02 the person required that material which will guide an unwritten ADR be written into that session's handoff in the same turn, without waiting to be asked. The procedure is `.grok/skills/research-session/SKILL.md`. This session's alignment check is still open.
+- On 2026-10-02 the person required that the assistant not use the Grok memory store (`~/.grok/memory-v2/` or `~/.grok/memory/`). Continuity stays in `ai/sessions/`. The rule is in `Agents.md`.
 
 ## Alignment check
 

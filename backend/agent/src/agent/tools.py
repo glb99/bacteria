@@ -2,7 +2,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, TypeVar
+from typing import Any, NotRequired, TypedDict, TypeVar, cast
 
 import anyio
 
@@ -147,7 +147,7 @@ async def _call_either(fn: Callable[..., _T | Awaitable[_T]], *args: Any) -> _T:
 
     if inspect.iscoroutinefunction(fn):
         return await fn(*args)
-    return await anyio.to_thread.run_sync(fn, *args)
+    return cast(_T, await anyio.to_thread.run_sync(fn, *args))
 
 
 async def execute_tool_call(

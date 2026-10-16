@@ -47,7 +47,7 @@ from dotenv import load_dotenv
 # the literal infers the two concrete classes and calls the wider declared type
 # a mismatch. Widening to `dict[str, Any]` to satisfy it would delete the only
 # thing here worth checking.
-PROVIDERS: dict[str, Callable[[], SendsMessage]] = {  # ty: ignore[invalid-assignment]
+PROVIDERS: dict[str, Callable[[], SendsMessage]] = {
     "gemini": GeminiClient,
 }
 """Selectable model providers, keyed by ``MODEL_PROVIDER``.

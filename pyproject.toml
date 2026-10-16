@@ -16,3 +16,13 @@ docs = [
 
 [tool.uv.workspace]
 members = ["backend/*"]
+
+[tool.coverage.run]
+source_dirs = [
+    "backend/agent/src/agent",
+    "backend/app/src/app",
+]
+
+[tool.coverage.report]
+show_missing = true
+sort = "-Cover"

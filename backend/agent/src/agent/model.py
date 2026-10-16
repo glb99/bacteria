@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol
 
 import anyio
 import httpx
@@ -15,12 +15,7 @@ from agent.errors import (
     ModelError,
     ServingError,
 )
-
-
-class ToolCall(TypedDict):
-    id: str
-    name: str
-    input: dict[str, Any]
+from agent.tools import ToolCall
 
 
 @dataclass

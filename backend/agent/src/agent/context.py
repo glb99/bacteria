@@ -14,7 +14,7 @@ class AssembledContext:
 
 def assemble_context(
     state: SessionState, user_text: str, window_size: int = 5
-) -> dict[str, Any]:
+) -> AssembledContext:
     """
     Assemble the context for the current session.
 

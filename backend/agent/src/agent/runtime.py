@@ -5,7 +5,7 @@ from typing import Any
 from agent.context import assemble_context
 from agent.model import ModelResponse, SendsMessage
 from agent.session import SessionRepository, TranscriptItem
-from agent.tools import ToolRegistry, ToolResult, execute_tool_call
+from agent.tools import ToolCall, ToolRegistry, ToolResult, execute_tool_call
 
 MAX_TOOL_ROUNDS = 3
 
@@ -72,7 +72,7 @@ def _follow_up_messages(
 
 
 async def _execute_tool_calls(
-    tool_calls: list[dict], tool_registry: ToolRegistry
+    tool_calls: list[ToolCall], tool_registry: ToolRegistry
 ) -> list[ToolResult]:
 
     results: list[ToolResult] = []

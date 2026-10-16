@@ -1,14 +1,13 @@
 from agent.context import assemble_context
-from agent.session import SessionState, TranscriptItem
+from agent.session import Session, SessionState, TranscriptItem
 
 
 def test_context_assembly_returns_expected_messages():
     """Assembled context should include the new user message and recent history."""
     state = SessionState(
-        session=None,  # Not needed for this test
+        session=Session(session_id="test"),
         transcript=[
-            TranscriptItem(kind="message", payload={
-                           "role": "user", "text": "Hello"}),
+            TranscriptItem(kind="message", payload={"role": "user", "text": "Hello"}),
             TranscriptItem(
                 kind="message", payload={"role": "assistant", "text": "Hi there!"}
             ),

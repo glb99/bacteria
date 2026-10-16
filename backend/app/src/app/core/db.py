@@ -14,7 +14,7 @@ engine = create_engine(str(settings.DATABASE_URL), pool_pre_ping=True)
 
 
 def scope_to_user(session: Session, user_id: str) -> None:
-    session.execute(
+    session.connection().execute(
         text("SELECT set_config('app.current_user_id', :user_id, true)"),
         {"user_id": user_id},
     )

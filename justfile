@@ -21,11 +21,7 @@ _cov *args:
 [group('qa')]
 @cov:
     just _cov erase
-    just _cov run -m pytest tests
-    # Ensure ASGI entrypoint is importable.
-    # You can also use coverage to run your CLI entrypoints.
-    just _cov run -m hello_svc.asgi
-    just _cov combine
+    just _cov run -m pytest backend/agent/src/tests
     just _cov report
     just _cov html
 
@@ -38,7 +34,7 @@ lint:
 # Check types
 [group('qa')]
 typing:
-    uvx ty check --python .venv src
+    uvx ty check --python .venv backend/agent/src backend/app/src backend/cli
 
 # Perform all checks
 [group('qa')]

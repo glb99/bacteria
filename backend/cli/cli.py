@@ -31,6 +31,7 @@ Not built:
     ``argparse`` here and keep the environment as the fallback.
 """
 
+
 from __future__ import annotations
 
 import os
@@ -39,21 +40,17 @@ from typing import Callable
 import anyio
 from dotenv import load_dotenv
 
-from backend.agent.src.agent.model.protocol import SendsMessages
-from backend.agent.src.agent.runtime.runtime import Runtime
-from backend.agent.src.agent.session.protocol import SessionRepository
-from backend.agent.src.agent.tools.approval import cli_approve
-from backend.agent.src.agent.tools.registry import ToolRegistry
-from backend.agent.src.agent.provider.gemini_client import GeminiClient
-from backend.agent.src.agent.store.in_memory.in_memory_session_repository import (
-    in_memory_session_repository,
-)
+from agent.model import GeminiClient, SendsMessage
+from agent.runtime import run_turn
+from agent.session import InMemorySessionRepository
+from agent.tools import ToolRegistry, build_add_note_tool
+
 
 # The annotation is the contract this table exists to state; a checker reading
 # the literal infers the two concrete classes and calls the wider declared type
 # a mismatch. Widening to `dict[str, Any]` to satisfy it would delete the only
 # thing here worth checking.
-PROVIDERS: dict[str, Callable[[], SendsMessages]] = {  # ty: ignore[invalid-assignment]
+PROVIDERS: dict[str, Callable[[], SendsMessage]] = {  # ty: ignore[invalid-assignment]
     "gemini": GeminiClient,
 }
 """Selectable model providers, keyed by ``MODEL_PROVIDER``.
@@ -70,7 +67,7 @@ module requires — a provider needing constructor arguments can be added as a
 DEFAULT_PROVIDER = "gemini"
 
 
-def build_model_client(provider: str | None = None) -> SendsMessages:
+def build_model_client(provider: str | None = None) -> SendsMessage:
     """Construct the configured model client.
 
     Args:
@@ -98,7 +95,7 @@ def build_model_client(provider: str | None = None) -> SendsMessages:
     return client_cls()
 
 
-def build_tool_registry(session_store: SessionRepository, session_id: str) -> ToolRegistry:
+def build_tool_registry() -> ToolRegistry:
     """Declare what this deployment can do.
 
     The complete capability surface, in one readable list. A tool that is not
@@ -127,7 +124,7 @@ def build_tool_registry(session_store: SessionRepository, session_id: str) -> To
     something that was never active on any later turn.
     """
     registry = ToolRegistry()
-    # registry.register_tool(...)
+    registry.register(build_add_note_tool())
     return registry
 
 
@@ -139,15 +136,8 @@ async def _run() -> None:
     committed to the session by the runtime before the exception reaches here.
     """
     load_dotenv()
-
-    session_store = in_memory_session_repository()
-    runtime = Runtime(model_client=build_model_client(),
-                      session_store=session_store)
-
-    # The session is created before the registry, not after: `remember` is bound
-    # to a conversation, so there has to be one first.
-    session = await session_store.create_session(user_id="local-cli")
-    tool_registry = build_tool_registry(session_store, session.session_id)
+    session_repository = InMemorySessionRepository()
+    session = session_repository.create_session()
     print(f"session: {session.session_id}  (empty line or Ctrl+C to quit)")
 
     while True:
@@ -157,19 +147,18 @@ async def _run() -> None:
             # no concurrency for it to stall. A surface that serves more than
             # one caller must not read its input this way.
             user_text = input("> ").strip()
+
         except (EOFError, KeyboardInterrupt):
             break
         if not user_text:
             break
 
-        result = await runtime.run_turn(
-            session.session_id,
-            user_text,
-            tool_registry=tool_registry,
-            # The real gate. Omitting it would leave the permissive default in
-            # place, which is wrong the moment a human is watching.
-            approve=cli_approve,
-        )
+        result = await run_turn(session_id=session.session_id,
+                                user_text=user_text,
+                                model_client=build_model_client(),
+                                tool_registry=build_tool_registry(),
+                                session_repository=session_repository)
+
         print(result.response.text)
 
 

@@ -4,5 +4,6 @@ Newest first. Status values are defined in `../README.md`.
 
 | Date | Question | Status | Record | ADR |
 | --- | --- | --- | --- | --- |
+| 2026-10-16 | How should uploaded files become a RAG the agent uses? | exploring | [2026-10-16-ingestion-rag-for-the-agent.md](2026-10-16-ingestion-rag-for-the-agent.md) | |
 | 2026-09-28 | Where should a user-scoped database session live? | aligned | [2026-09-28-user-scoped-database-session.md](2026-09-28-user-scoped-database-session.md) | 0006 |
 | 2026-09-27 | How should the assistant work in this repository? | exploring | [2026-09-27-assistant-works-by-understanding.md](2026-09-27-assistant-works-by-understanding.md) | |

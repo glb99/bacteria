@@ -1,40 +1,36 @@
-"""Gemini-backed implementation of :class:`~bacteria.agent.model.protocol.SendsMessages`.
-
-Exists to keep the provider seam honest. A protocol with one implementation is
-an assertion; with two it is a tested claim. Swapping this in requires no
-change to :mod:`bacteria.agent.runtime.runtime`, the tool loop, or the session store
-— only the CLI's provider table names it.
-
-This class is also where the cost of the internal message format is paid.
-Because the runtime speaks Anthropic's block vocabulary rather than a neutral
-one (see :mod:`bacteria.agent.model.protocol`), a second provider does real
-translation work rather than merely matching a method signature. Everything
-below the constructor is that translation, in both directions — role remapping,
-a pre-pass to recover function names, and schema field differences. Budget for
-it when adding a third provider.
-
-Failures are classified into the same
-:mod:`~bacteria.agent.model.errors` taxonomy the Anthropic client uses. Those
-categories describe which part of "talking to a model" broke, which is not an
-Anthropic-specific question, so a provider-specific taxonomy would only make
-callers branch on the provider.
-
-Not built:
-    Streaming, prompt caching, and the ``thinking`` modes Gemini exposes —
-    matching the Anthropic client's scope rather than exceeding it, so that the
-    two remain genuinely interchangeable rather than one being a superset.
-"""
-
-from __future__ import annotations
-
-from typing import Any
-
+from dataclasses import dataclass
+import types
+from typing import Any, Protocol, TypedDict
 import anyio
+import httpx
 from google import genai
-from backend.agent.src.agent.model.errors import CredentialsError
-from backend.agent.src.agent.model.protocol import ModelResponse
 from google.genai import errors as genai_errors
 from google.genai import types
+
+from agent.errors import AssetError, BacteriaException, ContractError, CredentialsError, ModelError, ServingError
+
+
+class ToolCall(TypedDict):
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+@dataclass
+class ModelResponse:
+    text: str
+    tool_calls: list[ToolCall]
+    stops_reason: str | None
+
+
+class SendsMessage(Protocol):
+    async def send(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
+    ) -> ModelResponse:
+        ...
 
 
 # Gemini reports "request too large" as a plain 400, same as Anthropic, so the
@@ -85,7 +81,7 @@ class GeminiClient:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-        system: str | None = None,
+        system_prompt: str | None = None,
         max_tokens: int = 1024,
     ) -> ModelResponse:
         """Make one model call, retrying only transient serving failures.
@@ -114,8 +110,8 @@ class GeminiClient:
             # trying exactly this as a fix and watching it fail.
             "thinking_config": types.ThinkingConfig(thinking_budget=0),
         }
-        if system:
-            config_kwargs["system_instruction"] = system
+        if system_prompt:
+            config_kwargs["system_instruction"] = system_prompt
         if tools:
             config_kwargs["tools"] = [self._to_gemini_tools(tools)]
         config = types.GenerateContentConfig(**config_kwargs)
@@ -135,7 +131,7 @@ class GeminiClient:
                 # an unreadable response is a contract failure, not an untyped
                 # parsing exception.
                 return self._to_model_response(response)
-            except ModelLayerError:
+            except ModelError:
                 raise
             except Exception as exc:
                 classified = self._classify(exc)
@@ -170,11 +166,10 @@ class GeminiClient:
     def _to_content(message: dict[str, Any], id_to_name: dict[str, str]) -> types.Content:
         """Translate one internal message into a Gemini ``Content``.
 
-        Three role vocabularies have to be reconciled: the internal format uses
-        ``user``/``assistant`` and marks tool results as a ``user`` message
-        whose blocks are ``tool_result``, whereas Gemini uses
-        ``user``/``model``/``tool`` and infers nothing from part type. Hence the
-        ``is_tool_result`` flag rather than a direct role mapping.
+        The internal format uses ``user``/``assistant`` and marks tool results
+        as a ``user`` message whose blocks are ``tool_result``. Gemini uses
+        ``user``/``model`` roles and identifies function results by their part
+        type, so tool-result messages remain ``user`` turns.
 
         Raises:
             ContractError: Unknown block type. Raised rather than skipped —
@@ -189,7 +184,6 @@ class GeminiClient:
             return types.Content(role=gemini_role, parts=[types.Part.from_text(text=content)])
 
         parts: list[types.Part] = []
-        is_tool_result = False
         for block in content:
             kind = block["type"]
             if kind == "text":
@@ -206,7 +200,6 @@ class GeminiClient:
                     part.thought_signature = signature
                 parts.append(part)
             elif kind == "tool_result":
-                is_tool_result = True
                 name = id_to_name.get(block["tool_use_id"], "unknown_tool")
                 parts.append(
                     types.Part.from_function_response(
@@ -216,8 +209,7 @@ class GeminiClient:
             else:
                 raise ContractError(f"unsupported content block type: {kind}")
 
-        gemini_role = "tool" if is_tool_result else (
-            "model" if role == "assistant" else "user")
+        gemini_role = "model" if role == "assistant" else "user"
         return types.Content(role=gemini_role, parts=parts)
 
     @staticmethod
@@ -283,35 +275,25 @@ class GeminiClient:
             stop_reason = str(response.candidates[0].finish_reason)
 
         return ModelResponse(
-            text=response.text or None,
+            text=response.text or "",
             tool_calls=tool_calls,
-            stop_reason=stop_reason,
-            raw=response,
-            # `model_version`, which is what served the request — a pinned alias
-            # can resolve to a specific build, and that build is what a run
-            # needs recorded.
-            #
-            # No fallback to the configured name. It is optional on the response
-            # type, so this can be None, and that is the honest answer: the
-            # provider did not say. Substituting what we asked for would record
-            # an intention as though it were an observation, which is the exact
-            # conflation ADR 0019 rejected when it put `model` on the response
-            # instead of on the client. A run that completed with no model named
-            # is distinguishable from one that failed before answering, because
-            # `run_meta` carries `outcome` alongside this.
-            model=response.model_version,
+            stops_reason=stop_reason,
         )
 
     @staticmethod
-    def _classify(exc: Exception) -> ModelLayerError:
+    def _classify(exc: Exception) -> BacteriaException:
         """Map a raw Gemini SDK exception onto the model-layer taxonomy.
 
         The SDK splits failures by HTTP range — ``ClientError`` for 4xx,
         ``ServerError`` for 5xx — which does not line up with retryability.
         429 is a 4xx but is exactly the case worth retrying, so it is pulled
         out of the client-error branch explicitly; without that, rate limits
-        would fail on the first attempt.
+        would fail on the first attempt. HTTP transport failures are also
+        retryable, unlike malformed requests and rejected credentials.
         """
+        if isinstance(exc, httpx.TransportError):
+            return ServingError(str(exc))
+
         if isinstance(exc, genai_errors.ClientError):
             message = str(exc).lower()
             if exc.code in (401, 403) or any(hint in message for hint in _AUTH_HINTS):

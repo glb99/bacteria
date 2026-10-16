@@ -1,29 +1,12 @@
 import copy
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Literal, Protocol
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Literal, Protocol
 
 from agent.errors import UnknownSessionError
 
-
 TranscriptItemKind = Literal["message", "tool_call", "run_error"]
-
-
-@dataclass
-class Session:
-    session_id: str
-
-
-@dataclass
-class SessionState:
-    session: Session
-
-
-@dataclass
-class SessionState:
-    session: Session
-    transcript: list[TranscriptItem] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -50,9 +33,19 @@ class TranscriptItem:
 
     kind: TranscriptItemKind
     payload: dict[str, Any]
-    timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     run_id: str | None = None
+
+
+@dataclass
+class Session:
+    session_id: str
+
+
+@dataclass
+class SessionState:
+    session: Session
+    transcript: list[TranscriptItem] = field(default_factory=list)
 
 
 TranscriptiontemKind = Literal["message", "tool_call", "run_error"]

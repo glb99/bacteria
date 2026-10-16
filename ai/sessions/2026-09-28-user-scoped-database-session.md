@@ -19,7 +19,7 @@ def scoped_session(user_id: str) -> Generator[Session, None, None]:
     try:
         session.execute(
             text("SELECT set_config('app.current_user_id', :user_id, true)"),
-            {"user_id": user_id}
+            {"user_id": user_id},
         )
         yield session
         session.commit()
@@ -81,7 +81,8 @@ The paragraphs above are the model confirmed when this session closed. The hando
 
 - Resolved on 2026-10-02: the accepted gap that nothing reads `app.current_user_id` is closed by revision `93f413156120`. The policies read the variable. When it is unset they still match every row, so a forgotten `scope_to_user` still sees every row of `item` and `"user"`.
 - The in-memory store and the CLI still pass and store `user_id`, and `MemoryScope` still includes `"user"`. The shared model says those leave. That confirmation belongs to ADR 0006. This session does not change that code.
-- No route uses `ScopedSessionDep`. `scope_to_user` calls `text` and `db.py` does not import it. Whether revision `93f413156120` has been applied to a database was not checked.
+- No route uses `ScopedSessionDep`. `scope_to_user` calls `text`, and `backend/app/src/app/core/db.py` imports it from `sqlalchemy`. Whether revision `93f413156120` has been applied to a database was not checked.
+- As of 2026-10-16 the importable package lives at `backend/app/src/app/`. Alembic stays at `backend/app/alembic`. Paths in the evidence above that omit `src/app` are the earlier tree.
 - Performance of a scoped transaction is the person's open question. The handoff keeps their sentence and does not answer it.
 
 ## Alignment check
@@ -183,7 +184,7 @@ Notes for that later evaluation. They stay out of More Information until the per
 The decision above is not the same as the tree. This session does not change code.
 
 - `scope_to_user` and `get_scoped_session` are in the tree. No route uses `ScopedSessionDep`.
-- `scope_to_user` calls `text` and `backend/app/core/db.py` does not import it.
+- `scope_to_user` calls `text`. `backend/app/src/app/core/db.py` imports it from `sqlalchemy`.
 - Revision `93f413156120` contains the policies. Application of that revision to a database was not checked.
 - `backend/app/api/deps.py` still has `except InvalidTokenError, ValidationError` without parentheses. That defect is outside this decision.
 - Removing `user_id` from the agent `Session` and `create_session`, and removing the `"user"` memory scope, is the confirmation of ADR 0006.

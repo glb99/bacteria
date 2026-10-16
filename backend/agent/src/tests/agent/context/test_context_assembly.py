@@ -1,7 +1,5 @@
-import pytest
-
-from backend.agent.src.agent.context.assembly import assemble_context
-from backend.agent.src.agent.session.model import SessionState, TranscriptItem
+from agent.context import assemble_context
+from agent.session import SessionState, TranscriptItem
 
 
 def test_context_assembly_returns_expected_messages():
@@ -11,12 +9,13 @@ def test_context_assembly_returns_expected_messages():
         transcript=[
             TranscriptItem(kind="message", payload={
                            "role": "user", "text": "Hello"}),
-            TranscriptItem(kind="message", payload={
-                           "role": "assistant", "text": "Hi there!"}),
-            TranscriptItem(kind="message", payload={
-                           "role": "user", "text": "How are you?"}),
-        ]
-
+            TranscriptItem(
+                kind="message", payload={"role": "assistant", "text": "Hi there!"}
+            ),
+            TranscriptItem(
+                kind="message", payload={"role": "user", "text": "How are you?"}
+            ),
+        ],
     )
     user_text = "What's the weather like?"
     window_size = 2

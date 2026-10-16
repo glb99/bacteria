@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlmodel import Session, create_engine, select
 
 from app import crud

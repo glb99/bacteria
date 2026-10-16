@@ -1,7 +1,8 @@
-from dataclasses import dataclass
 import inspect
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, NotRequired, TypeVar, TypedDict
+from typing import Any, NotRequired, TypedDict, TypeVar
 
 import anyio
 
@@ -149,14 +150,17 @@ async def _call_either(fn: Callable[..., _T | Awaitable[_T]], *args: Any) -> _T:
     return await anyio.to_thread.run_sync(fn, *args)
 
 
-async def execute_tool_call(tool_call: ToolCall, tool_registry: ToolRegistry) -> ToolResult:
+async def execute_tool_call(
+    tool_call: ToolCall, tool_registry: ToolRegistry
+) -> ToolResult:
     name = tool_call["name"]
 
     try:
         tool = tool_registry.get(name)
     except UnknownToolError as exc:
         raise ToolExecutionError(
-            f"Unknown tool: {name}", reason="unknown_tool") from exc
+            f"Unknown tool: {name}", reason="unknown_tool"
+        ) from exc
 
     output = await _call_either(tool.handler, tool_call["input"])
 
@@ -179,7 +183,9 @@ def build_add_note_tool(notes_path: Path = DEFAULT_NOTES_PATH) -> ToolDefinition
         description="Appends a short note to a local notes file, for the user to read later.",
         input_schema={
             "type": "object",
-            "properties": {"text": {"type": "string", "description": "The note text to save."}},
+            "properties": {
+                "text": {"type": "string", "description": "The note text to save."}
+            },
             "required": ["text"],
         },
         handler=handler,

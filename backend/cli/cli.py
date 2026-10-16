@@ -31,20 +31,17 @@ Not built:
     ``argparse`` here and keep the environment as the fallback.
 """
 
-
 from __future__ import annotations
 
 import os
-from typing import Callable
+from collections.abc import Callable
 
 import anyio
-from dotenv import load_dotenv
-
 from agent.model import GeminiClient, SendsMessage
 from agent.runtime import run_turn
 from agent.session import InMemorySessionRepository
 from agent.tools import ToolRegistry, build_add_note_tool
-
+from dotenv import load_dotenv
 
 # The annotation is the contract this table exists to state; a checker reading
 # the literal infers the two concrete classes and calls the wider declared type
@@ -84,14 +81,14 @@ def build_model_client(provider: str | None = None) -> SendsMessage:
         CredentialsError: The chosen provider found no usable API key. Some
             providers surface this at construction, others on the first call.
     """
-    name = (provider or os.getenv("MODEL_PROVIDER",
-            DEFAULT_PROVIDER)).strip().lower()
+    name = (provider or os.getenv("MODEL_PROVIDER", DEFAULT_PROVIDER)).strip().lower()
     try:
         client_cls = PROVIDERS[name]
     except KeyError:
         known = ", ".join(sorted(PROVIDERS))
         raise ValueError(
-            f"unknown MODEL_PROVIDER {name!r}; expected one of: {known}") from None
+            f"unknown MODEL_PROVIDER {name!r}; expected one of: {known}"
+        ) from None
     return client_cls()
 
 
@@ -153,11 +150,13 @@ async def _run() -> None:
         if not user_text:
             break
 
-        result = await run_turn(session_id=session.session_id,
-                                user_text=user_text,
-                                model_client=build_model_client(),
-                                tool_registry=build_tool_registry(),
-                                session_repository=session_repository)
+        result = await run_turn(
+            session_id=session.session_id,
+            user_text=user_text,
+            model_client=build_model_client(),
+            tool_registry=build_tool_registry(),
+            session_repository=session_repository,
+        )
 
         print(result.response.text)
 

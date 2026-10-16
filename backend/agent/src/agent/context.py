@@ -13,9 +13,7 @@ class AssembledContext:
 
 
 def assemble_context(
-    state: SessionState,
-    user_text: str,
-    window_size: int = 5
+    state: SessionState, user_text: str, window_size: int = 5
 ) -> dict[str, Any]:
     """
     Assemble the context for the current session.
@@ -34,8 +32,10 @@ def assemble_context(
     # everything" — the exact failure this module exists to prevent, produced by
     # asking for the strictest possible bound.
     recent = history[-window_size:] if window_size > 0 else []
-    messages = [{"role": item.payload["role"],
-                 "content": item.payload["text"]} for item in recent]
+    messages = [
+        {"role": item.payload["role"], "content": item.payload["text"]}
+        for item in recent
+    ]
     messages.append({"role": "user", "content": user_text})
     return AssembledContext(
         messages=messages,

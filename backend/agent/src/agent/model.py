@@ -1,13 +1,20 @@
 from dataclasses import dataclass
-import types
 from typing import Any, Protocol, TypedDict
+
 import anyio
 import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
-from agent.errors import AssetError, BacteriaException, ContractError, CredentialsError, ModelError, ServingError
+from agent.errors import (
+    AssetError,
+    BacteriaException,
+    ContractError,
+    CredentialsError,
+    ModelError,
+    ServingError,
+)
 
 
 class ToolCall(TypedDict):
@@ -29,16 +36,14 @@ class SendsMessage(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         system_prompt: str | None = None,
-    ) -> ModelResponse:
-        ...
+    ) -> ModelResponse: ...
 
 
 # Gemini reports "request too large" as a plain 400, same as Anthropic, so the
 # same message sniffing is needed to separate it from an integration bug.
 _ASSET_HINTS = ("context", "maximum context length", "token", "too long")
 
-_AUTH_HINTS = ("api key", "api_key", "credential",
-               "unauthenticated", "permission")
+_AUTH_HINTS = ("api key", "api_key", "credential", "unauthenticated", "permission")
 
 
 class GeminiClient:
@@ -99,8 +104,7 @@ class GeminiClient:
             CredentialsError: Credentials rejected by the server.
         """
         id_to_name = self._collect_tool_names(messages)
-        contents = [self._to_content(message, id_to_name)
-                    for message in messages]
+        contents = [self._to_content(message, id_to_name) for message in messages]
 
         config_kwargs: dict[str, Any] = {
             "max_output_tokens": max_tokens,
@@ -163,7 +167,9 @@ class GeminiClient:
         return id_to_name
 
     @staticmethod
-    def _to_content(message: dict[str, Any], id_to_name: dict[str, str]) -> types.Content:
+    def _to_content(
+        message: dict[str, Any], id_to_name: dict[str, str]
+    ) -> types.Content:
         """Translate one internal message into a Gemini ``Content``.
 
         The internal format uses ``user``/``assistant`` and marks tool results
@@ -181,7 +187,9 @@ class GeminiClient:
 
         if isinstance(content, str):
             gemini_role = "model" if role == "assistant" else "user"
-            return types.Content(role=gemini_role, parts=[types.Part.from_text(text=content)])
+            return types.Content(
+                role=gemini_role, parts=[types.Part.from_text(text=content)]
+            )
 
         parts: list[types.Part] = []
         for block in content:
@@ -190,12 +198,12 @@ class GeminiClient:
                 parts.append(types.Part.from_text(text=block["text"]))
             elif kind == "tool_use":
                 part = types.Part.from_function_call(
-                    name=block["name"], args=block["input"])
+                    name=block["name"], args=block["input"]
+                )
                 # Re-attach the opaque continuation token this same provider
                 # emitted on the previous turn. Gemini rejects a function_call
                 # part that arrives without it. See _to_model_response.
-                signature = (block.get("provider_data")
-                             or {}).get("thought_signature")
+                signature = (block.get("provider_data") or {}).get("thought_signature")
                 if signature is not None:
                     part.thought_signature = signature
                 parts.append(part)
@@ -251,8 +259,9 @@ class GeminiClient:
         # TypeError from inside response parsing. The sibling guard for "no
         # candidates at all" was already here; this is the other half of the
         # same shape.
-        parts = (response.candidates[0].content.parts or [
-        ]) if response.candidates else []
+        parts = (
+            (response.candidates[0].content.parts or []) if response.candidates else []
+        )
         tool_calls: list[ToolCall] = []
         for i, part in enumerate(parts):
             call = part.function_call
@@ -267,7 +276,8 @@ class GeminiClient:
             }
             if part.thought_signature:
                 tool_call["provider_data"] = {
-                    "thought_signature": part.thought_signature}
+                    "thought_signature": part.thought_signature
+                }
             tool_calls.append(tool_call)
 
         stop_reason = None

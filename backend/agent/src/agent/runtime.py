@@ -1,6 +1,6 @@
+import uuid
 from dataclasses import dataclass
 from typing import Any
-import uuid
 
 from agent.context import assemble_context
 from agent.model import ModelResponse, SendsMessage
@@ -38,7 +38,11 @@ def _assistant_content_blocks(response: ModelResponse) -> list[dict[str, Any]]:
             "id": call["id"],
             "name": call["name"],
             "input": call["input"],
-            **({"provider_data": call["provider_data"]} if "provider_data" in call else {}),
+            **(
+                {"provider_data": call["provider_data"]}
+                if "provider_data" in call
+                else {}
+            ),
         }
         for call in response.tool_calls
     )
@@ -52,8 +56,7 @@ def _follow_up_messages(
 ) -> list[dict[str, Any]]:
     return [
         *messages,
-        {"role": "assistant",
-            "content": _assistant_content_blocks(response)},
+        {"role": "assistant", "content": _assistant_content_blocks(response)},
         {
             "role": "user",
             "content": [
@@ -69,8 +72,7 @@ def _follow_up_messages(
 
 
 async def _execute_tool_calls(
-    tool_calls: list[dict],
-    tool_registry: ToolRegistry
+    tool_calls: list[dict], tool_registry: ToolRegistry
 ) -> list[ToolResult]:
 
     results: list[ToolResult] = []
@@ -85,7 +87,7 @@ async def run_turn(
     user_text: str,
     model_client: SendsMessage,
     tool_registry: ToolRegistry,
-    session_repository: SessionRepository
+    session_repository: SessionRepository,
 ) -> RunResult:
 
     run_id = str(uuid.uuid4())
@@ -94,13 +96,13 @@ async def run_turn(
     tools = tool_registry.schemas_for_run() if tool_registry else None
     # tools_exposed = [schema["name"] for schema in tools or []]
 
-    evidence = [TranscriptItem(
-        kind="message",
-        payload={"role": "user", "text": user_text}
-    )]
+    evidence = [
+        TranscriptItem(kind="message", payload={"role": "user", "text": user_text})
+    ]
 
     response = await model_client.send(
-        messages=context.messages, system_prompt=context.system_prompt, tools=tools)
+        messages=context.messages, system_prompt=context.system_prompt, tools=tools
+    )
 
     for _ in range(MAX_TOOL_ROUNDS):
         if not response.tool_calls:
@@ -112,7 +114,8 @@ async def run_turn(
 
         response = await model_client.send(
             messages=_follow_up_messages(
-                messages=context.messages, response=response, results=results),
+                messages=context.messages, response=response, results=results
+            ),
             system_prompt=context.system_prompt,
             tools=tools,
         )
@@ -120,13 +123,13 @@ async def run_turn(
     else:
         raise RuntimeError(f"tool loop exceeded {MAX_TOOL_ROUNDS} rounds")
 
-    evidence.append(TranscriptItem(
-        kind="message",
-        payload={"role": "assistant", "text": response.text}
-    ))
+    evidence.append(
+        TranscriptItem(
+            kind="message", payload={"role": "assistant", "text": response.text}
+        )
+    )
 
     for item in evidence:
-        session_repository.commit(session_id=session_id,
-                                  new_transcript_item=item)
+        session_repository.commit(session_id=session_id, new_transcript_item=item)
 
     return RunResult(run_id=run_id, response=response)

@@ -21,6 +21,7 @@ members = ["backend/*"]
 source_dirs = [
     "backend/agent/src/agent",
     "backend/app/src/app",
+    "backend/ingestion/src/ingestion",
 ]
 
 [tool.coverage.report]

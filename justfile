@@ -21,7 +21,7 @@ _cov *args:
 [group('qa')]
 @cov:
     just _cov erase
-    just _cov run -m pytest backend/agent/src/tests
+    just _cov run -m pytest backend/agent/src/tests backend/ingestion/src/tests
     just _cov report
     just _cov html
 
@@ -34,7 +34,7 @@ lint:
 # Check types
 [group('qa')]
 typing:
-    uvx ty check --python .venv backend/agent/src backend/app/src backend/cli
+    uvx ty check --python .venv backend/agent/src backend/app/src backend/cli backend/ingestion/src
 
 # Perform all checks
 [group('qa')]

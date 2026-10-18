@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from typing import Annotated
 
+from document import DocumentRepository
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -12,6 +13,7 @@ from app.core import security
 from app.core.config import settings
 from app.core.db import engine, scope_to_user
 from app.models import TokenPayload, User
+from app.core.file_system import LocalFileSystem
 
 reusable_oauth2 = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/login/access-token"
@@ -64,3 +66,19 @@ def get_current_active_superuser(current_user: CurrentUser) -> User:
             status_code=403, detail="The user doesn't have enough privileges"
         )
     return current_user
+
+
+def get_local_file_system() -> LocalFileSystem:
+    return LocalFileSystem()
+
+
+LocalFilesystemDep = Annotated[LocalFileSystem,
+                               Depends(get_local_file_system())]
+
+
+def get_document_repository(scoped_sesion: ScopedSessionDep) -> DocumentRepository:
+    return DocumentRepository(session=scoped_sesion)
+
+
+DocumentRepositoryDep = Annotated[
+    DocumentRepository, Depends(get_document_repository())]

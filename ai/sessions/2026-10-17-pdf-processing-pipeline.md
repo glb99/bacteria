@@ -64,7 +64,8 @@ The person confirmed the model with these left open:
 - "diagrams, text..." leaves other entity kinds unnamed. The evals session also lists tables.
 - Whether the text inside a block is stored beside its vector is unstated. The read-by-id session keeps extracted text off that route.
 - What the entity comparison returns, a page or an entity, is unstated. An earlier restatement said the page. That restatement was partial, and the confirmed paragraph stops at the comparison.
-- `extract_entities` in `backend/ingestion/src/entity_extractor.py` is a capitalized-word split of a string. The package does not embed a vector. The confirmed pipeline is not what the code does.
+- On 2026-10-17 this file said `extract_entities` splits a string and keeps capitalized words. On 2026-10-19 that function loads a PNG path and `GeminiMultimodalClient.send` posts those bytes with mime type `image/png`. The package still does not embed a vector.
+- On 2026-10-19 the person chose each paginator page as the bytes of a single-page PDF, sent to the entity call as `application/pdf`, with no PNG from the paginator. That replaces "a page is held as an image" for the paginator. The provider still handles the PDF page as an image inside the model call. The later record is [2026-10-19-pdf-page-split.md](2026-10-19-pdf-page-split.md). This session's shared model was not revised in place.
 
 ## Alignment check
 

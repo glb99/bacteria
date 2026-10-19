@@ -90,6 +90,13 @@ class GeminiMultimodalClient:
         return response.output[0].content
 
 
+class ExtractEntities(Protocol):
+    """A protocol for a function that formats text."""
+
+    def __call__(self, model_client: SendsMultimodalContent, image_path: Path, prompt: str) -> str:
+        ...
+
+
 def extract_entities(model_client: SendsMultimodalContent, image_path: Path, prompt: str) -> Detections:
     """
     Extracts entities from the given image using a simple rule-based approach.

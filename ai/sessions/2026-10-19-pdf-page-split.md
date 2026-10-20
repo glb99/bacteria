@@ -30,7 +30,7 @@ From the opening message, before the rest of the interview:
 - `backend/app/src/app/api/services/document_service.py` defines `validate_document` and `upload_document`. `upload_document` takes a FastAPI `UploadFile`, a `DocumentRepository`, a `FileSystem`, and a `Document`. Neither function splits a PDF or returns pages.
 - `backend/app/src/app/api/routes/documents.py` calls `validate_document`, then `upload_document`, and passes the route's `UploadFile` into `upload_document`. The route does not call a page split.
 - `backend/app/src/app/core/file_system.py` `LocalFileSystem.upload_file` reads the whole `UploadFile` with `file.file.read()` and writes those bytes to a path.
-- `backend/ingestion/src/ingestion/paginator.py` is empty. `backend/ingestion/src/ingestion/__init__.py` says the pipeline is independent of the agent.
+- `backend/ingestion/src/ingestion/paginator.py` defines `Paginate` and `paginate`. `paginate` yields one single-page PDF per page, using `pypdf`. `backend/ingestion/src/ingestion/__init__.py` says the pipeline is independent of the agent.
 - `backend/ingestion/src/ingestion/page.py` `PageExtractor.extract_page` takes one page as `bytes` and returns a `str`.
 - The aligned pipeline session chose: separate the uploaded PDF into pages, one visual call per page, join the extracted text in page order. Source: `ai/sessions/2026-10-16-pdf-ingestion-pipeline.md`.
 - The aligned 2026-10-17 session defines a **page** as one page of the uploaded PDF, held as an image. The confirmed pipeline splits the PDF into pages, then recognizes diagrams and text blocks. Source: `ai/sessions/2026-10-17-pdf-processing-pipeline.md`.
@@ -47,7 +47,7 @@ From the opening message, before the rest of the interview:
 ## Inferences
 
 - The function the person is designing does not exist in `document_service` today. Evidence: `document_service.py` defines validate and upload, and neither returns pages.
-- "For now" first placed the function in the API service. The person then moved it. Evidence: "it moves, as it will be injected as dependency", answering the choice between `document_service` and `paginator.py`. The function lives in `paginator.py` and is supplied to its caller as a dependency. `paginator.py` is empty. The 2026-10-16 session says the pipeline is independent of the agent. This move puts the function in the ingestion package.
+- "For now" first placed the function in the API service. The person then moved it. Evidence: "it moves, as it will be injected as dependency", answering the choice between `document_service` and `paginator.py`. The function lives in `paginator.py` and is supplied to its caller as a dependency. `paginate` is implemented there. The 2026-10-16 session says the pipeline is independent of the agent. This move puts the function in the ingestion package.
 - "Receive the file" matches the `UploadFile` the route already passes into `upload_document`. Evidence: `documents.py` and their sentence. `LocalFileSystem` then reads that file completely into a path. Evidence: `file_system.py`. The person has not said whether the split receives the `UploadFile`, those stored bytes, or the path.
 - The person chose the recommended return. Evidence: "I take it", said after the recommendation to implement the split as a generator, type it as an iterator of pages, and iterate it inside the job.
 - The next existing contract consumes one page as `bytes`. Evidence: `PageExtractor.extract_page`. The person has now chosen those bytes to be one single-page PDF. Evidence: the second "I take it".
@@ -65,9 +65,11 @@ From the opening message, before the rest of the interview:
 
 The person has not confirmed this paragraph.
 
-The **page-split function** is the first step of the documents endpoint pipeline. It lives in `paginator.py`. It is injected as a dependency. It receives the stored file, the PDF after upload has written it, and returns an iterator of pages. The implementation is a generator. The job iterates that iterator. The HTTP response stays the document id and the not-ready status. When a caller needs a length, the page count is taken from the PDF before the loop. A retry of one page opens the PDF again.
+The **page-split function** is the first step of the documents endpoint pipeline. It lives in `paginator.py`. It is injected as a dependency. It receives the stored file, the PDF after upload has written it, and returns an iterator of pages. The implementation is a generator. The HTTP response stays the document id and the not-ready status. When a caller needs a length, the page count is taken from the PDF before the loop. A retry of one page opens the PDF again.
 
-A **file** in this function is that stored PDF. The route's upload handler receives a FastAPI `UploadFile`, and `LocalFileSystem` reads it completely onto a path before the split. The PDF then passes through the **paginator**, which returns the iterator. `paginator.py` is empty. `document_service` does not define the function. The app already injects `LocalFilesystemDep` and `DocumentRepositoryDep` from `deps.py` into the route, and the route passes the repository into `upload_document`. This session has not said whether the route or the service is the one that receives the paginator.
+A **job**, in the aligned pipeline session, is the work that runs after that response has been sent: split the PDF, make one visual call per page, and join the text in page order. This session used that word for the caller that walks the iterator. The person asked what it means. No queue, worker, or scheduler exists in the code. They then said: "at first I only want to implement the function that iterates over the pages sequentially." The first implementation is that function. The separate work-after-response is not part of it.
+
+A **file** in this function is that stored PDF. The route's upload handler receives a FastAPI `UploadFile`, and `LocalFileSystem` reads it completely onto a path before the split. The PDF then passes through the **paginator**, which returns the iterator. `paginate` yields one single-page PDF per page. `document_service` does not define the function. The app already injects `LocalFilesystemDep` and `DocumentRepositoryDep` from `deps.py` into the route, and the route passes the repository into `upload_document`. This session has not said whether the route or the service is the one that receives the paginator.
 
 A **page** is one single-page PDF, carried as `bytes`. The person chose this with the second "I take it". The 2026-10-17 session held a page as an image. This choice replaces that holding for the paginator. The provider still handles a PDF page as an image inside the model call. The pipeline does not write a PNG.
 
@@ -88,8 +90,8 @@ The constraint they will not trade away, and the observation that would show thi
 - The function receives the stored file. Whether the argument is the path or the stored bytes is unstated.
 - The drawing script is outside the pipeline. A raster kept for painting boxes is not a pipeline step.
 - `extract_entities` takes a PNG path and the client sends `image/png`. The chosen entity call sends `application/pdf`. The code does not do that yet.
-- `paginator.py` is empty. The function is not injected anywhere today.
-- Where this step sits beside `validate_document` and `upload_document`.
+- `paginate` is implemented. `PaginateDep`, `ExtractEntitiesDep`, and `EmbedDep` are in `deps.py`. The upload route does not take them yet. `GeminiEmbedder` embeds UTF-8 text, so a diagram with no text has nothing to embed. `DocumentRepository` is still only a protocol.
+- The person asked what is missing to see the full processing work, then approved a plan to run that processing inside the upload request. `process_document` now walks `iterate_pages`, calls `extract_entities`, embeds each labeled box, and sets the status to `ready`. `POST /documents/uploaded` and `GET /documents/{document_id}` return the id and status. The read response still omits the extracted text. The Alembic revision is written and has not been applied.
 
 ## Alignment check
 
@@ -109,7 +111,7 @@ Suggested title, for the person to keep or replace: "Define the function that sp
 
 The person is designing the function that takes one PDF and divides it into pages. The aligned route session accepts one PDF on upload. The aligned pipeline session and the 2026-10-17 pipeline session both start by splitting that PDF into pages. A page there is one page of the uploaded PDF, held as an image. `PageExtractor.extract_page` takes one page as bytes and returns a string.
 
-`document_service` today validates a file name and uploads an `UploadFile`. It does not split pages. `paginator.py` is empty. The ingestion package describes the pipeline as independent of the agent. No PDF parser is a dependency of that package.
+`document_service` today validates a file name and uploads an `UploadFile`. It does not split pages. `paginate` in `paginator.py` yields single-page PDF bytes, and `PaginateDep` is defined in `deps.py`. The upload route does not take that dependency yet. The ingestion package describes the pipeline as independent of the agent. `pypdf` is the parser that dependency uses.
 
 #### Decision drivers
 
@@ -151,7 +153,7 @@ Also chosen with "I take it": each yielded page is the bytes of a single-page PD
 - A progress count is read from the PDF before the loop.
 - A retry opens the stored PDF again.
 - `document_service` does not define the paginator. It receives the paginator as an injected dependency, by the person's reason for the move. Which function's parameter that is, the route or the service, is unstated.
-- The function is not in `paginator.py` today. `paginator.py` is empty. There is no paginator dependency in `deps.py`.
+- `paginate` yields single-page PDF bytes. `PaginateDep` exists. The upload route does not take it yet.
 - A test can supply a list, because the return type is an iterator.
 
 #### Confirmation

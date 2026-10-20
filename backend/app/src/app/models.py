@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import JSON, DateTime, Text
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -111,6 +111,34 @@ class ItemPublic(ItemBase):
 class ItemsPublic(SQLModel):
     data: list[ItemPublic]
     count: int
+
+
+class Document(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    file_name: str = Field(max_length=255, index=True)
+    path: str = Field(default="", max_length=1024)
+    status: str = Field(max_length=32)
+
+
+class DocumentEntity(SQLModel, table=True):
+    __tablename__ = "document_entity"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    document_id: uuid.UUID = Field(
+        foreign_key="document.id", nullable=False, ondelete="CASCADE"
+    )
+    page_index: int
+    label: str = Field(sa_type=Text)
+    y_min: int
+    x_min: int
+    y_max: int
+    x_max: int
+    vector: list[float] = Field(default_factory=list, sa_type=JSON)
+
+
+class DocumentStatus(SQLModel):
+    id: uuid.UUID
+    status: str
 
 
 # Generic message

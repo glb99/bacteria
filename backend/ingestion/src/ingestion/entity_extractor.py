@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol
 
 from agent.errors import CredentialsError
@@ -15,11 +14,11 @@ class ModelResponse:
 
 
 class Box(BaseModel):
-    """One diagram box. Edges are 0-1000 relative to the image."""
+    """One diagram box. Edges are 0-1000 relative to the page."""
 
     label: str
     ymin: int = Field(
-        description="Top edge, 0 at the top of the image, 1000 at the bottom.")
+        description="Top edge, 0 at the top of the page, 1000 at the bottom.")
     xmin: int = Field(
         description="Left edge, 0 at the left, 1000 at the right.")
     ymax: int
@@ -30,16 +29,17 @@ class Detections(BaseModel):
     boxes: list[Box]
 
 
+ENTITY_PROMPT = (
+    "Mark each diagram and each text block on this page. Return one box per region."
+)
+
+
 class SendsMultimodalContent(Protocol):
     async def send(
         self,
-        image: bytes,
+        page: bytes,
         prompt: str,
     ) -> Detections: ...
-
-
-def load_image_as_bytes(path: Path) -> bytes:
-    return path.read_bytes()
 
 
 class GeminiMultimodalClient:
@@ -49,7 +49,14 @@ class GeminiMultimodalClient:
         model: str = "gemini-3.5-flash",
         max_retries: int = 2,
         backoff_seconds: float = 1.0,
+        client: object | None = None,
     ) -> None:
+        if client is not None:
+            self._client = client
+            self.model = model
+            self.max_retries = max_retries
+            self.backoff_seconds = backoff_seconds
+            return
         try:
             self._client = genai.Client(api_key=api_key)
         except ValueError as exc:
@@ -66,20 +73,14 @@ class GeminiMultimodalClient:
 
     async def send(
         self,
-        image: bytes,
+        page: bytes,
         prompt: str,
     ) -> Detections:
-        """
-        Sends the image and prompt to the Gemini model and returns the extracted boxes.
-
-        Args:
-            image (bytes): The image data in bytes.
-            prompt (str): The prompt to guide the model's response.
-        """
+        """Send one single-page PDF and return the boxes on that page."""
         response = self._client.models.generate_content(
             model=self.model,
             contents=[
-                genai.types.Part.from_bytes(data=image, mime_type="image/png"),
+                genai.types.Part.from_bytes(data=page, mime_type="application/pdf"),
                 prompt,
             ],
             config=genai.types.GenerateContentConfig(
@@ -87,26 +88,29 @@ class GeminiMultimodalClient:
                 response_schema=Detections,
             ),
         )
-        return response.output[0].content
+        parsed = response.parsed
+        if isinstance(parsed, Detections):
+            return parsed
+        return Detections.model_validate(parsed)
 
 
 class ExtractEntities(Protocol):
-    """A protocol for a function that formats text."""
+    """Recognize the entities on one single-page PDF."""
 
-    def __call__(self, model_client: SendsMultimodalContent, image_path: Path, prompt: str) -> str:
+    async def __call__(
+        self,
+        model_client: SendsMultimodalContent,
+        page: bytes,
+        prompt: str,
+    ) -> Detections:
+        """Return the boxes found on ``page``."""
         ...
 
 
-def extract_entities(model_client: SendsMultimodalContent, image_path: Path, prompt: str) -> Detections:
-    """
-    Extracts entities from the given image using a simple rule-based approach.
-
-    Args:
-        image_path (Path): The path to the image from which to extract entities.
-        prompt (str): The prompt to guide the model's response.
-
-    Returns:
-        Detections: A list of extracted entities.
-    """
-    image_bytes = load_image_as_bytes(image_path)
-    return model_client.send(image_bytes, prompt)
+async def extract_entities(
+    model_client: SendsMultimodalContent,
+    page: bytes,
+    prompt: str,
+) -> Detections:
+    """Send one single-page PDF to the model and return its boxes."""
+    return await model_client.send(page, prompt)

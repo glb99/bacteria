@@ -1,37 +1,62 @@
-from app.api.deps import DocumentRepositoryDep, ScopedSessionDep
-from app.api.services import document_service
-from app.core.file_system import LocalFileSystem
-from app.models import UploadedDocument
-from fastapi import APIRouter, UploadFile
-from app.core.config import settings
-from ingestion.embedder import Embed
-from ingestion.entity_extractor import EntityExtractor
-from ingestion.paginator import Paginate
+import uuid
 
-router = APIRouter(prefix="/items", tags=["items"])
+from fastapi import APIRouter, HTTPException, UploadFile
+
+from app.api.deps import (
+    DocumentRepositoryDep,
+    EmbedDep,
+    ExtractEntitiesDep,
+    LocalFilesystemDep,
+    ModelClientDep,
+    PaginateDep,
+)
+from app.api.services import document_service
+from app.models import DocumentStatus
+
+router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 @router.post(
     path="/uploaded",
-    response_model=UploadedDocument,
+    response_model=DocumentStatus,
 )
-def upload_document(
+async def upload_document(
     document_repository: DocumentRepositoryDep,
-    file_system: LocalFileSystem,
+    file_system: LocalFilesystemDep,
+    paginate: PaginateDep,
+    entity_extractor: ExtractEntitiesDep,
+    embedder: EmbedDep,
+    model_client: ModelClientDep,
     file: UploadFile,
-    paginate: Paginate,
-    entity_extractor: EntityExtractor,
-    embedder: Embed,
-):
-    document = None
-    file_name = file.filename
+) -> DocumentStatus:
     document = document_service.validate_document(
-        file_name=file_name,
-        document_repository=document_repository
+        file_name=file.filename or "",
+        document_repository=document_repository,
     )
-    document = document_service.upload_document(
+    pdf, document = document_service.upload_document(
         file=file,
         document_repository=document_repository,
         file_system=file_system,
         document=document,
     )
+    await document_service.process_document(
+        paginate=paginate,
+        extract_entities=entity_extractor,
+        model_client=model_client,
+        embed=embedder,
+        document_repository=document_repository,
+        document_id=document.id,
+        pdf=pdf,
+    )
+    return DocumentStatus(id=document.id, status="ready")
+
+
+@router.get("/{document_id}", response_model=DocumentStatus)
+def read_document(
+    document_id: uuid.UUID,
+    document_repository: DocumentRepositoryDep,
+) -> DocumentStatus:
+    document = document_repository.get_document_by_id(str(document_id))
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return DocumentStatus(id=document.id, status=document.status)

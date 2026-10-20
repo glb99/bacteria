@@ -1,19 +1,28 @@
 from collections.abc import Generator
 from typing import Annotated
 
-from document import DocumentRepository
 import jwt
+from document import DocumentRepository
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from ingestion.embedder import Embed, GeminiEmbedder
+from ingestion.entity_extractor import (
+    ExtractEntities,
+    GeminiMultimodalClient,
+    SendsMultimodalContent,
+    extract_entities,
+)
+from ingestion.paginator import Paginate, paginate
 from jwt.exceptions import InvalidTokenError
 from pydantic import ValidationError
 from sqlmodel import Session
 
+from app.api.services.document_repository import SqlDocumentRepository
 from app.core import security
 from app.core.config import settings
 from app.core.db import engine, scope_to_user
-from app.models import TokenPayload, User
 from app.core.file_system import LocalFileSystem
+from app.models import TokenPayload, User
 
 reusable_oauth2 = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/login/access-token"
@@ -72,13 +81,41 @@ def get_local_file_system() -> LocalFileSystem:
     return LocalFileSystem()
 
 
-LocalFilesystemDep = Annotated[LocalFileSystem,
-                               Depends(get_local_file_system())]
+LocalFilesystemDep = Annotated[LocalFileSystem, Depends(get_local_file_system)]
 
 
 def get_document_repository(scoped_sesion: ScopedSessionDep) -> DocumentRepository:
-    return DocumentRepository(session=scoped_sesion)
+    return SqlDocumentRepository(scoped_sesion)
 
 
 DocumentRepositoryDep = Annotated[
-    DocumentRepository, Depends(get_document_repository())]
+    DocumentRepository, Depends(get_document_repository)
+]
+
+
+def get_paginate() -> Paginate:
+    return paginate
+
+
+PaginateDep = Annotated[Paginate, Depends(get_paginate)]
+
+
+def get_extract_entities() -> ExtractEntities:
+    return extract_entities
+
+
+ExtractEntitiesDep = Annotated[ExtractEntities, Depends(get_extract_entities)]
+
+
+def get_embedder() -> Embed:
+    return GeminiEmbedder()
+
+
+EmbedDep = Annotated[Embed, Depends(get_embedder)]
+
+
+def get_model_client() -> SendsMultimodalContent:
+    return GeminiMultimodalClient()
+
+
+ModelClientDep = Annotated[SendsMultimodalContent, Depends(get_model_client)]

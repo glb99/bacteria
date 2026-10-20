@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: bacteria
+      POSTGRES_PASSWORD: local-dev-only
+      POSTGRES_DB: bacteria
+    ports:
+      - "5432:5432"
+    volumes:
+      - dev_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=$$POSTGRES_PASSWORD psql -U $$POSTGRES_USER -d $$POSTGRES_DB -c 'SELECT 1'",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha-dark
+    labels:
+      # Enable Traefik for this service
+      - traefik.enable=true
+      # Route HTTP traffic for the Adminer subdomain
+      - traefik.http.routers.adminer-http.rule=Host(`adminer.${DOMAIN:-localhost}`)
+      - traefik.http.routers.adminer-http.entrypoints=http
+      # Define the port inside of the Docker service to use
+      - traefik.http.services.adminer.loadbalancer.server.port=8080
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      FASTAPI_ENV: development
+      SECRET_KEY: local-dev-only-secret
+      PROJECT_NAME: bacteria
+      DATABASE_URL: postgresql://bacteria:local-dev-only@postgres:5432/bacteria
+      FIRST_SUPERUSER: admin@example.com
+      FIRST_SUPERUSER_PASSWORD: local-dev-only
+      DOCUMENTS_DIR: /data/documents
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    volumes:
+      - documents:/data/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/utils/health-check/')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  dev_postgres:
+  documents:

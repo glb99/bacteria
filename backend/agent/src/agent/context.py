@@ -1,5 +1,5 @@
 from dataclasses import field
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic.dataclasses import dataclass
 
@@ -13,7 +13,10 @@ class AssembledContext:
 
 
 def assemble_context(
-    state: SessionState, user_text: str, window_size: int = 5
+    state: SessionState,
+    user_text: str,
+    window_size: int = 5,
+    retrieved_documents: bytes | None = None,
 ) -> AssembledContext:
     """
     Assemble the context for the current session.
@@ -37,6 +40,7 @@ def assemble_context(
         for item in recent
     ]
     messages.append({"role": "user", "content": user_text})
+
     return AssembledContext(
         messages=messages,
     )

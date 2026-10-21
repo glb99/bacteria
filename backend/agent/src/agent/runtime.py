@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from agent.context import assemble_context
+from agent.context import RetrievesDocumentPages, assemble_context
 from agent.model import ModelResponse, SendsMessage
 from agent.session import SessionRepository, TranscriptItem
 from agent.tools import ToolCall, ToolRegistry, ToolResult, execute_tool_call
@@ -88,16 +88,20 @@ async def run_turn(
     model_client: SendsMessage,
     tool_registry: ToolRegistry,
     session_repository: SessionRepository,
+    document_retriever: RetrievesDocumentPages,
 ) -> RunResult:
 
     run_id = str(uuid.uuid4())
     state = session_repository.get_state(session_id)
-    context = assemble_context(state, user_text)
+    retrieved_documents = document_retriever.select(query=user_text, limit=1)
+    context = assemble_context(
+        state=state, user_text=user_text, retrieved_documents=retrieved_documents)
     tools = tool_registry.schemas_for_run() if tool_registry else None
     # tools_exposed = [schema["name"] for schema in tools or []]
 
     evidence = [
-        TranscriptItem(kind="message", payload={"role": "user", "text": user_text})
+        TranscriptItem(kind="message", payload={
+                       "role": "user", "text": user_text})
     ]
 
     response = await model_client.send(
@@ -130,6 +134,7 @@ async def run_turn(
     )
 
     for item in evidence:
-        session_repository.commit(session_id=session_id, new_transcript_item=item)
+        session_repository.commit(
+            session_id=session_id, new_transcript_item=item)
 
     return RunResult(run_id=run_id, response=response)

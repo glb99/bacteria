@@ -202,6 +202,13 @@ class GeminiClient:
                 if signature is not None:
                     part.thought_signature = signature
                 parts.append(part)
+            elif kind == "image":
+                parts.append(
+                    types.Part.from_bytes(
+                        data=block["data"],
+                        mime_type=block.get("media_type", "image/png"),
+                    )
+                )
             elif kind == "tool_result":
                 name = id_to_name.get(block["tool_use_id"], "unknown_tool")
                 parts.append(

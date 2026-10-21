@@ -38,10 +38,15 @@ from collections.abc import Callable
 
 import anyio
 from agent.model import GeminiClient, SendsMessage
+from agent.retriever import EmbeddingPageRetriever, RetrievesDocumentPages, StoredEntity
 from agent.runtime import run_turn
 from agent.session import InMemorySessionRepository
 from agent.tools import ToolRegistry, build_add_note_tool
+# TODO: not having to import from our packages
+from app.api.services.document_repository import SqlDocumentRepository
 from dotenv import load_dotenv
+from ingestion.embedder import GeminiEmbedder
+from sqlmodel import Session, create_engine
 
 # The annotation is the contract this table exists to state; a checker reading
 # the literal infers the two concrete classes and calls the wider declared type
@@ -81,7 +86,8 @@ def build_model_client(provider: str | None = None) -> SendsMessage:
         CredentialsError: The chosen provider found no usable API key. Some
             providers surface this at construction, others on the first call.
     """
-    name = (provider or os.getenv("MODEL_PROVIDER", DEFAULT_PROVIDER)).strip().lower()
+    name = (provider or os.getenv("MODEL_PROVIDER",
+            DEFAULT_PROVIDER)).strip().lower()
     try:
         client_cls = PROVIDERS[name]
     except KeyError:
@@ -125,6 +131,55 @@ def build_tool_registry() -> ToolRegistry:
     return registry
 
 
+def _psycopg_url(database_url: str) -> str:
+    for scheme in ("postgres://", "postgresql://"):
+        if database_url.startswith(scheme):
+            return database_url.replace(scheme, "postgresql+psycopg://", 1)
+    return database_url
+
+
+def load_stored_entities(database_url: str) -> list[StoredEntity]:
+    """Read every ``document_entity`` row into the retriever's entity list.
+
+    The vector comes from the entity row. The image path comes from the ``page``
+    row for that document and page index. A page with no row contributes an
+    empty path, and ``select`` skips an empty path.
+    """
+    engine = create_engine(_psycopg_url(database_url))
+    with Session(engine) as session:
+        repository = SqlDocumentRepository(session)
+        image_paths = {
+            (str(page.document_id), page.page_index): page.image_path
+            for page in repository.list_pages()
+        }
+        entities = [
+            StoredEntity(
+                document_id=str(row.document_id),
+                page_index=row.page_index,
+                vector=list(row.vector),
+                image_path=image_paths.get(
+                    (str(row.document_id), row.page_index), ""),
+            )
+            for row in repository.list_entities()
+        ]
+    engine.dispose()
+    return entities
+
+
+def build_document_retriever(
+    entities: list[StoredEntity] | None = None,
+    database_url: str | None = None,
+) -> RetrievesDocumentPages:
+    """Construct the page retriever for this deployment.
+
+    When ``entities`` is omitted, the list is every row in ``document_entity``.
+    """
+    if entities is None:
+        url = database_url if database_url is not None else os.environ["DATABASE_URL"]
+        entities = load_stored_entities(url)
+    return EmbeddingPageRetriever(embed=GeminiEmbedder(), entities=entities)
+
+
 async def _run() -> None:
     """Run the interactive loop until the user exits.
 
@@ -135,6 +190,7 @@ async def _run() -> None:
     load_dotenv()
     session_repository = InMemorySessionRepository()
     session = session_repository.create_session()
+    document_retriever = build_document_retriever()
     print(f"session: {session.session_id}  (empty line or Ctrl+C to quit)")
 
     while True:
@@ -156,6 +212,7 @@ async def _run() -> None:
             model_client=build_model_client(),
             tool_registry=build_tool_registry(),
             session_repository=session_repository,
+            document_retriever=document_retriever,
         )
 
         print(result.response.text)
@@ -168,13 +225,11 @@ def main() -> None:
     library that starts its own loop cannot be embedded in a process that
     already has one — which is the entire situation this agent is heading into.
     """
-    # Taking the default loop is safe *because this command has no database
-    # driver*, not because the default is generally fine. On Windows that is
-    # `ProactorEventLoop`, which psycopg's async mode cannot use -- so a
-    # Postgres-backed `SessionRepository` wired into this CLI would work
-    # everywhere else and fail at the first query here. The host application
-    # chooses its loop in its own entrypoints for exactly this reason; this
-    # package cannot reuse that without depending on the thing it is embedded in.
+    # Document rows are loaded through a synchronous engine in ``_run``.
+    # psycopg's async mode cannot use Windows' ProactorEventLoop, so a
+    # Postgres-backed session store that queried asynchronously would still
+    # fail at its first query here. The host application chooses its loop in
+    # its own entrypoints for that reason.
     anyio.run(_run)
 
 

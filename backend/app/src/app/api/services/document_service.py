@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from io import BytesIO
 from pathlib import Path
 
@@ -11,6 +11,7 @@ from ingestion.entity_extractor import (
     ExtractEntities,
     SendsMultimodalContent,
 )
+from ingestion.page_image import render_page_image
 from ingestion.paginator import Paginate
 
 from app.core.config import settings
@@ -69,9 +70,20 @@ async def process_document(
     document_id: uuid.UUID,
     pdf: bytes,
     prompt: str = ENTITY_PROMPT,
+    render_page: Callable[[bytes], bytes] | None = None,
 ) -> None:
-    """Recognize each page in order and embed each labeled box."""
+    """Store each page image, then embed each labeled box on that page."""
+    render = render_page_image if render_page is None else render_page
+    directory = Path(settings.DOCUMENTS_DIR) / str(document_id)
+    directory.mkdir(parents=True, exist_ok=True)
     for page_index, page in enumerate(iterate_pages(paginate, pdf)):
+        image_path = directory / f"{page_index}.png"
+        image_path.write_bytes(render(page))
+        document_repository.add_page(
+            document_id=document_id,
+            page_index=page_index,
+            image_path=str(image_path),
+        )
         detections = await extract_entities(model_client, page, prompt)
         for box in detections.boxes:
             label = box.label.replace("\x00", "")

@@ -4,6 +4,8 @@ Newest first. Status values are defined in `../README.md`.
 
 | Date | Question | Status | Record | ADR |
 | --- | --- | --- | --- | --- |
+| 2026-10-21 | Where does the page-image path live: a page model, or the document model? | aligned | [2026-10-21-page-image-path.md](2026-10-21-page-image-path.md) | |
+| 2026-10-21 | How is EmbeddingPageRetriever initialized? | exploring | [2026-10-21-retriever-initialization.md](2026-10-21-retriever-initialization.md) | |
 | 2026-10-20 | Should retrieval live in the ingestion package or in its own package? | exploring | [2026-10-20-retrieval-package.md](2026-10-20-retrieval-package.md) | |
 | 2026-10-19 | How does the ingestion function divide one PDF into pages? | exploring | [2026-10-19-pdf-page-split.md](2026-10-19-pdf-page-split.md) | |
 | 2026-10-19 | How could we implement observability for the agent, according to The Agent Stack Part 8? | exploring | [2026-10-19-agent-observability.md](2026-10-19-agent-observability.md) | |

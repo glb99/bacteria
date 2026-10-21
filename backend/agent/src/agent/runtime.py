@@ -2,8 +2,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from agent.context import RetrievesDocumentPages, assemble_context
+from agent.context import assemble_context
 from agent.model import ModelResponse, SendsMessage
+from agent.retriever import RetrievesDocumentPages
 from agent.session import SessionRepository, TranscriptItem
 from agent.tools import ToolCall, ToolRegistry, ToolResult, execute_tool_call
 

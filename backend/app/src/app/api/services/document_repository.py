@@ -2,7 +2,7 @@ import uuid
 
 from sqlmodel import Session, select
 
-from app.models import Document, DocumentEntity
+from app.models import Document, DocumentEntity, Page
 
 
 class SqlDocumentRepository:
@@ -31,6 +31,27 @@ class SqlDocumentRepository:
         self._session.commit()
         self._session.refresh(document)
         return document
+
+    def add_page(
+        self,
+        document_id: uuid.UUID,
+        page_index: int,
+        image_path: str,
+    ) -> None:
+        self._session.add(
+            Page(
+                document_id=document_id,
+                page_index=page_index,
+                image_path=image_path,
+            )
+        )
+        self._session.commit()
+
+    def list_pages(self) -> list[Page]:
+        return list(self._session.exec(select(Page)).all())
+
+    def list_entities(self) -> list[DocumentEntity]:
+        return list(self._session.exec(select(DocumentEntity)).all())
 
     def update_document_status(self, document_id: str, status: str) -> None:
         document = self.get_document_by_id(document_id)

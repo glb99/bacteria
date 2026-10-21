@@ -27,6 +27,14 @@ class DocumentRepository(Protocol):
     def update_document_status(self, document_id: str, status: str) -> None:
         ...
 
+    def add_page(
+        self,
+        document_id: uuid.UUID,
+        page_index: int,
+        image_path: str,
+    ) -> None:
+        ...
+
     def add_entity(
         self,
         document_id: uuid.UUID,

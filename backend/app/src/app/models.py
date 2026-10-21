@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from pydantic import EmailStr
-from sqlalchemy import JSON, DateTime, Text
+from sqlalchemy import JSON, DateTime, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -118,6 +118,20 @@ class Document(SQLModel, table=True):
     file_name: str = Field(max_length=255, index=True)
     path: str = Field(default="", max_length=1024)
     status: str = Field(max_length=32)
+
+
+class Page(SQLModel, table=True):
+    """One page of a document and the local file that shows that page."""
+
+    __tablename__ = "page"
+    __table_args__ = (UniqueConstraint("document_id", "page_index"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    document_id: uuid.UUID = Field(
+        foreign_key="document.id", nullable=False, ondelete="CASCADE"
+    )
+    page_index: int
+    image_path: str = Field(max_length=1024)
 
 
 class DocumentEntity(SQLModel, table=True):

@@ -39,3 +39,24 @@ def test_context_assembly_returns_expected_messages():
     assert assembled_context.messages == expected_messages, (
         "expected windowed history followed by the new user message"
     )
+
+
+def test_assemble_context_adds_retrieved_pages_as_images() -> None:
+    state = SessionState(session=Session(session_id="test"), transcript=[])
+
+    assembled = assemble_context(
+        state,
+        "What does the diagram show?",
+        retrieved_documents=[b"page-png", b"second-png"],
+    )
+
+    assert assembled.messages == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What does the diagram show?"},
+                {"type": "image", "media_type": "image/png", "data": b"page-png"},
+                {"type": "image", "media_type": "image/png", "data": b"second-png"},
+            ],
+        }
+    ]

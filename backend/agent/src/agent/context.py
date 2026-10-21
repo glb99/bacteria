@@ -1,5 +1,5 @@
 from dataclasses import field
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic.dataclasses import dataclass
 
@@ -16,7 +16,7 @@ def assemble_context(
     state: SessionState,
     user_text: str,
     window_size: int = 5,
-    retrieved_documents: bytes | None = None,
+    retrieved_documents: list[bytes] | None = None,
 ) -> AssembledContext:
     """
     Assemble the context for the current session.
@@ -39,8 +39,25 @@ def assemble_context(
         {"role": item.payload["role"], "content": item.payload["text"]}
         for item in recent
     ]
-    messages.append({"role": "user", "content": user_text})
+    messages.append(
+        {"role": "user", "content": _user_content(user_text, retrieved_documents)}
+    )
 
     return AssembledContext(
         messages=messages,
     )
+
+
+def _user_content(
+    user_text: str, retrieved_documents: list[bytes] | None
+) -> str | list[dict[str, Any]]:
+    pages = [page for page in retrieved_documents or [] if page]
+    if not pages:
+        return user_text
+    return [
+        {"type": "text", "text": user_text},
+        *(
+            {"type": "image", "media_type": "image/png", "data": page}
+            for page in pages
+        ),
+    ]

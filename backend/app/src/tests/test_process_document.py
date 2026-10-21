@@ -18,10 +18,18 @@ def _box(label: str) -> Box:
     return Box(label=label, ymin=1, xmin=2, ymax=3, xmax=4)
 
 
+def _png(page: bytes) -> bytes:
+    return b"png:" + page
+
+
 class _Repository:
     def __init__(self) -> None:
         self.entities: list[dict[str, object]] = []
+        self.pages: list[dict[str, object]] = []
         self.status: tuple[str, str] | None = None
+
+    def add_page(self, **kwargs: object) -> None:
+        self.pages.append(kwargs)
 
     def add_entity(self, **kwargs: object) -> None:
         self.entities.append(kwargs)
@@ -41,10 +49,11 @@ class _Client:
         return Detections(boxes=[_box(""), _box("Valve")])
 
 
-def test_process_document_drops_nul_bytes_from_labels() -> None:
+def test_process_document_drops_nul_bytes_from_labels(tmp_path, monkeypatch) -> None:
     async def extract(_model_client: object, _page: bytes, _prompt: str) -> Detections:
         return Detections(boxes=[_box("re\x00identification")])
 
+    monkeypatch.setattr(settings, "DOCUMENTS_DIR", str(tmp_path))
     repository = _Repository()
     embedded: list[bytes] = []
 
@@ -57,6 +66,7 @@ def test_process_document_drops_nul_bytes_from_labels() -> None:
             document_repository=repository,
             document_id=uuid.uuid4(),
             pdf=b"stored-pdf",
+            render_page=_png,
         )
     )
 
@@ -64,7 +74,7 @@ def test_process_document_drops_nul_bytes_from_labels() -> None:
     assert repository.entities[0]["label"] == "reidentification"
 
 
-def test_process_document_handles_pages_in_order() -> None:
+def test_process_document_handles_pages_in_order(tmp_path, monkeypatch) -> None:
     pulled: list[str] = []
     extracts = 0
 
@@ -81,9 +91,11 @@ def test_process_document_handles_pages_in_order() -> None:
         extracts += 1
         return await model_client.send(page, prompt)
 
+    monkeypatch.setattr(settings, "DOCUMENTS_DIR", str(tmp_path))
     client = _Client()
     repository = _Repository()
     embedded: list[bytes] = []
+    document_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
     asyncio.run(
         process_document(
@@ -92,8 +104,9 @@ def test_process_document_handles_pages_in_order() -> None:
             model_client=client,
             embed=embedded.append,
             document_repository=repository,
-            document_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+            document_id=document_id,
             pdf=b"stored-pdf",
+            render_page=_png,
         )
     )
 
@@ -103,10 +116,10 @@ def test_process_document_handles_pages_in_order() -> None:
     assert [entity["page_index"] for entity in repository.entities] == [0, 1]
     assert repository.entities[0]["label"] == "Pump"
     assert repository.entities[0]["xmin"] == 2
-    assert repository.status == (
-        "11111111-1111-1111-1111-111111111111",
-        "ready",
-    )
+    assert repository.status == (str(document_id), "ready")
+    assert [page["page_index"] for page in repository.pages] == [0, 1]
+    assert (tmp_path / str(document_id) / "0.png").read_bytes() == b"png:one"
+    assert (tmp_path / str(document_id) / "1.png").read_bytes() == b"png:two"
 
 
 def test_repository_stores_the_document_and_its_entities() -> None:
@@ -147,6 +160,7 @@ class _RouteRepository:
     def __init__(self) -> None:
         self.document: Document | None = None
         self.ready = False
+        self.pages: list[dict[str, object]] = []
 
     def get_by_file_name(self, file_name: str) -> Document | None:
         if self.document and self.document.file_name == file_name:
@@ -161,6 +175,9 @@ class _RouteRepository:
         assert self.document is not None
         self.document.path = path
         return self.document
+
+    def add_page(self, **kwargs: object) -> None:
+        self.pages.append(kwargs)
 
     def add_entity(self, **kwargs: object) -> None:
         return None
@@ -186,6 +203,10 @@ class _FileSystem:
 
 def test_upload_returns_ready_only_after_processing(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(settings, "DOCUMENTS_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "app.api.services.document_service.render_page_image",
+        lambda page: b"png",
+    )
     repository = _RouteRepository()
     processed: list[bytes] = []
 
@@ -212,6 +233,8 @@ def test_upload_returns_ready_only_after_processing(tmp_path, monkeypatch) -> No
     )
 
     assert processed == [b"%PDF"]
+    assert repository.pages[0]["page_index"] == 0
+    assert (tmp_path / str(repository.document.id) / "0.png").read_bytes() == b"png"
     assert result == DocumentStatus(id=repository.document.id, status="ready")
     assert repository.ready is True
 

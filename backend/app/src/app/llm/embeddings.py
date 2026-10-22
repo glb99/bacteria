@@ -1,9 +1,8 @@
 """Embed one recognized entity."""
 
 from typing import Any, Protocol
-
-from agent.errors import CredentialsError
-from agent.model import _AUTH_HINTS
+from app.agent.errors import CredentialsError
+from app.llm.multimodal import _AUTH_HINTS
 from google import genai
 
 

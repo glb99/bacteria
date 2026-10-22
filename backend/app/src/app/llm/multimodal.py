@@ -1,47 +1,24 @@
-from dataclasses import dataclass
-from typing import Any, Protocol
-
-import anyio
-import httpx
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types
-
-from agent.errors import (
-    AssetError,
-    BacteriaException,
-    ContractError,
-    CredentialsError,
-    ModelError,
-    ServingError,
-)
-from agent.tools import ToolCall
-
-
-@dataclass
-class ModelResponse:
-    text: str
-    tool_calls: list[ToolCall]
-    stops_reason: str | None
-
-
-class SendsMessage(Protocol):
-    async def send(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        system_prompt: str | None = None,
-    ) -> ModelResponse: ...
-
-
 # Gemini reports "request too large" as a plain 400, same as Anthropic, so the
 # same message sniffing is needed to separate it from an integration bug.
+from typing import Any
+
+import anyio
+from app.agent.errors import BacteriaException, ContractError, CredentialsError, ModelError, ServingError
+from app.agent.model import ModelResponse
+from app.agent.tools import ToolCall
+from google.genai import types
+from google import genai
+from google.genai import errors as genai_errors
+import httpx
+
+
 _ASSET_HINTS = ("context", "maximum context length", "token", "too long")
 
-_AUTH_HINTS = ("api key", "api_key", "credential", "unauthenticated", "permission")
+_AUTH_HINTS = ("api key", "api_key", "credential",
+               "unauthenticated", "permission")
 
 
-class GeminiClient:
+class GeminiAgent:
     """Sends messages to Gemini, translating to and from the internal format.
 
     Args:
@@ -99,7 +76,8 @@ class GeminiClient:
             CredentialsError: Credentials rejected by the server.
         """
         id_to_name = self._collect_tool_names(messages)
-        contents = [self._to_content(message, id_to_name) for message in messages]
+        contents = [self._to_content(message, id_to_name)
+                    for message in messages]
 
         config_kwargs: dict[str, Any] = {
             "max_output_tokens": max_tokens,
@@ -198,7 +176,8 @@ class GeminiClient:
                 # Re-attach the opaque continuation token this same provider
                 # emitted on the previous turn. Gemini rejects a function_call
                 # part that arrives without it. See _to_model_response.
-                signature = (block.get("provider_data") or {}).get("thought_signature")
+                signature = (block.get("provider_data")
+                             or {}).get("thought_signature")
                 if signature is not None:
                     part.thought_signature = signature
                 parts.append(part)
@@ -262,7 +241,8 @@ class GeminiClient:
         # candidates at all" was already here; this is the other half of the
         # same shape.
         parts = (
-            (response.candidates[0].content.parts or []) if response.candidates else []
+            (response.candidates[0].content.parts or []
+             ) if response.candidates else []
         )
         tool_calls: list[ToolCall] = []
         for i, part in enumerate(parts):

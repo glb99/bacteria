@@ -1,9 +1,8 @@
 from dataclasses import field
 from typing import Any
 
+from app.agent.session import SessionState
 from pydantic.dataclasses import dataclass
-
-from agent.session import SessionState
 
 
 @dataclass
@@ -40,7 +39,8 @@ def assemble_context(
         for item in recent
     ]
     messages.append(
-        {"role": "user", "content": _user_content(user_text, retrieved_documents)}
+        {"role": "user", "content": _user_content(
+            user_text, retrieved_documents)}
     )
 
     return AssembledContext(

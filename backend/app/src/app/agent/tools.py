@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any, NotRequired, TypedDict, TypeVar, cast
 
 import anyio
-
-from agent.errors import ToolExecutionError, UnknownToolError
+from app.agent.errors import ToolExecutionError, UnknownToolError
 
 _T = TypeVar("_T")
 

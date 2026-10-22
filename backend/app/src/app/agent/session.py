@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
-from agent.errors import UnknownSessionError
+from app.agent.errors import UnknownSessionError
 
 TranscriptItemKind = Literal["message", "tool_call", "run_error"]
 

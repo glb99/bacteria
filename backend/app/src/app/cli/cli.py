@@ -37,23 +37,23 @@ import os
 from collections.abc import Callable
 
 import anyio
-from agent.model import GeminiClient, SendsMessage
-from agent.retriever import EmbeddingPageRetriever, RetrievesDocumentPages, StoredEntity
-from agent.runtime import run_turn
-from agent.session import InMemorySessionRepository
-from agent.tools import ToolRegistry, build_add_note_tool
-# TODO: not having to import from our packages
+from app.agent.model import SendsToAgent
+from app.agent.retriever import EmbeddingPageRetriever, RetrievesDocumentPages, StoredEntity
+from app.agent.runtime import run_turn
+from app.agent.session import InMemorySessionRepository
+from app.agent.tools import ToolRegistry, build_add_note_tool
 from app.api.services.document_repository import SqlDocumentRepository
+from app.llm.embeddings import GeminiEmbedder
+from app.llm.multimodal import GeminiAgent
 from dotenv import load_dotenv
-from ingestion.embedder import GeminiEmbedder
 from sqlmodel import Session, create_engine
 
 # The annotation is the contract this table exists to state; a checker reading
 # the literal infers the two concrete classes and calls the wider declared type
 # a mismatch. Widening to `dict[str, Any]` to satisfy it would delete the only
 # thing here worth checking.
-PROVIDERS: dict[str, Callable[[], SendsMessage]] = {
-    "gemini": GeminiClient,
+PROVIDERS: dict[str, Callable[[], SendsToAgent]] = {
+    "gemini": GeminiAgent,
 }
 """Selectable model providers, keyed by ``MODEL_PROVIDER``.
 
@@ -69,7 +69,7 @@ module requires — a provider needing constructor arguments can be added as a
 DEFAULT_PROVIDER = "gemini"
 
 
-def build_model_client(provider: str | None = None) -> SendsMessage:
+def build_model_client(provider: str | None = None) -> SendsToAgent:
     """Construct the configured model client.
 
     Args:

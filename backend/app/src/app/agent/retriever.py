@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ingestion.embedder import Embed
+from app.llm.embeddings import Embed
 
 
 class RetrievesDocumentPages(Protocol):

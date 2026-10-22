@@ -2,11 +2,11 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from agent.context import assemble_context
-from agent.model import ModelResponse, SendsMessage
-from agent.retriever import RetrievesDocumentPages
-from agent.session import SessionRepository, TranscriptItem
-from agent.tools import ToolCall, ToolRegistry, ToolResult, execute_tool_call
+from app.agent.context import assemble_context
+from app.agent.model import ModelResponse, SendsToAgent
+from app.agent.retriever import RetrievesDocumentPages
+from app.agent.session import SessionRepository, TranscriptItem
+from app.agent.tools import ToolCall, ToolRegistry, ToolResult, execute_tool_call
 
 MAX_TOOL_ROUNDS = 3
 
@@ -86,7 +86,7 @@ async def _execute_tool_calls(
 async def run_turn(
     session_id: str,
     user_text: str,
-    model_client: SendsMessage,
+    model_client: SendsToAgent,
     tool_registry: ToolRegistry,
     session_repository: SessionRepository,
     document_retriever: RetrievesDocumentPages,

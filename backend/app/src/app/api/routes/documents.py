@@ -26,7 +26,6 @@ async def upload_document(
     paginate: PaginateDep,
     entity_extractor: ExtractEntitiesDep,
     embedder: EmbedDep,
-    model_client: ModelClientDep,
     file: UploadFile,
 ) -> DocumentStatus:
     document = document_service.validate_document(
@@ -42,7 +41,6 @@ async def upload_document(
     await document_service.process_document(
         paginate=paginate,
         extract_entities=entity_extractor,
-        model_client=model_client,
         embed=embedder,
         document_repository=document_repository,
         document_id=document.id,

@@ -3,16 +3,12 @@ from collections.abc import Callable, Iterator
 from io import BytesIO
 from pathlib import Path
 
-from document import DocumentRepository
+from app.documents.document import DocumentRepository
+from app.documents.entity_extractor import ENTITY_PROMPT, SendsForDetections
+from app.documents.page_image import render_page_image
+from app.documents.paginator import Paginate
+from app.llm.embeddings import Embed
 from fastapi import HTTPException, UploadFile
-from ingestion.embedder import Embed
-from ingestion.entity_extractor import (
-    ENTITY_PROMPT,
-    ExtractEntities,
-    SendsMultimodalContent,
-)
-from ingestion.page_image import render_page_image
-from ingestion.paginator import Paginate
 
 from app.core.config import settings
 from app.core.file_system import FileSystem
@@ -63,13 +59,11 @@ def iterate_pages(paginate: Paginate, document: bytes) -> Iterator[bytes]:
 
 async def process_document(
     paginate: Paginate,
-    extract_entities: ExtractEntities,
-    model_client: SendsMultimodalContent,
+    extract_entities: SendsForDetections,
     embed: Embed,
     document_repository: DocumentRepository,
     document_id: uuid.UUID,
     pdf: bytes,
-    prompt: str = ENTITY_PROMPT,
     render_page: Callable[[bytes], bytes] | None = None,
 ) -> None:
     """Store each page image, then embed each labeled box on that page."""
@@ -84,7 +78,7 @@ async def process_document(
             page_index=page_index,
             image_path=str(image_path),
         )
-        detections = await extract_entities(model_client, page, prompt)
+        detections = await extract_entities.send(page=page, prompt=ENTITY_PROMPT)
         for box in detections.boxes:
             label = box.label.replace("\x00", "")
             if not label:

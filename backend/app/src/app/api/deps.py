@@ -1,18 +1,13 @@
 from collections.abc import Generator
 from typing import Annotated
 
+from app.documents.document import DocumentRepository
+from app.documents.entity_extractor import GeminiEntityExtractor, SendsForDetections
+from app.documents.paginator import Paginate, paginate
+from app.llm.embeddings import Embed, GeminiEmbedder
 import jwt
-from document import DocumentRepository
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from ingestion.embedder import Embed, GeminiEmbedder
-from ingestion.entity_extractor import (
-    ExtractEntities,
-    GeminiMultimodalClient,
-    SendsMultimodalContent,
-    extract_entities,
-)
-from ingestion.paginator import Paginate, paginate
 from jwt.exceptions import InvalidTokenError
 from pydantic import ValidationError
 from sqlmodel import Session
@@ -100,11 +95,12 @@ def get_paginate() -> Paginate:
 PaginateDep = Annotated[Paginate, Depends(get_paginate)]
 
 
-def get_extract_entities() -> ExtractEntities:
-    return extract_entities
+def get_extract_entities() -> GeminiEntityExtractor:
+    return GeminiEntityExtractor()
 
 
-ExtractEntitiesDep = Annotated[ExtractEntities, Depends(get_extract_entities)]
+ExtractEntitiesDep = Annotated[GeminiEntityExtractor, Depends(
+    get_extract_entities)]
 
 
 def get_embedder() -> Embed:
@@ -114,8 +110,8 @@ def get_embedder() -> Embed:
 EmbedDep = Annotated[Embed, Depends(get_embedder)]
 
 
-def get_model_client() -> SendsMultimodalContent:
-    return GeminiMultimodalClient()
+def get_model_client() -> SendsForDetections:
+    return GeminiEntityExtractor()
 
 
-ModelClientDep = Annotated[SendsMultimodalContent, Depends(get_model_client)]
+ModelClientDep = Annotated[SendsForDetections, Depends(get_model_client)]

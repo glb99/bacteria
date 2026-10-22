@@ -44,7 +44,7 @@ check-all: lint cov typing
 # Run development server
 [group('run')]
 serve:
-    uv run {{ ARGS_SERVE }} -m fastapi dev src/hello_svc/asgi.py --port {{ PORT }}
+    uv run --directory backend/app {{ ARGS_SERVE }} -m fastapi dev --port {{ PORT }}
 
 # Send HTTP request to development server
 [group('run')]

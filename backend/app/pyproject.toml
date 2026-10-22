@@ -19,6 +19,9 @@ dependencies = [
     "pyjwt<3.0.0,>=2.13.0",
     "pwdlib[argon2,bcrypt]>=0.3.1",
     "google-genai>=2.32.0",
+    "pypdf>=6.21.2",
+    "pypdfium2>=5.14.0",
+    "pillow>=13.0.0",
 ]
 
 [dependency-groups]

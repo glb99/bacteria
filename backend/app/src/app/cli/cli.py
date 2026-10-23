@@ -37,17 +37,22 @@ import os
 from collections.abc import Callable
 
 import anyio
+from dotenv import load_dotenv
+from sqlmodel import Session, create_engine
+
 from app.agent.model import SendsToAgent
-from app.agent.retriever import EmbeddingPageRetriever, RetrievesDocumentPages, StoredEntity
+from app.agent.retriever import (
+    EmbeddingPageRetriever,
+    RetrievesDocumentPages,
+    StoredEntity,
+)
 from app.agent.runtime import run_turn
 from app.agent.session import InMemorySessionRepository
 from app.agent.tools import ToolRegistry, build_add_note_tool
 from app.api.services.document_repository import SqlDocumentRepository
 from app.llm.embeddings import GeminiEmbedder
 from app.llm.multimodal import GeminiAgent
-from app.observability import setup_observability
-from dotenv import load_dotenv
-from sqlmodel import Session, create_engine
+from app.observability import get_tracer, setup_observability
 
 # The annotation is the contract this table exists to state; a checker reading
 # the literal infers the two concrete classes and calls the wider declared type
@@ -207,14 +212,18 @@ async def _run() -> None:
         if not user_text:
             break
 
-        result = await run_turn(
-            session_id=session.session_id,
-            user_text=user_text,
-            model_client=build_model_client(),
-            tool_registry=build_tool_registry(),
-            session_repository=session_repository,
-            document_retriever=document_retriever,
-        )
+        with get_tracer().start_as_current_span("agent.run_turn") as span:
+            span.set_attribute("session.id", session.session_id)
+            span.set_attribute("input.text", user_text)
+            result = await run_turn(
+                session_id=session.session_id,
+                user_text=user_text,
+                model_client=build_model_client(),
+                tool_registry=build_tool_registry(),
+                session_repository=session_repository,
+                document_retriever=document_retriever,
+            )
+            span.set_attribute("run.id", result.run_id)
 
         print(result.response.text)
 

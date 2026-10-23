@@ -1,22 +1,22 @@
-from bacteria.observability.logging import setup_logging
-
-_tracer = None
-
-
-def setup_observability():
-    global _tracer
-    from bacteria.settings import get_settings
-    obs = get_settings().observability
-
-    setup_logging(level=obs.log_level, fmt=obs.log_format)
-
-    from bacteria.observability.tracing import instrument_app, setup_tracing
-    setup_tracing(otlp_endpoint=obs.otel_endpoint,
-                  console=obs.otel_console, service_name=obs.service_name)
-
-    if app is not None:
-        instrument_app(app)
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
 
-def get_tracer():
-    return _tracer
+def setup_tracing(service_name: str = "bacteria"):
+    resource = Resource(attributes={"service.name": service_name})
+    provider = TracerProvider(resource=resource)
+
+    provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+
+    trace.set_tracer_provider(provider)
+
+
+def setup_observability(app=None):
+
+    setup_tracing()
+
+
+def get_tracer(name: str = "bacteria"):
+    return trace.get_tracer(name)

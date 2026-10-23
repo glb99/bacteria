@@ -3,8 +3,6 @@ import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from bacteria.observability.context import bind_request, clear
-
 _provider = None
 
 
@@ -34,7 +32,8 @@ def setup_tracing(otlp_endpoint: str | None = None, console: bool = True, servic
 
     if otlp_endpoint:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        _provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint)))
+        _provider.add_span_processor(BatchSpanProcessor(
+            OTLPSpanExporter(endpoint=otlp_endpoint)))
 
     trace.set_tracer_provider(_provider)
 
@@ -44,12 +43,14 @@ def add_otlp_exporter(endpoint: str, headers: dict | None = None) -> None:
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     if _provider is None:
-        raise RuntimeError("setup_tracing() must be called before add_otlp_exporter()")
+        raise RuntimeError(
+            "setup_tracing() must be called before add_otlp_exporter()")
 
     kwargs = {"endpoint": endpoint}
     if headers:
         kwargs["headers"] = headers
-    _provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(**kwargs)))
+    _provider.add_span_processor(
+        BatchSpanProcessor(OTLPSpanExporter(**kwargs)))
 
 
 def instrument_app(app) -> None:

@@ -45,6 +45,7 @@ from app.agent.tools import ToolRegistry, build_add_note_tool
 from app.api.services.document_repository import SqlDocumentRepository
 from app.llm.embeddings import GeminiEmbedder
 from app.llm.multimodal import GeminiAgent
+from app.observability import setup_observability
 from dotenv import load_dotenv
 from sqlmodel import Session, create_engine
 
@@ -230,6 +231,7 @@ def main() -> None:
     # Postgres-backed session store that queried asynchronously would still
     # fail at its first query here. The host application chooses its loop in
     # its own entrypoints for that reason.
+    setup_observability()  # TODO: maybe is it better to have a Hynek's style entrypoint setup
     anyio.run(_run)
 
 

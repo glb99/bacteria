@@ -12,3 +12,6 @@ wheels/
 
 # Docs-site-build
 site
+
+# Local document uploads and rendered page images
+/documents/

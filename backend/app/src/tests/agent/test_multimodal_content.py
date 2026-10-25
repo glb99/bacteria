@@ -1,9 +1,10 @@
-from agent.model import GeminiClient
+
+from app.llm.multimodal import GeminiAgent
 from google.genai import types
 
 
 def test_image_block_becomes_an_image_part() -> None:
-    content = GeminiClient._to_content(
+    content = GeminiAgent._to_content(
         {
             "role": "user",
             "content": [

@@ -77,7 +77,8 @@ def _trace_payload(value: Any) -> Any:
 
 
 def _record_payload(span: Span, name: str, value: Any) -> None:
-    span.set_attribute(name, json.dumps(_trace_payload(value), ensure_ascii=False))
+    span.set_attribute(name, json.dumps(
+        _trace_payload(value), ensure_ascii=False))
 
 
 def _follow_up_messages(
@@ -137,11 +138,11 @@ async def run_turn(
             state = session_repository.get_state(session_id)
 
         with _TRACER.start_as_current_span("agent.retrieval") as retrieval_span:
-            retrieval_span.set_attribute("retrieval.limit", 5)
+            retrieval_span.set_attribute("retrieval.limit", 1)
             _record_payload(retrieval_span, "retrieval.query", user_text)
             if isinstance(document_retriever, RetrievesDocumentPagesWithMetadata):
                 retrieved_pages = document_retriever.select_with_metadata(
-                    query=user_text, limit=5
+                    query=user_text, limit=1
                 )
             else:
                 retrieved_pages = [
@@ -152,10 +153,11 @@ async def run_turn(
                         content=content,
                     )
                     for index, content in enumerate(
-                        document_retriever.select(query=user_text, limit=5)
+                        document_retriever.select(query=user_text, limit=1)
                     )
                 ]
-            retrieval_span.set_attribute("retrieval.page_count", len(retrieved_pages))
+            retrieval_span.set_attribute(
+                "retrieval.page_count", len(retrieved_pages))
             _record_payload(
                 retrieval_span,
                 "retrieval.pages",
@@ -177,7 +179,8 @@ async def run_turn(
                 user_text=user_text,
                 retrieved_documents=retrieved_documents,
             )
-            context_span.set_attribute("context.message_count", len(context.messages))
+            context_span.set_attribute(
+                "context.message_count", len(context.messages))
             _record_payload(context_span, "context.messages", context.messages)
             _record_payload(
                 context_span, "context.system_prompt", context.system_prompt

@@ -1,4 +1,6 @@
-from agent.retriever import EmbeddingPageRetriever, StoredEntity
+
+
+from app.agent.retriever import EmbeddingPageRetriever, StoredEntity
 
 
 def test_select_returns_the_highest_scoring_page_image(tmp_path) -> None:

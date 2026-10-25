@@ -1,22 +1,21 @@
-import importlib.util
-from pathlib import Path
-
 from sqlmodel import Session, SQLModel, create_engine
 
+from app.agent.retriever import EmbeddingPageRetriever
 from app.api.services.document_repository import SqlDocumentRepository
+from app.cli import cli as _CLI
 from app.models import Document
 
-_CLI_PATH = Path(__file__).resolve().parents[3] / "cli" / "cli.py"
-_SPEC = importlib.util.spec_from_file_location("bacteria_cli", _CLI_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-_CLI = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_CLI)
 load_stored_entities = _CLI.load_stored_entities
 
 
-def test_load_stored_entities_reads_document_entity_rows(tmp_path) -> None:
+def test_load_stored_entities_reads_document_entity_rows(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "docs.db"
     database_url = "sqlite:///" + database_path.as_posix()
+    documents_dir = tmp_path / "documents"
+    image_path = documents_dir / "plant-2.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"page image")
+    monkeypatch.setattr(_CLI, "_LOCAL_DOCUMENTS_DIR", documents_dir, raising=False)
     engine = create_engine(database_url)
     SQLModel.metadata.create_all(
         engine,
@@ -34,7 +33,7 @@ def test_load_stored_entities_reads_document_entity_rows(tmp_path) -> None:
         repository.add_page(
             document_id=document.id,
             page_index=2,
-            image_path="documents/plant-2.png",
+            image_path="/data/documents/plant-2.png",
         )
         repository.add_entity(
             document_id=document.id,
@@ -55,4 +54,10 @@ def test_load_stored_entities_reads_document_entity_rows(tmp_path) -> None:
     assert entities[0].document_id == document_id
     assert entities[0].page_index == 2
     assert entities[0].vector == [0.25, 0.75]
-    assert entities[0].image_path == "documents/plant-2.png"
+    assert entities[0].image_path == str(image_path)
+
+    retriever = EmbeddingPageRetriever(
+        embed=lambda _: [0.25, 0.75],
+        entities=entities,
+    )
+    assert retriever.select(query="pump", limit=1) == [b"page image"]

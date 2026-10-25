@@ -4,6 +4,12 @@ Newest first. Status values are defined in `../README.md`.
 
 | Date | Question | Status | Record | ADR |
 | --- | --- | --- | --- | --- |
+| 2026-10-25 | Can we use Logfire as the observability backend instead of the console? | exploring | [2026-10-25-logfire-as-observability-backend.md](2026-10-25-logfire-as-observability-backend.md) | |
+| 2026-10-25 | How could we add observability to the entire runtime? | exploring | [2026-10-25-entire-runtime-observability.md](2026-10-25-entire-runtime-observability.md) | |
+| 2026-10-24 | How can I verify agent CLI article retrieval works? | aligned | [2026-10-24-verifying-cli-retrieval.md](2026-10-24-verifying-cli-retrieval.md) | |
+| 2026-10-24 | Will the agent CLI retrieve pages from an uploaded article? | aligned | [2026-10-24-agent-cli-article-retrieval.md](2026-10-24-agent-cli-article-retrieval.md) | |
+| 2026-10-24 | Where are the document page images stored? | aligned | [2026-10-24-image-storage-location.md](2026-10-24-image-storage-location.md) | |
+| 2026-10-23 | How do we start observability with OpenTelemetry, from the basics? | aligned | [2026-10-23-opentelemetry-basics.md](2026-10-23-opentelemetry-basics.md) | |
 | 2026-10-21 | Where does the page-image path live: a page model, or the document model? | aligned | [2026-10-21-page-image-path.md](2026-10-21-page-image-path.md) | |
 | 2026-10-21 | How is EmbeddingPageRetriever initialized? | exploring | [2026-10-21-retriever-initialization.md](2026-10-21-retriever-initialization.md) | |
 | 2026-10-20 | Should retrieval live in the ingestion package or in its own package? | exploring | [2026-10-20-retrieval-package.md](2026-10-20-retrieval-package.md) | |

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from pathlib import Path, PurePosixPath
 
 import anyio
 from dotenv import load_dotenv
@@ -73,6 +74,7 @@ module requires — a provider needing constructor arguments can be added as a
 """
 
 DEFAULT_PROVIDER = "gemini"
+_LOCAL_DOCUMENTS_DIR = Path(__file__).resolve().parents[5] / "documents"
 
 
 def build_model_client(provider: str | None = None) -> SendsToAgent:
@@ -144,12 +146,29 @@ def _psycopg_url(database_url: str) -> str:
     return database_url
 
 
+def _resolve_image_path(image_path: str) -> str:
+    """Resolve container document paths to the project folder on the host."""
+    container_path = PurePosixPath(image_path)
+    try:
+        relative_path = container_path.relative_to("/data/documents")
+    except ValueError:
+        return image_path
+
+    if not relative_path.parts or ".." in relative_path.parts:
+        return image_path
+
+    if Path(image_path).is_file():
+        return image_path
+    return str(_LOCAL_DOCUMENTS_DIR.joinpath(*relative_path.parts))
+
+
 def load_stored_entities(database_url: str) -> list[StoredEntity]:
     """Read every ``document_entity`` row into the retriever's entity list.
 
     The vector comes from the entity row. The image path comes from the ``page``
-    row for that document and page index. A page with no row contributes an
-    empty path, and ``select`` skips an empty path.
+    row for that document and page index. Container paths are mapped to the
+    project documents folder when the CLI runs on the host. A page with no row
+    contributes an empty path, and ``select`` skips an empty path.
     """
     engine = create_engine(_psycopg_url(database_url))
     with Session(engine) as session:
@@ -163,8 +182,9 @@ def load_stored_entities(database_url: str) -> list[StoredEntity]:
                 document_id=str(row.document_id),
                 page_index=row.page_index,
                 vector=list(row.vector),
-                image_path=image_paths.get(
-                    (str(row.document_id), row.page_index), ""),
+                image_path=_resolve_image_path(
+                    image_paths.get((str(row.document_id), row.page_index), "")
+                ),
             )
             for row in repository.list_entities()
         ]

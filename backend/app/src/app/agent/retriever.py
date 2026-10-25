@@ -1,7 +1,7 @@
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from app.llm.embeddings import Embed
 
@@ -31,6 +31,19 @@ class RetrievesDocumentPages(Protocol):
 
 
 @dataclass(frozen=True)
+class RetrievedPage:
+    document_id: str
+    page_index: int
+    score: float
+    content: bytes
+
+
+@runtime_checkable
+class RetrievesDocumentPagesWithMetadata(Protocol):
+    def select_with_metadata(self, query: str, limit: int) -> list[RetrievedPage]: ...
+
+
+@dataclass(frozen=True)
 class StoredEntity:
     """One recognized region and the page image file that holds it."""
 
@@ -53,6 +66,11 @@ class EmbeddingPageRetriever:
         self._entities = entities
 
     def select(self, query: str, limit: int) -> list[bytes]:
+        return [
+            page.content for page in self.select_with_metadata(query=query, limit=limit)
+        ]
+
+    def select_with_metadata(self, query: str, limit: int) -> list[RetrievedPage]:
         if limit <= 0 or not self._entities:
             return []
         query_vector = self._embed(query.encode())
@@ -60,11 +78,10 @@ class EmbeddingPageRetriever:
         paths: dict[tuple[str, int], str] = {}
         for entity in self._entities:
             key = (entity.document_id, entity.page_index)
-            scores[key] = scores.get(key, 0.0) + \
-                _cosine(query_vector, entity.vector)
+            scores[key] = scores.get(key, 0.0) + _cosine(query_vector, entity.vector)
             paths[key] = entity.image_path
         ranked = sorted(scores, key=lambda key: (-scores[key], key))
-        pages: list[bytes] = []
+        pages: list[RetrievedPage] = []
         for key in ranked:
             if len(pages) == limit:
                 break
@@ -76,7 +93,14 @@ class EmbeddingPageRetriever:
                 continue
             image = image_file.read_bytes()
             if image:
-                pages.append(image)
+                pages.append(
+                    RetrievedPage(
+                        document_id=key[0],
+                        page_index=key[1],
+                        score=scores[key],
+                        content=image,
+                    )
+                )
         return pages
 
 

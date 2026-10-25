@@ -4,6 +4,7 @@ Newest first. Status values are defined in `../README.md`.
 
 | Date | Question | Status | Record | ADR |
 | --- | --- | --- | --- | --- |
+| 2026-10-25 | Should the retrieval eval expect page index 3? | exploring | [2026-10-25-retriever-page-index.md](2026-10-25-retriever-page-index.md) | |
 | 2026-10-25 | Can we use Logfire as the observability backend instead of the console? | exploring | [2026-10-25-logfire-as-observability-backend.md](2026-10-25-logfire-as-observability-backend.md) | |
 | 2026-10-25 | How could we add observability to the entire runtime? | exploring | [2026-10-25-entire-runtime-observability.md](2026-10-25-entire-runtime-observability.md) | |
 | 2026-10-24 | How can I verify agent CLI article retrieval works? | aligned | [2026-10-24-verifying-cli-retrieval.md](2026-10-24-verifying-cli-retrieval.md) | |

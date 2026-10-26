@@ -4,6 +4,12 @@ Newest first. Status values are defined in `../README.md`.
 
 | Date | Question | Status | Record | ADR |
 | --- | --- | --- | --- | --- |
+| 2026-10-26 | Why does the retriever have select and select_with_metadata? | exploring | [2026-10-26-select-and-select-with-metadata.md](2026-10-26-select-and-select-with-metadata.md) | |
+| 2026-10-26 | Where does the test for the new page score belong? | exploring | [2026-10-26-test-for-page-score.md](2026-10-26-test-for-page-score.md) | |
+| 2026-10-26 | What is the standard retrieval score for papers and architecture articles? | exploring | [2026-10-26-standard-score-for-papers.md](2026-10-26-standard-score-for-papers.md) | |
+| 2026-10-26 | What is the standard way to score a page from many entity vectors? | exploring | [2026-10-26-standard-page-score.md](2026-10-26-standard-page-score.md) | |
+| 2026-10-26 | Why does the retriever return page 10 instead of the Scaled Dot-Product Attention page? | exploring | [2026-10-26-why-summed-page-score-ranks-page-10.md](2026-10-26-why-summed-page-score-ranks-page-10.md) | |
+| 2026-10-26 | Do we have an eval that catches the retrieval error before we change ranking? | exploring | [2026-10-26-eval-catches-retrieval-miss.md](2026-10-26-eval-catches-retrieval-miss.md) | |
 | 2026-10-25 | Should the retrieval eval expect page index 3? | exploring | [2026-10-25-retriever-page-index.md](2026-10-25-retriever-page-index.md) | |
 | 2026-10-25 | Can we use Logfire as the observability backend instead of the console? | exploring | [2026-10-25-logfire-as-observability-backend.md](2026-10-25-logfire-as-observability-backend.md) | |
 | 2026-10-25 | How could we add observability to the entire runtime? | exploring | [2026-10-25-entire-runtime-observability.md](2026-10-25-entire-runtime-observability.md) | |

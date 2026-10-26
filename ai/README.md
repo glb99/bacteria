@@ -4,6 +4,10 @@ These files are working notes from research sessions, and they are the assistant
 
 Architecture decision records live in `docs/adr/` and are written by a person. A session may name an ADR id after that record exists. The session does not create the record.
 
+## Standing
+
+Tests are not added or rewritten after each feature or bug. A test is written carefully, and its assertion is a behavior worth protecting. Record: [sessions/2026-10-26-useful-tests.md](sessions/2026-10-26-useful-tests.md).
+
 ## What goes here
 
 - `session-template.md` — the report structure for one session.

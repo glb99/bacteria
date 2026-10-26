@@ -27,3 +27,6 @@ source_dirs = [
 [tool.coverage.report]
 show_missing = true
 sort = "-Cover"
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"

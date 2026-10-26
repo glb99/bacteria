@@ -1,5 +1,5 @@
-from agent.context import assemble_context
-from agent.session import Session, SessionState, TranscriptItem
+from app.agent.context import assemble_context
+from app.agent.session import Session, SessionState, TranscriptItem
 
 
 def test_context_assembly_returns_expected_messages():

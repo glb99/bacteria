@@ -4,6 +4,7 @@ Newest first. Status values are defined in `../README.md`.
 
 | Date | Question | Status | Record | ADR |
 | --- | --- | --- | --- | --- |
+| 2026-10-26 | When is a test worth adding? | aligned | [2026-10-26-useful-tests.md](2026-10-26-useful-tests.md) | |
 | 2026-10-26 | Why does the retriever have select and select_with_metadata? | exploring | [2026-10-26-select-and-select-with-metadata.md](2026-10-26-select-and-select-with-metadata.md) | |
 | 2026-10-26 | Where does the test for the new page score belong? | exploring | [2026-10-26-test-for-page-score.md](2026-10-26-test-for-page-score.md) | |
 | 2026-10-26 | What is the standard retrieval score for papers and architecture articles? | exploring | [2026-10-26-standard-score-for-papers.md](2026-10-26-standard-score-for-papers.md) | |

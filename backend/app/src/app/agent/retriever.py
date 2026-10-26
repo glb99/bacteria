@@ -68,7 +68,8 @@ class EmbeddingPageRetriever:
         paths: dict[tuple[str, int], str] = {}
         for entity in self._entities:
             key = (entity.document_id, entity.page_index)
-            scores[key] = scores.get(key, 0.0) + _cosine(query_vector, entity.vector)
+            scores[key] = max(scores.get(key, float("-inf")),
+                              _cosine(query_vector, entity.vector))
             paths[key] = entity.image_path
         ranked = sorted(scores, key=lambda key: (-scores[key], key))
         pages: list[RetrievedPage] = []

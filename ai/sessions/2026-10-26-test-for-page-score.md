@@ -21,6 +21,10 @@ They then asked whether the new test would resemble the existing one: "would it 
 
 They then asked what carries the vector: "but are pages vectorized, or entities?"
 
+They then rejected mechanical tests: "I definitely don't like how do you make tests, after each feature/bug... they should be done carefuly, making them actually useful"
+
+They then asked to resume this test, and later to be guided through making it pass: "now, I want you to guide me on making that test pass"
+
 | Prompt | Answer |
 | --- | --- |
 | What do you currently believe? | The next step is a test that catches the new behaviour, placed in the exact part of the code that owns it. |
@@ -48,7 +52,7 @@ Entities are vectorized. A page is the image file for one page index, and it has
 
 The new behaviour is the industrial page score. For one query vector, the page returned by `EmbeddingPageRetriever` is the page that holds the closest entity, and `RetrievedPage.score` is that entity's cosine.
 
-The test that catches it is a unit test in `backend/app/src/tests/agent/test_retriever.py`. It calls `select_with_metadata` with a fixed embedder. One page has several moderate entity cosines whose sum is larger. Another page has one higher cosine. The assertion is the page index and the score of that closer entity. Today the sum returns the crowded page, so the test is red before any production change.
+The test that catches it is `test_select_with_metadata_scores_a_page_by_its_closest_entity` in `backend/app/src/tests/agent/test_retriever.py`. The query vector is `[1.0, 0.0]`. Page 0 has three entities `[0.6, 0.8]`, cosine `0.6` each. Page 1 has `[1.0, 0.0]`, cosine `1.0`, and one `[0.6, 0.8]`. The assertion is page index `1`, score `1.0`, and the closest page's image. A run returned page 0 with score `1.7999999999999998`. The retriever still adds entity cosines.
 
 The article eval in `backend/app/src/evals/agent/test_retriever.py` stays the check that the stored paper returns page 3. It is not the test that defines the page score.
 
@@ -56,7 +60,7 @@ The article eval in `backend/app/src/evals/agent/test_retriever.py` stays the ch
 
 ## Gaps
 
-- The test has not been written. The person asked to be guided.
+- The test is `test_select_with_metadata_scores_a_page_by_its_closest_entity` in `backend/app/src/tests/agent/test_retriever.py`. It was added when the person said to go back to this test. A run failed: the returned page index was 0 and the score was `1.7999999999999998`, the sum of the three moderate cosines. The retriever has not been changed.
 - The person asked whether the new test goes in `evals/` or `tests/`. The answer recorded here is `tests/`. They have not confirmed that in their own words.
 - `select` was removed after this record. The page-score test calls `select_with_metadata`. Image bytes are `RetrievedPage.content`.
 

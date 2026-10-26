@@ -22,7 +22,7 @@ The boundaries are in `AGENTS.md`. The report sections are `ai/session-template.
 
 1. Read `ai/README.md`, `ai/sessions/index.md`, and any session whose question overlaps. Read the ADRs and code you will rely on. Do not read or write a provider memory store; `AGENTS.md` forbids it. Do not explain the topic yet.
 2. Copy `ai/session-template.md` to a new file as named in `ai/README.md`. Set `date`, `question`, and `status: exploring`. Add a row at the top of the index.
-3. Interview in the conversation. Ask only what the person's message has not already answered: what they currently believe, which decision this understanding would change, which constraint they will not trade away, and what observation would show the belief is wrong. Wait for the answers. Write them under **Starting model** in their words.
+3. Interview in the conversation. Ask only what the person's message has not already answered: what they currently believe, and which decision this understanding would change. Wait for the answers. Write them under **Starting model** in their words.
 
 ## Reason
 

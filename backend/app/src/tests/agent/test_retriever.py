@@ -16,9 +16,9 @@ def test_select_returns_the_highest_scoring_page_image(tmp_path) -> None:
 
     pages = EmbeddingPageRetriever(
         embed=lambda text: [0.0, 1.0], entities=entities
-    ).select("diagram", limit=1)
+    ).select_with_metadata("diagram", limit=1)
 
-    assert pages == [b"best-page"]
+    assert [page.content for page in pages] == [b"best-page"]
 
 
 def test_select_with_limit_zero_returns_nothing(tmp_path) -> None:
@@ -29,7 +29,7 @@ def test_select_with_limit_zero_returns_nothing(tmp_path) -> None:
         entities=[StoredEntity("doc", 0, [1.0], str(image))],
     )
 
-    assert retriever.select("question", limit=0) == []
+    assert retriever.select_with_metadata("question", limit=0) == []
 
 
 def test_select_skips_an_entity_with_no_page_image(tmp_path) -> None:
@@ -42,9 +42,9 @@ def test_select_skips_an_entity_with_no_page_image(tmp_path) -> None:
 
     pages = EmbeddingPageRetriever(
         embed=lambda text: [0.0, 1.0], entities=entities
-    ).select("diagram", limit=1)
+    ).select_with_metadata("diagram", limit=1)
 
-    assert pages == [b"page"]
+    assert [page.content for page in pages] == [b"page"]
 
 
 def test_select_with_metadata_returns_page_provenance_and_score(tmp_path) -> None:

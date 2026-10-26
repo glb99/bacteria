@@ -60,4 +60,5 @@ def test_load_stored_entities_reads_document_entity_rows(tmp_path, monkeypatch) 
         embed=lambda _: [0.25, 0.75],
         entities=entities,
     )
-    assert retriever.select(query="pump", limit=1) == [b"page image"]
+    pages = retriever.select_with_metadata(query="pump", limit=1)
+    assert [page.content for page in pages] == [b"page image"]

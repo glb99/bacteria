@@ -1,13 +1,21 @@
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from app.llm.embeddings import Embed
 
 
-class RetrievesDocumentPages(Protocol):
-    """A rule for picking which memories a turn should see.
+@dataclass(frozen=True)
+class RetrievedPage:
+    document_id: str
+    page_index: int
+    score: float
+    content: bytes
+
+
+class RetrievesDocumentPagesWithMetadata(Protocol):
+    """A rule for picking which page images a turn should see.
 
     Synchronous, unlike the rest of this package's seams, and deliberately: an
     implementation that needs to await something is querying a store, which is
@@ -15,8 +23,8 @@ class RetrievesDocumentPages(Protocol):
     this one.
     """
 
-    def select(self, query: str, limit: int) -> list[bytes]:
-        """Choose from ``candidates``.
+    def select_with_metadata(self, query: str, limit: int) -> list[RetrievedPage]:
+        """Return the chosen pages with their document, index, and score.
 
         Args:
             query: The incoming user message. Unused by recency, and present
@@ -28,19 +36,6 @@ class RetrievesDocumentPages(Protocol):
                 the loosest, which is a bug this module has already had once.
         """
         ...
-
-
-@dataclass(frozen=True)
-class RetrievedPage:
-    document_id: str
-    page_index: int
-    score: float
-    content: bytes
-
-
-@runtime_checkable
-class RetrievesDocumentPagesWithMetadata(Protocol):
-    def select_with_metadata(self, query: str, limit: int) -> list[RetrievedPage]: ...
 
 
 @dataclass(frozen=True)
@@ -64,11 +59,6 @@ class EmbeddingPageRetriever:
     def __init__(self, embed: Embed, entities: list[StoredEntity]) -> None:
         self._embed = embed
         self._entities = entities
-
-    def select(self, query: str, limit: int) -> list[bytes]:
-        return [
-            page.content for page in self.select_with_metadata(query=query, limit=limit)
-        ]
 
     def select_with_metadata(self, query: str, limit: int) -> list[RetrievedPage]:
         if limit <= 0 or not self._entities:

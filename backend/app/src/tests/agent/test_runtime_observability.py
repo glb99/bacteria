@@ -41,10 +41,6 @@ class _ModelClient:
 
 
 class _Retriever:
-    def select(self, query: str, limit: int) -> list[bytes]:
-        del query, limit
-        return [b"page-data"]
-
     def select_with_metadata(self, query: str, limit: int) -> list[RetrievedPage]:
         del query, limit
         return [

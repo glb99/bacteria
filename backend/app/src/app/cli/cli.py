@@ -44,7 +44,7 @@ from sqlmodel import Session, create_engine
 from app.agent.model import SendsToAgent
 from app.agent.retriever import (
     EmbeddingPageRetriever,
-    RetrievesDocumentPages,
+    RetrievesDocumentPagesWithMetadata,
     StoredEntity,
 )
 from app.agent.runtime import run_turn
@@ -195,7 +195,7 @@ def load_stored_entities(database_url: str) -> list[StoredEntity]:
 def build_document_retriever(
     entities: list[StoredEntity] | None = None,
     database_url: str | None = None,
-) -> RetrievesDocumentPages:
+) -> RetrievesDocumentPagesWithMetadata:
     """Construct the page retriever for this deployment.
 
     When ``entities`` is omitted, the list is every row in ``document_entity``.

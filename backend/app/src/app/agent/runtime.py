@@ -8,11 +8,7 @@ from opentelemetry.trace import Span
 
 from app.agent.context import assemble_context
 from app.agent.model import ModelResponse, SendsToAgent
-from app.agent.retriever import (
-    RetrievedPage,
-    RetrievesDocumentPages,
-    RetrievesDocumentPagesWithMetadata,
-)
+from app.agent.retriever import RetrievesDocumentPagesWithMetadata
 from app.agent.session import SessionRepository, TranscriptItem
 from app.agent.tools import ToolCall, ToolRegistry, ToolResult, execute_tool_call
 from app.observability import get_tracer
@@ -126,7 +122,7 @@ async def run_turn(
     model_client: SendsToAgent,
     tool_registry: ToolRegistry,
     session_repository: SessionRepository,
-    document_retriever: RetrievesDocumentPages,
+    document_retriever: RetrievesDocumentPagesWithMetadata,
 ) -> RunResult:
 
     run_id = str(uuid.uuid4())
@@ -140,22 +136,9 @@ async def run_turn(
         with _TRACER.start_as_current_span("agent.retrieval") as retrieval_span:
             retrieval_span.set_attribute("retrieval.limit", 1)
             _record_payload(retrieval_span, "retrieval.query", user_text)
-            if isinstance(document_retriever, RetrievesDocumentPagesWithMetadata):
-                retrieved_pages = document_retriever.select_with_metadata(
-                    query=user_text, limit=1
-                )
-            else:
-                retrieved_pages = [
-                    RetrievedPage(
-                        document_id="unknown",
-                        page_index=index,
-                        score=0.0,
-                        content=content,
-                    )
-                    for index, content in enumerate(
-                        document_retriever.select(query=user_text, limit=1)
-                    )
-                ]
+            retrieved_pages = document_retriever.select_with_metadata(
+                query=user_text, limit=1
+            )
             retrieval_span.set_attribute(
                 "retrieval.page_count", len(retrieved_pages))
             _record_payload(

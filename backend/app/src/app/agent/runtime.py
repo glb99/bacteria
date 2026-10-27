@@ -123,6 +123,7 @@ async def run_turn(
     tool_registry: ToolRegistry,
     session_repository: SessionRepository,
     document_retriever: RetrievesDocumentPagesWithMetadata,
+    minimum_score: float | None = None,
 ) -> RunResult:
 
     run_id = str(uuid.uuid4())
@@ -155,7 +156,11 @@ async def run_turn(
                 ],
             )
 
-        retrieved_documents = [page.content for page in retrieved_pages]
+        retrieved_documents = [
+            page.content
+            for page in retrieved_pages
+            if minimum_score is None or page.score >= minimum_score
+        ]
         with _TRACER.start_as_current_span("agent.context.assemble") as context_span:
             context = assemble_context(
                 state=state,

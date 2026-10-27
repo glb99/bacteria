@@ -1,8 +1,9 @@
 from dataclasses import field
 from typing import Any
 
-from app.agent.session import SessionState
 from pydantic.dataclasses import dataclass
+
+from app.agent.session import SessionState
 
 
 @dataclass

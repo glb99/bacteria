@@ -5,12 +5,9 @@ runtime. It holds no conversation logic, no prompting, and no tool behavior, so
 adding a second interface (HTTP, a bot, a scheduled job) means writing another
 module this thin rather than untangling this one.
 
-It does own **composition**, though, and that is deliberate. Nothing else in the
-system decides which model provider to use, which tools this deployment has, or
-who approves a call — those are deployment questions, not library questions, and
-answering them here keeps every other module free of global configuration. This
-is the only file that constructs concrete implementations; everything below it
-receives what it needs as an argument.
+Concrete implementations are chosen in :mod:`app.composition`. This loop creates
+the in-memory session store, because that store belongs to this surface, and
+passes the composed model, tools, and retriever into ``run_turn``.
 
 Credentials are read from the process environment, with ``.env`` loaded into it
 first. Provider SDKs read real environment variables and never a ``.env`` file
@@ -33,177 +30,17 @@ Not built:
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
-from pathlib import Path, PurePosixPath
-
 import anyio
 from dotenv import load_dotenv
-from sqlmodel import Session, create_engine
 
-from app.agent.model import SendsToAgent
-from app.agent.retriever import (
-    EmbeddingPageRetriever,
-    RetrievesDocumentPagesWithMetadata,
-    StoredEntity,
-)
 from app.agent.runtime import run_turn
 from app.agent.session import InMemorySessionRepository
-from app.agent.tools import ToolRegistry, build_add_note_tool
-from app.api.services.document_repository import SqlDocumentRepository
-from app.llm.embeddings import GeminiEmbedder
-from app.llm.multimodal import GeminiAgent
+from app.composition import (
+    build_embedding_page_retriever,
+    build_model_client,
+    build_tool_registry,
+)
 from app.observability import get_tracer, setup_observability
-
-# The annotation is the contract this table exists to state; a checker reading
-# the literal infers the two concrete classes and calls the wider declared type
-# a mismatch. Widening to `dict[str, Any]` to satisfy it would delete the only
-# thing here worth checking.
-PROVIDERS: dict[str, Callable[[], SendsToAgent]] = {
-    "gemini": GeminiAgent,
-}
-"""Selectable model providers, keyed by ``MODEL_PROVIDER``.
-
-A table rather than a chain of conditionals: adding a provider is one entry,
-and the set of valid values is readable at a glance instead of inferred from
-control flow. Each entry needs its own API key in the environment.
-
-Typed as a zero-argument factory rather than a class, because that is all this
-module requires — a provider needing constructor arguments can be added as a
-``lambda`` without changing the table's type.
-"""
-
-DEFAULT_PROVIDER = "gemini"
-_LOCAL_DOCUMENTS_DIR = Path(__file__).resolve().parents[5] / "documents"
-
-
-def build_model_client(provider: str | None = None) -> SendsToAgent:
-    """Construct the configured model client.
-
-    Args:
-        provider: Overrides ``MODEL_PROVIDER``. Mostly for tests.
-
-    Returns:
-        A client satisfying the protocol. Which concrete class it is stops
-        mattering the moment it is returned.
-
-    Raises:
-        ValueError: Unrecognized provider name. Rejected rather than silently
-            falling back to the default — a typo in ``MODEL_PROVIDER`` should
-            not quietly bill a different vendor.
-        CredentialsError: The chosen provider found no usable API key. Some
-            providers surface this at construction, others on the first call.
-    """
-    name = (provider or os.getenv("MODEL_PROVIDER",
-            DEFAULT_PROVIDER)).strip().lower()
-    try:
-        client_cls = PROVIDERS[name]
-    except KeyError:
-        known = ", ".join(sorted(PROVIDERS))
-        raise ValueError(
-            f"unknown MODEL_PROVIDER {name!r}; expected one of: {known}"
-        ) from None
-    return client_cls()
-
-
-def build_tool_registry() -> ToolRegistry:
-    """Declare what this deployment can do.
-
-    The complete capability surface, in one readable list. A tool that is not
-    registered here does not exist as far as the model is concerned, which is
-    the property that makes this function worth having separately.
-
-    Takes the store and the session because ``remember`` proposes *into* one
-    conversation, so it cannot be built before there is a conversation to build
-    it for. That is also why the model supplies the fact and never the session:
-    the binding happens here, out of its reach.
-
-    ``add_note`` is no longer registered. :mod:`bacteria.agent.tools.notes` is kept as
-    the worked example a new tool should be modelled on, and keeping it out of
-    the registry is the demonstration of what "registered" means — the module
-    exists, its tests pass, and the model cannot call it.
-
-    ``remember`` activates in the same call here, which it does on no other
-    surface. The precondition is :func:`~bacteria.agent.tools.approval.cli_approve`,
-    wired below: it asks the person at the keyboard, before the handler runs,
-    showing them the key and the value, and they can refuse. That is the human
-    ADR 0017 requires, and they are *upstream* rather than downstream.
-
-    Without this the tool was a dead end on this surface. The model proposed,
-    the user approved the call, the proposal went into a queue nothing in an
-    interactive session drains, and the model reported that it had noted
-    something that was never active on any later turn.
-    """
-    registry = ToolRegistry()
-    registry.register(build_add_note_tool())
-    return registry
-
-
-def _psycopg_url(database_url: str) -> str:
-    for scheme in ("postgres://", "postgresql://"):
-        if database_url.startswith(scheme):
-            return database_url.replace(scheme, "postgresql+psycopg://", 1)
-    return database_url
-
-
-def _resolve_image_path(image_path: str) -> str:
-    """Resolve container document paths to the project folder on the host."""
-    container_path = PurePosixPath(image_path)
-    try:
-        relative_path = container_path.relative_to("/data/documents")
-    except ValueError:
-        return image_path
-
-    if not relative_path.parts or ".." in relative_path.parts:
-        return image_path
-
-    if Path(image_path).is_file():
-        return image_path
-    return str(_LOCAL_DOCUMENTS_DIR.joinpath(*relative_path.parts))
-
-
-def load_stored_entities(database_url: str) -> list[StoredEntity]:
-    """Read every ``document_entity`` row into the retriever's entity list.
-
-    The vector comes from the entity row. The image path comes from the ``page``
-    row for that document and page index. Container paths are mapped to the
-    project documents folder when the CLI runs on the host. A page with no row
-    contributes an empty path, and ``select`` skips an empty path.
-    """
-    engine = create_engine(_psycopg_url(database_url))
-    with Session(engine) as session:
-        repository = SqlDocumentRepository(session)
-        image_paths = {
-            (str(page.document_id), page.page_index): page.image_path
-            for page in repository.list_pages()
-        }
-        entities = [
-            StoredEntity(
-                document_id=str(row.document_id),
-                page_index=row.page_index,
-                vector=list(row.vector),
-                image_path=_resolve_image_path(
-                    image_paths.get((str(row.document_id), row.page_index), "")
-                ),
-            )
-            for row in repository.list_entities()
-        ]
-    engine.dispose()
-    return entities
-
-
-def build_document_retriever(
-    entities: list[StoredEntity] | None = None,
-    database_url: str | None = None,
-) -> RetrievesDocumentPagesWithMetadata:
-    """Construct the page retriever for this deployment.
-
-    When ``entities`` is omitted, the list is every row in ``document_entity``.
-    """
-    if entities is None:
-        url = database_url if database_url is not None else os.environ["DATABASE_URL"]
-        entities = load_stored_entities(url)
-    return EmbeddingPageRetriever(embed=GeminiEmbedder(), entities=entities)
 
 
 async def _run() -> None:
@@ -216,7 +53,7 @@ async def _run() -> None:
     load_dotenv()
     session_repository = InMemorySessionRepository()
     session = session_repository.create_session()
-    document_retriever = build_document_retriever()
+    document_retriever = build_embedding_page_retriever()
     print(f"session: {session.session_id}  (empty line or Ctrl+C to quit)")
 
     while True:

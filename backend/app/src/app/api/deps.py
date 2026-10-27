@@ -1,10 +1,6 @@
 from collections.abc import Generator
 from typing import Annotated
 
-from app.documents.document import DocumentRepository
-from app.documents.entity_extractor import GeminiEntityExtractor, SendsForDetections
-from app.documents.paginator import Paginate, paginate
-from app.llm.embeddings import Embed, GeminiEmbedder
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -13,10 +9,15 @@ from pydantic import ValidationError
 from sqlmodel import Session
 
 from app.api.services.document_repository import SqlDocumentRepository
+from app.composition import build_gemini_embedder
 from app.core import security
 from app.core.config import settings
 from app.core.db import engine, scope_to_user
 from app.core.file_system import LocalFileSystem
+from app.documents.document import DocumentRepository
+from app.documents.entity_extractor import GeminiEntityExtractor, SendsForDetections
+from app.documents.paginator import Paginate, paginate
+from app.llm.embeddings import Embed
 from app.models import TokenPayload, User
 
 reusable_oauth2 = OAuth2PasswordBearer(
@@ -104,7 +105,7 @@ ExtractEntitiesDep = Annotated[GeminiEntityExtractor, Depends(
 
 
 def get_embedder() -> Embed:
-    return GeminiEmbedder()
+    return build_gemini_embedder()
 
 
 EmbedDep = Annotated[Embed, Depends(get_embedder)]

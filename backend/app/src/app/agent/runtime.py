@@ -7,6 +7,7 @@ from typing import Any
 from opentelemetry.trace import Span
 
 from app.agent.context import assemble_context
+from app.agent.errors import ServingError
 from app.agent.model import ModelResponse, SendsToAgent
 from app.agent.retriever import RetrievesDocumentPagesWithMetadata
 from app.agent.session import SessionRepository, TranscriptItem
@@ -265,3 +266,40 @@ async def run_turn(
                 )
 
         return RunResult(run_id=run_id, response=response)
+
+
+async def run_turn_with_retry(
+    session_id: str,
+    user_text: str,
+    model_client: SendsToAgent,
+    tool_registry: ToolRegistry,
+    session_repository: SessionRepository,
+    document_retriever: RetrievesDocumentPagesWithMetadata,
+    minimum_score: float | None = None,
+    max_retries: int = 2,
+) -> RunResult:
+    """
+    Run a turn with automatic retry on transient serving errors.
+
+    Retries up to ``max_retries`` times if the model call raises ``ServingError``.
+    Other exceptions are raised immediately without retry.
+
+    Args:
+        max_retries: Number of retries after the initial attempt (default: 2).
+                     So max_retries=2 means up to 3 total attempts.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return await run_turn(
+                session_id=session_id,
+                user_text=user_text,
+                model_client=model_client,
+                tool_registry=tool_registry,
+                session_repository=session_repository,
+                document_retriever=document_retriever,
+                minimum_score=minimum_score,
+            )
+        except ServingError:
+            if attempt >= max_retries:
+                raise
+            # Continue to retry loop

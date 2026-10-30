@@ -4,6 +4,10 @@ Newest first. Status values are defined in `../README.md`.
 
 | Date | Question | Status | Record | ADR |
 | --- | --- | --- | --- | --- |
+| 2026-10-29 | What is _call_either for? | exploring | [2026-10-29-call-either.md](2026-10-29-call-either.md) | |
+| 2026-10-28 | How should we design tests for a fault-tolerant runtime wrapper as a prototype? | aligned | [2026-10-28-testing-fault-tolerant-runtime-wrapper.md](2026-10-28-testing-fault-tolerant-runtime-wrapper.md) | |
+| 2026-10-28 | Can app.cli.cli be run by bgt.SupervisedService? | gaps | [2026-10-28-cli-under-supervised-service.md](2026-10-28-cli-under-supervised-service.md) | |
+| 2026-10-27 | If the agent run collapses when running, does it retry? | aligned | [2026-10-27-agent-run-retry-on-collapse.md](2026-10-27-agent-run-retry-on-collapse.md) | |
 | 2026-10-27 | Does any caller pass entities into build_document_retriever? | exploring | [2026-10-27-retriever-entities-argument.md](2026-10-27-retriever-entities-argument.md) | |
 | 2026-10-26 | When is a test worth adding? | aligned | [2026-10-26-useful-tests.md](2026-10-26-useful-tests.md) | |
 | 2026-10-26 | Why does the retriever have select and select_with_metadata? | exploring | [2026-10-26-select-and-select-with-metadata.md](2026-10-26-select-and-select-with-metadata.md) | |

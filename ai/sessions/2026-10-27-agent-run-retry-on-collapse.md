@@ -1,6 +1,6 @@
 ---
 date: 2026-10-27
-status: aligned
+status: gaps
 question: "If the agent run collapses when running, does it retry?"
 adr: ""
 ---
@@ -52,6 +52,9 @@ A **model-call retry** is separate. `GeminiAgent.send` tries the same `generate_
 
 ## Gaps
 
+- Open: the code changed after this session. Commit `68e0cff` ("Implement runtime run with retries") adds `run_turn_with_retry` in `backend/app/src/app/agent/runtime.py`. It calls `run_turn` up to `max_retries + 1` times (default 3 attempts, so 2 retries) and retries only on `ServingError`. Every other exception is raised immediately. This contradicts the Evidence bullet "There is no retry around `run_turn`" and the chosen "every exception" decision. The wrapper has no step registration, so a retry re-executes tools that already ran. Its callers are `backend/app/src/app/script/supervised_job.py` and `backend/app/src/tests/agent/test_wrapped_runtime_fault_tolerance.py`. The CLI still calls `run_turn` once.
+- Implemented: each tool result is committed as a `tool_call` item (with `run_id`) when its handler returns. `run_turn_with_retry` passes one `run_id` to every attempt, and `run_turn` reuses committed results for that run and call id instead of running the tool again. Tests: `tests/agent/test_runtime.py`. Open: the reuse is keyed by the provider's call id, so a provider that issues new ids on a retry would run the tool again. Open: a failure after the user item is committed but before the assistant item still duplicates the user message on retry.
+- Open: `run_turn_with_retry` does not wait between attempts. `GeminiAgent.send` uses a linear backoff.
 - Resolved: collapse means `run_turn` raises. Their words: "I mean a run_turn raise."
 - Resolved: a retry after `run_turn` raises must not execute a tool that already ran. Their words: "No, it shouldn't."
 - Resolved: the tool-calling step is registered as done only after the handler returns. Their words: "Yes, only after the handler returns." A raise inside the handler is not that step already done. The registration is still not in the code.

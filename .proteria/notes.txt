@@ -2,3 +2,4 @@ hello
 User asked to access page 1 of the "Attention Is All You Need" paper while providing page 11 (references section).
 User asked for an explanation of Scaled Dot-Product Attention in the Transformer paper context.
 User provided image of references section (page 11) of Attention Is All You Need paper.
+29

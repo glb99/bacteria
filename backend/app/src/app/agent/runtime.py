@@ -10,7 +10,7 @@ from app.agent.context import assemble_context
 from app.agent.errors import ServingError
 from app.agent.model import ModelResponse, SendsToAgent
 from app.agent.retriever import RetrievesDocumentPagesWithMetadata
-from app.agent.session import SessionRepository, TranscriptItem
+from app.agent.session import SessionRepository, SessionState, TranscriptItem
 from app.agent.tools import ToolCall, ToolRegistry, ToolResult, execute_tool_call
 from app.observability import get_tracer
 
@@ -100,12 +100,34 @@ def _follow_up_messages(
     ]
 
 
+def _completed_tool_results(state: SessionState, run_id: str) -> dict[str, ToolResult]:
+    """Tool results this run already committed, keyed by the model's call id."""
+    return {
+        item.payload["tool_call_id"]: ToolResult(
+            tool_call_id=item.payload["tool_call_id"],
+            name=item.payload["name"],
+            output=item.payload["output"],
+        )
+        for item in state.transcript
+        if item.kind == "tool_call" and item.run_id == run_id
+    }
+
+
 async def _execute_tool_calls(
-    tool_calls: list[ToolCall], tool_registry: ToolRegistry, tool_round: int
+    tool_calls: list[ToolCall],
+    tool_registry: ToolRegistry,
+    tool_round: int,
+    session_repository: SessionRepository,
+    session_id: str,
+    run_id: str,
+    completed: dict[str, ToolResult],
 ) -> list[ToolResult]:
 
     results: list[ToolResult] = []
     for call in tool_calls:
+        if call["id"] in completed:
+            results.append(completed[call["id"]])
+            continue
         with _TRACER.start_as_current_span("agent.tool.execute") as span:
             span.set_attribute("tool.name", call["name"])
             span.set_attribute("tool.call_id", call["id"])
@@ -113,6 +135,18 @@ async def _execute_tool_calls(
             _record_payload(span, "tool.input", call["input"])
             result = await execute_tool_call(call, tool_registry)
             _record_payload(span, "tool.output", str(result.output))
+        session_repository.commit(
+            session_id=session_id,
+            new_transcript_item=TranscriptItem(
+                kind="tool_call",
+                payload={
+                    "tool_call_id": result.tool_call_id,
+                    "name": result.name,
+                    "output": str(result.output),
+                },
+                run_id=run_id,
+            ),
+        )
         results.append(result)
     return results
 
@@ -125,15 +159,17 @@ async def run_turn(
     session_repository: SessionRepository,
     document_retriever: RetrievesDocumentPagesWithMetadata,
     minimum_score: float | None = None,
+    run_id: str | None = None,
 ) -> RunResult:
 
-    run_id = str(uuid.uuid4())
+    run_id = run_id or str(uuid.uuid4())
     with _TRACER.start_as_current_span("agent.runtime") as runtime_span:
         runtime_span.set_attribute("session.id", session_id)
         runtime_span.set_attribute("run.id", run_id)
 
         with _TRACER.start_as_current_span("agent.session.load"):
             state = session_repository.get_state(session_id)
+        completed = _completed_tool_results(state, run_id)
 
         with _TRACER.start_as_current_span("agent.retrieval") as retrieval_span:
             retrieval_span.set_attribute("retrieval.limit", 1)
@@ -229,6 +265,10 @@ async def run_turn(
                 tool_calls=response.tool_calls,
                 tool_registry=tool_registry,
                 tool_round=tool_round,
+                session_repository=session_repository,
+                session_id=session_id,
+                run_id=run_id,
+                completed=completed,
             )
             response = await send_model_request(
                 follow_up_messages(response, results),
@@ -288,6 +328,7 @@ async def run_turn_with_retry(
         max_retries: Number of retries after the initial attempt (default: 2).
                      So max_retries=2 means up to 3 total attempts.
     """
+    run_id = str(uuid.uuid4())
     for attempt in range(max_retries + 1):
         try:
             return await run_turn(
@@ -298,6 +339,7 @@ async def run_turn_with_retry(
                 session_repository=session_repository,
                 document_retriever=document_retriever,
                 minimum_score=minimum_score,
+                run_id=run_id,
             )
         except ServingError:
             if attempt >= max_retries:
